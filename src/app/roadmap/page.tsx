@@ -36,10 +36,10 @@ export default function RoadmapPage() {
     <div className="py-12 sm:py-16 lg:py-20">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <SectionHeader
-          badge="Visual Architecture"
+          badge="Learning Architecture"
           title="Interactive DevOps"
-          highlight="Learning Track"
-          subtitle="Click on any node to jump directly into the curriculum. Pan, zoom, and explore how modern DevOps concepts connect seamlessly."
+          highlight="Mastery Track"
+          subtitle="A structured 9-step progression from your first Linux command to production Kubernetes CI/CD. Follow each milestone or switch to the 2D graph view."
         />
 
         <RoadmapCanvas />
