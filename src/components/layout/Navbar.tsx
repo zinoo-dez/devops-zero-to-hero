@@ -57,9 +57,6 @@ export function Navbar() {
             <span className="font-extrabold text-base tracking-tight text-foreground flex items-center gap-1.5">
               DevOps <span className="bg-gradient-to-r from-slate-900 via-blue-700 to-blue-600 dark:from-white dark:via-blue-200 dark:to-blue-400 bg-clip-text text-transparent">Zero to Hero</span>
             </span>
-            <span className="text-[10px] font-semibold text-muted-foreground tracking-widest uppercase -mt-0.5">
-              White-Dark-Blue Architecture
-            </span>
           </div>
         </Link>
 
