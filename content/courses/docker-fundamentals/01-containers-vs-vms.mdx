@@ -124,11 +124,39 @@ A Docker container includes **not just your code**, but the exact runtime (Node 
 
 ---
 
-## What Containers Are NOT
+## Interactive Terminal Sandbox: Docker Runtime
 
-Containers are **not** stronger security than VMs. Because containers share the host kernel, a kernel vulnerability could allow a container escape (breaking out of the container to the host). VMs have a much thicker isolation boundary (the hypervisor).
+Explore running container processes and images directly in the browser:
 
-For workloads with extreme security requirements (handling payment data, running untrusted code), VMs are still appropriate — or a combination: VMs running Docker (the default on AWS ECS, GKE, AKS).
+<InteractiveTerminal
+  title="Docker CLI Simulator"
+  welcomeMessage="Docker Daemon is active. Run 'docker ps' or 'docker images' to inspect running container environments."
+  initialCommand="docker ps"
+  presets={[
+    { label: "List Containers", command: "docker ps" },
+    { label: "List Local Images", command: "docker images" },
+    { label: "System Host Uptime", command: "uname -a" },
+    { label: "Process Monitor", command: "htop" }
+  ]}
+/>
+
+<CloudSandboxCallout />
+
+---
+
+## Knowledge Check
+
+<KnowledgeCheck
+  question="What allows 100+ Docker containers to run simultaneously on a single modest Linux server?"
+  hint="Consider what containers share vs what VMs must duplicate."
+  options={[
+    { id: "1", text: "Each container runs its own lightweight hypervisor.", isCorrect: false },
+    { id: "2", text: "All containers share the single underlying host OS kernel, eliminating duplicated Guest OS memory overhead.", isCorrect: true },
+    { id: "3", text: "Docker compresses RAM using hardware swap exclusively.", isCorrect: false },
+    { id: "4", text: "Containers only execute during active network requests.", isCorrect: false }
+  ]}
+  explanation="Containers share the host Linux kernel and isolate processes using Namespaces and cgroups. Because each container doesn't duplicate a 1-2GB Guest OS like VMs do, memory footprint is minimal and density is 10x higher."
+/>
 
 ---
 

@@ -34,7 +34,7 @@ export function CourseHeader({ course }: CourseHeaderProps) {
           <div className="flex items-center flex-wrap gap-3 mb-6">
             <LevelBadge level={course.level} />
             <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-500/20 dark:text-blue-300 dark:border-blue-500/30">
-              Course 0{course.order + 1}
+              Course {String(course.order + 1).padStart(2, "0")}
             </span>
             {course.hasFullContent && (
               <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-500/20 dark:text-blue-300 dark:border-blue-500/30">

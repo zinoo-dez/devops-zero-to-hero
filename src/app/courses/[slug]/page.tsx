@@ -91,7 +91,7 @@ export default async function CourseDetailPage({
                   Ready to start?
                 </span>
                 <h3 className="text-xl font-bold text-foreground mt-1">
-                  Begin Course 0{course.order + 1}
+                  Begin Course {String(course.order + 1).padStart(2, "0")}
                 </h3>
                 <p className="text-xs text-muted-foreground mt-2 leading-relaxed">
                   Start with the first lesson. No prior setup required. Complete step-by-step guidance.

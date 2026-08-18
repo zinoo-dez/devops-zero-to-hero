@@ -146,6 +146,43 @@ cat /etc/os-release
 
 ---
 
+## 6. Live Interactive Terminal Sandbox
+
+Practice running your first Linux commands right here in the browser without installing anything:
+
+<InteractiveTerminal
+  title="Linux Shell Simulator"
+  welcomeMessage="Welcome to the Linux Terminal Sandbox! Practice kernel commands and file inspection below."
+  initialCommand="uname -a"
+  presets={[
+    { label: "Kernel Version", command: "uname -a" },
+    { label: "Who Am I", command: "whoami" },
+    { label: "List Files", command: "ls -la" },
+    { label: "Process Monitor", command: "htop" },
+    { label: "Active Processes", command: "ps aux" }
+  ]}
+/>
+
+<CloudSandboxCallout />
+
+---
+
+## Knowledge Check
+
+<KnowledgeCheck
+  question="Why is a Docker container not considered a full virtual machine?"
+  hint="Think about what operating system component is shared with the host."
+  options={[
+    { id: "1", text: "Containers bundle their own independent guest Linux kernel and hypervisor.", isCorrect: false },
+    { id: "2", text: "Containers share the host Linux kernel and rely on Namespaces & cgroups for isolation.", isCorrect: true },
+    { id: "3", text: "Containers only run inside Windows Subsystem for Linux (WSL).", isCorrect: false },
+    { id: "4", text: "Containers do not use CPU or Memory resources.", isCorrect: false }
+  ]}
+  explanation="Containers are lightweight processes running directly on the host Linux kernel. They use Linux Namespaces to provide isolated process, network, and mount views, and cgroups to enforce CPU/RAM limits without running a second guest kernel or hypervisor."
+/>
+
+---
+
 ## Summary
 
 - Linux is the foundational runtime for 96%+ of web infrastructure, containers, and cloud VMs.

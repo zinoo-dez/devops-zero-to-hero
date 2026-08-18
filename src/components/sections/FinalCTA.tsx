@@ -44,7 +44,7 @@ export function FinalCTA() {
                 className="w-full sm:w-auto inline-flex items-center justify-center gap-2.5 px-8 py-4 rounded-2xl text-sm font-bold uppercase tracking-wider bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-xl shadow-blue-500/30 hover:scale-[1.02] active:scale-[0.98] transition-all"
               >
                 <Terminal className="w-4 h-4" />
-                Start with Course 0 (Linux)
+                Start Course 01: Linux CLI
                 <ArrowRight className="w-4 h-4" />
               </Link>
 

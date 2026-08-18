@@ -99,14 +99,46 @@ export function Footer() {
             </ul>
           </div>
 
-          {/* Community & Creator */}
+          {/* Community & Open Source */}
           <div className="space-y-4">
             <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">
-              Community & Creator
+              Community & Open Source
             </h4>
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              DevOps Zero to Hero is an open educational project built to empower new engineers everywhere.
-            </p>
+            <ul className="space-y-2 text-xs text-muted-foreground">
+              <li>
+                <a
+                  href="https://github.com"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:text-blue-400 transition-colors flex items-center gap-1.5"
+                >
+                  <GitHubIcon className="w-3.5 h-3.5" />
+                  GitHub Repository & Discussions
+                </a>
+              </li>
+              <li>
+                <a
+                  href="https://github.com"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:text-blue-400 transition-colors flex items-center gap-1.5"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-blue-400" />
+                  Contribute a Lesson / Fix
+                </a>
+              </li>
+              <li>
+                <a
+                  href="https://github.com"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:text-blue-400 transition-colors flex items-center gap-1.5"
+                >
+                  <BookOpen className="w-3.5 h-3.5 text-blue-400" />
+                  Community Release Notes
+                </a>
+              </li>
+            </ul>
             <div className="flex items-center gap-3 pt-1">
               <a
                 href="https://github.com"

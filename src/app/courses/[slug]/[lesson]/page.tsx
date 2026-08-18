@@ -98,7 +98,9 @@ export default async function LessonPage({
         {/* Lesson Header Meta */}
         <div className="pb-6 border-b border-slate-200 dark:border-white/[0.08] mb-8">
           <div className="flex items-center gap-3 text-xs text-indigo-600 dark:text-indigo-400 font-bold uppercase tracking-wider mb-2">
-            <span>Lesson 0{result.index + 1} of 0{result.course.lessons.length}</span>
+            <span>
+              Lesson {result.index + 1} of {result.course.lessons.length}
+            </span>
             <span>•</span>
             <span className="flex items-center gap-1 text-muted-foreground">
               <Clock className="w-3 h-3 text-indigo-600 dark:text-indigo-400" />

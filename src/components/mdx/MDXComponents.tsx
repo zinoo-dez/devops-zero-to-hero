@@ -10,6 +10,10 @@ import { KubernetesComponentsDiagram } from "@/components/diagrams/KubernetesCom
 import { LevelBadge } from "@/components/ui/LevelBadge";
 import { GradientText } from "@/components/ui/GradientText";
 
+import { InteractiveTerminal } from "@/components/interactive/InteractiveTerminal";
+import { KnowledgeCheck } from "@/components/interactive/KnowledgeCheck";
+import { CloudSandboxCallout } from "@/components/interactive/CloudSandboxCallout";
+
 export const MDXComponents = {
   // Headings
   h1: () => null, // Hide h1 from MDX because the page template already renders the lesson title
@@ -179,7 +183,8 @@ export const MDXComponents = {
   MermaidDiagram,
   CICDPipelineDiagram,
   DockerArchitectureDiagram,
-  KubernetesComponentsDiagram,
-  LevelBadge,
-  GradientText,
+  // Interactive Components
+  InteractiveTerminal,
+  KnowledgeCheck,
+  CloudSandboxCallout,
 };

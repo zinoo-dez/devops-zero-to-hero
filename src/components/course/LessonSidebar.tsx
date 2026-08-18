@@ -43,7 +43,7 @@ export function LessonSidebar({
 
         <div>
           <span className="text-[10px] font-bold uppercase tracking-wider text-blue-400">
-            Course 0{course.order + 1}
+            Course {String(course.order + 1).padStart(2, "0")}
           </span>
           <h2 className="text-base font-bold text-foreground line-clamp-1 mt-0.5">
             {course.title}

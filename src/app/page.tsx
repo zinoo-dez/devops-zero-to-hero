@@ -4,6 +4,7 @@ import { StatsBar } from "@/components/sections/StatsBar";
 import { RoadmapPreview } from "@/components/sections/RoadmapPreview";
 import { FeaturedCourses } from "@/components/sections/FeaturedCourses";
 import { BenefitsSection } from "@/components/sections/BenefitsSection";
+import { CommunitySection } from "@/components/sections/CommunitySection";
 import { FinalCTA } from "@/components/sections/FinalCTA";
 
 export default function HomePage() {
@@ -14,6 +15,7 @@ export default function HomePage() {
       <RoadmapPreview />
       <FeaturedCourses />
       <BenefitsSection />
+      <CommunitySection />
       <FinalCTA />
     </div>
   );
