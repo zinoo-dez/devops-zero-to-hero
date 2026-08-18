@@ -114,10 +114,10 @@ export function Navbar() {
           {/* Mobile hamburger button */}
           <button
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="md:hidden p-2 rounded-xl bg-slate-200 dark:bg-white/5 border border-slate-300 dark:border-white/10 text-muted-foreground hover:text-foreground cursor-pointer"
+            className="md:hidden p-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 border border-slate-200 dark:border-white/10 text-slate-700 dark:text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
             aria-label="Toggle menu"
           >
-            {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            {mobileMenuOpen ? <X className="w-5 h-5 text-slate-800 dark:text-white" /> : <Menu className="w-5 h-5 text-slate-800 dark:text-white" />}
           </button>
         </div>
       </div>
@@ -129,8 +129,25 @@ export function Navbar() {
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: "auto" }}
             exit={{ opacity: 0, height: 0 }}
-            className="md:hidden border-t border-white/[0.08] bg-[#09090d]/95 backdrop-blur-2xl px-4 pt-4 pb-6 space-y-3"
+            className="md:hidden border-t border-slate-200 dark:border-white/[0.08] bg-white/95 dark:bg-[#09090d]/95 backdrop-blur-2xl px-4 pt-4 pb-6 space-y-2.5 shadow-2xl transition-colors"
           >
+            {/* Quick Search Button on mobile */}
+            <button
+              onClick={() => {
+                setMobileMenuOpen(false);
+                setSearchOpen(true);
+              }}
+              className="w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-sm text-slate-500 dark:text-muted-foreground bg-slate-100 hover:bg-slate-200/80 dark:bg-white/5 dark:hover:bg-white/10 border border-slate-200 dark:border-white/10 hover:text-foreground transition-all mb-3 cursor-pointer"
+            >
+              <span className="flex items-center gap-2.5">
+                <Search className="w-4 h-4 text-blue-500" />
+                <span className="text-xs font-medium">Search courses & lessons...</span>
+              </span>
+              <kbd className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-200 dark:bg-white/10 border border-slate-300 dark:border-white/10">
+                ⌘K
+              </kbd>
+            </button>
+
             {navLinks.map((link) => {
               const isActive =
                 link.href === "/" ? pathname === "/" : pathname.startsWith(link.href);
@@ -142,24 +159,40 @@ export function Navbar() {
                   className={cn(
                     "flex items-center justify-between px-4 py-3 rounded-xl text-base font-semibold transition-all",
                     isActive
-                      ? "text-blue-700 dark:text-white bg-blue-500/15 border border-blue-500/30"
-                      : "text-muted-foreground hover:text-foreground hover:bg-slate-200 dark:hover:bg-white/5"
+                      ? "text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/15 border border-blue-200 dark:border-blue-500/30 shadow-sm"
+                      : "text-slate-700 hover:text-slate-950 dark:text-slate-300 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5"
                   )}
                 >
                   <span className="flex items-center gap-3">
-                    {link.icon && <link.icon className="w-5 h-5 text-blue-400" />}
+                    {link.icon && (
+                      <link.icon
+                        className={cn(
+                          "w-5 h-5",
+                          isActive
+                            ? "text-blue-600 dark:text-blue-400"
+                            : "text-slate-400 dark:text-slate-400"
+                        )}
+                      />
+                    )}
                     {link.label}
                   </span>
-                  <ArrowRight className="w-4 h-4 opacity-50" />
+                  <ArrowRight
+                    className={cn(
+                      "w-4 h-4",
+                      isActive
+                        ? "text-blue-600 dark:text-blue-400 opacity-80"
+                        : "opacity-40"
+                    )}
+                  />
                 </Link>
               );
             })}
 
-            <div className="pt-2">
+            <div className="pt-3">
               <Link
                 href="/courses/linux-command-line/01-why-linux-matters"
                 onClick={() => setMobileMenuOpen(false)}
-                className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-bold uppercase tracking-wider bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/25"
+                className="w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl text-sm font-bold uppercase tracking-wider bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-lg shadow-blue-500/25 active:scale-[0.98] transition-all"
               >
                 <Sparkles className="w-4 h-4" />
                 Start Learning for Free
