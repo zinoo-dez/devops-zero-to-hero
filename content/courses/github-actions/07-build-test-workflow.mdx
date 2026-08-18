@@ -1,0 +1,261 @@
+---
+title: "Building a Real-World Production CI Pipeline"
+---
+
+# Production Continuous Integration (CI) Architecture
+
+A production-grade CI pipeline is not just a script that runs `npm test`. It is an automated quality enforcement system designed to provide rapid feedback to engineers, block regressions from reaching the main branch, verify multi-service compatibility against live databases, and build deterministic, cached production artifacts.
+
+```mermaid
+flowchart TD
+    TRIGGER["📦 Trigger: git push / pull_request"] --> CANCEL["⚡ Concurrency: Cancel stale in-progress runs"]
+    
+    subgraph STAGE1["Stage 1: Fast Quality Checks (< 1 min)"]
+        LINT["🔍 ESLint / Prettier"]
+        TYPE["📐 TypeScript Typecheck (tsc --noEmit)"]
+        SECURITY["🛡️ Dependency Audit (npm audit / Snyk)"]
+    end
+
+    subgraph STAGE2["Stage 2: Parallel Test Matrix (1-3 min)"]
+        UNIT["🧪 Unit Tests (Jest / Vitest)"]
+        INT["🔗 Integration Tests (PostgreSQL + Redis Service Containers)"]
+    end
+
+    subgraph STAGE3["Stage 3: Build & Packaging (2-4 min)"]
+        BUNDLE["🏗️ Production Bundle (Next.js / Vite / Go)"]
+        DOCKER["🐳 Docker Build with BuildKit GHA Layer Caching"]
+    end
+
+    subgraph STAGE4["Stage 4: Reporting & Artifacts"]
+        SUMMARY["📊 $GITHUB_STEP_SUMMARY Table"]
+        ARTIFACT["📦 Upload Build Artifacts (actions/upload-artifact@v4)"]
+    end
+
+    CANCEL --> STAGE1
+    STAGE1 --> STAGE2
+    STAGE2 --> STAGE3
+    STAGE3 --> STAGE4
+```
+
+---
+
+## 1. Pipeline Performance Optimization Principles
+
+Before writing workflow code, let's establish the key architectural rules that keep enterprise pipelines fast and cost-effective:
+
+1. **Fail-Fast Early Gates**: Put cheap, static checks (linting, typechecking) at the front. If there's a missing semicolon or type error, fail in 15 seconds before spinning up expensive database containers.
+2. **Deterministic Installs (`npm ci`)**: Always use `npm ci` rather than `npm install`. It strictly adheres to `package-lock.json` and skips mutating dependency graphs.
+3. **Multi-Tier Caching**: Cache both package manager dependencies (`~/.npm`) and compilation artifacts (`.next/cache` or Docker BuildKit layer caches).
+4. **Automated Concurrency Cancellation**: When a developer pushes 3 commits within 2 minutes, immediately cancel the first two runs to save queue time and runner costs.
+
+---
+
+## 2. Complete Enterprise CI Workflow: `.github/workflows/ci.yml`
+
+Below is the complete, battle-tested CI workflow configured with parallel jobs, database service containers, artifact archiving, and dynamic step summaries:
+
+```yaml
+name: Production CI Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.vscode/**'
+  pull_request:
+    branches: [ main ]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+
+# 1. CONCURRENCY: Cancel stale runs on the same branch when new commits are pushed
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# 2. LEAST-PRIVILEGE PERMISSIONS
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # JOB 1: Fast Static Quality Checks (Linting, Formatting, Types)
+  # ─────────────────────────────────────────────────────────────────────────────
+  quality-checks:
+    name: 🔍 Static Analysis & Type Checking
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: 📥 Check out repository
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Setup Node.js 20 with npm caching
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: 📦 Install dependencies
+        run: npm ci
+
+      - name: 🧹 Run ESLint & Prettier
+        run: npm run lint
+
+      - name: 📐 Run TypeScript Typecheck
+        run: npx tsc --noEmit
+
+      - name: 🛡️ Audit Dependencies for Known CVEs
+        run: npm audit --audit-level=high
+        continue-on-error: false
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # JOB 2: Unit & Integration Testing (with Live Postgres & Redis)
+  # ─────────────────────────────────────────────────────────────────────────────
+  test-suite:
+    name: 🧪 Automated Test Suite
+    needs: quality-checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    # Ephemeral service containers spun up on runner network
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: test_database
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test_user -d test_database"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: 📥 Check out repository
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Setup Node.js 20 with npm caching
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: 📦 Install dependencies
+        run: npm ci
+
+      - name: 🗄️ Run Database Migrations & Seeds
+        env:
+          DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_database
+        run: npx prisma migrate deploy
+
+      - name: 🧪 Execute Unit & Integration Tests with Coverage
+        env:
+          DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_database
+          REDIS_URL: redis://localhost:6379
+          NODE_ENV: test
+        run: npm test -- --coverage --coverageReporters=text --coverageReporters=json-summary
+
+      - name: 📊 Upload Coverage Report to Step Summary
+        if: always()
+        run: |
+          echo "### 🧪 Test & Coverage Summary" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "| :--- | :--- | :--- |" >> $GITHUB_STEP_SUMMARY
+          echo "| Node.js Version | 20.x | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "| Database | PostgreSQL 16 (Healthy) | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "| In-Memory Cache | Redis 7 (Healthy) | ✅ |" >> $GITHUB_STEP_SUMMARY
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # JOB 3: Production Build & Container Layer Caching
+  # ─────────────────────────────────────────────────────────────────────────────
+  build-and-package:
+    name: 🏗️ Production Build & Container Artifact
+    needs: test-suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 📥 Check out repository
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Setup Node.js 20 with npm caching
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: 📦 Install dependencies
+        run: npm ci
+
+      - name: 🏗️ Compile Web Application Bundle
+        run: npm run build
+
+      - name: 📤 Archive Production Static Assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-app-dist-${{ github.sha }}
+          path: dist/
+          retention-days: 7
+
+      - name: 🐳 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 🐳 Test Docker Build with GHA Layer Caching
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false   # Dry-run build in CI; actual push happens in CD deploy workflow
+          tags: my-org/web-app:ci-test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+```
+
+---
+
+## 3. Deep Dive into Pipeline Steps
+
+### The Role of `concurrency`
+```yaml
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+```
+When you push commit `A`, CI starts. If you push commit `B` 30 seconds later, GitHub Actions automatically detects that `A` and `B` belong to the same concurrency group (`Production CI Pipeline-refs/heads/feature/login`). It cancels run `A` instantly and allocates runner resources to `B`.
+
+### Service Containers vs Mocking
+Why spin up real PostgreSQL and Redis containers instead of mocking database calls with Jest?
+- **Mocks lie, real databases don't**: In-memory mocks cannot catch SQL dialect differences, migration syntax bugs, constraint violations (e.g. `NOT NULL`, foreign key collisions), or Redis connection timeouts.
+- **Service containers are zero-install**: GitHub runner's native Docker engine starts the official Alpine images with healthchecks in under 5 seconds.
+
+### GitHub Actions Cache (`type=gha`) for Docker Builds
+Using `cache-from: type=gha` and `cache-to: type=gha,mode=max` allows Docker BuildKit to store intermediate image layers directly in GitHub Actions cache storage. Subsequent runs that don't modify `package.json` skip the dependency installation layer entirely, reducing container build times from 3 minutes to **under 15 seconds**.
+
+---
+
+## Summary
+
+- Structure CI pipelines into discrete stages: **Static Quality Checks** → **Tests (with Service Containers)** → **Build & Package**.
+- Enforce strict branch concurrency with `cancel-in-progress: true` to prevent runner queue bottlenecks.
+- Use real ephemeral service containers for integration tests to eliminate discrepancies between local mocks and production databases.
+- Store build outputs via `actions/upload-artifact@v4` for consumption by deployment pipelines or diagnostic auditing.
+- Publish human-readable metrics directly to `$GITHUB_STEP_SUMMARY` for seamless team visibility.
+
+In the next lesson, you will build the final piece of the pipeline: **Continuous Deployment (CD)** to automated cloud hosting, static CDN targets, and live production VPS servers!

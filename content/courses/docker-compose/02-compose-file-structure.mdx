@@ -1,0 +1,497 @@
+---
+title: "Compose YAML Specification (services, networks, volumes)"
+---
+
+# Anatomy of a docker-compose.yml File
+
+A Compose file has three top-level sections: `services`, `networks`, and `volumes`. Understanding every option in each section lets you build robust, production-ready stacks.
+
+```yaml
+# docker-compose.yml — annotated skeleton
+services:       # Define each container here (required)
+  web: ...
+  db: ...
+
+networks:       # Custom network definitions (optional — default is auto-created)
+  myapp-net:
+    driver: bridge
+
+volumes:        # Named persistent volumes (optional)
+  postgres-data:
+  redis-data:
+```
+
+---
+
+## The `services` Block: Every Key Explained
+
+### `image` vs `build`
+
+```yaml
+services:
+  # Option A: Pull a pre-built image from a registry
+  db:
+    image: postgres:16-alpine          # Docker Hub image
+  
+  cache:
+    image: redis:7-alpine
+  
+  private-service:
+    image: ghcr.io/yourorg/app:v1.2.0  # GitHub Container Registry
+    # For private registries, run: docker login ghcr.io first
+
+  # Option B: Build from a local Dockerfile
+  api:
+    build:
+      context: .                       # Directory containing Dockerfile
+      dockerfile: Dockerfile           # Default name — can be omitted
+      args:                            # Build-time ARG values
+        NODE_VERSION: "20"
+        BUILD_ENV: production
+      target: runner                   # Multi-stage build: stop at this stage
+      cache_from:                      # Speed up CI builds with layer cache
+        - type=gha                     # GitHub Actions cache
+      labels:
+        org.opencontainers.image.source: "https://github.com/yourorg/app"
+```
+
+### `ports` — Host-to-Container Port Mapping
+
+```yaml
+services:
+  api:
+    ports:
+      # "HOST_PORT:CONTAINER_PORT"
+      - "3000:3000"             # Expose API on host port 3000
+
+      # Bind to a specific host IP (don't expose to all interfaces)
+      - "127.0.0.1:3000:3000"  # Only accessible from localhost — NOT from internet
+
+      # Let Docker pick a random host port (useful in CI to avoid conflicts)
+      - "3000"                  # Random host port → container port 3000
+
+      # Named port with protocol
+      - "5353:53/udp"           # UDP port for DNS services
+```
+
+<Callout type="tip" title="Bind to 127.0.0.1 in Production">
+Never expose database ports (5432, 6379, 27017) to `0.0.0.0` on a public server. Bind to `127.0.0.1` for local-only access, or omit `ports` entirely and use the internal Docker network — containers on the same Compose network can always reach each other.
+</Callout>
+
+### `environment` — Setting Env Vars
+
+```yaml
+services:
+  api:
+    # Method 1: List form
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - LOG_LEVEL=info
+
+    # Method 2: Map form (cleaner, preferred)
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      LOG_LEVEL: info
+
+    # Method 3: Reference from host environment (value comes from your shell)
+    environment:
+      - DATABASE_URL       # If DATABASE_URL is set in your shell, it passes through
+      - API_KEY            # No = means: use host's value
+
+    # Method 4: Use .env file values via variable interpolation
+    environment:
+      DATABASE_URL: "postgres://${DB_USER}:${DB_PASS}@db:5432/${DB_NAME}"
+```
+
+### `env_file` — Load from Files
+
+```yaml
+services:
+  api:
+    env_file:
+      - .env               # Load all KEY=VALUE pairs from .env file
+      - .env.local         # Override with local settings (gitignored)
+```
+
+### `volumes` — Bind Mounts and Named Volumes
+
+```yaml
+services:
+  api:
+    volumes:
+      # Bind mount: host_path:container_path
+      - ./src:/app/src                   # Hot reload in development
+      - ./config.json:/app/config.json   # Single file mount
+
+      # Named volume: volume_name:container_path
+      - node_modules:/app/node_modules   # Isolate node_modules in container
+
+      # Read-only mount
+      - ./certs:/etc/ssl/certs:ro        # ro = read-only
+
+  db:
+    volumes:
+      # Persistent data — always use named volumes for databases
+      - postgres-data:/var/lib/postgresql/data
+```
+
+### `depends_on` — Dependency Ordering
+
+```yaml
+services:
+  api:
+    depends_on:
+      # Simple form: just wait for container to START (not be healthy)
+      - db
+
+      # Extended form: wait for specific conditions
+      db:
+        condition: service_healthy      # Wait for healthcheck to pass
+        restart: true                   # Restart api if db restarts
+      cache:
+        condition: service_started      # Just wait for container to start
+      migrate:
+        condition: service_completed_successfully  # Wait for migration to exit 0
+```
+
+### `healthcheck` — Detect When a Service Is Truly Ready
+
+```yaml
+services:
+  db:
+    image: postgres:16-alpine
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s      # Run check every 5 seconds
+      timeout: 5s       # Fail if check takes more than 5 seconds
+      retries: 10       # Mark unhealthy after 10 consecutive failures
+      start_period: 15s # Grace period before failures count (first init is slow)
+
+  cache:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build: .
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+```
+
+### `restart` — Recovery Policy
+
+```yaml
+services:
+  api:
+    restart: "no"              # Never restart (default) — good for one-off tasks
+    # restart: "on-failure"    # Restart only on non-zero exit code
+    # restart: "always"        # Always restart, even if manually stopped
+    # restart: "unless-stopped" # Restart always EXCEPT when you manually stop it
+```
+
+<Callout type="tip" title="Use unless-stopped in Production">
+`unless-stopped` is the best policy for long-running production services. It restarts automatically after crashes AND after server reboots — but respects `docker compose stop` when you intentionally stop the service.
+</Callout>
+
+### `command` and `entrypoint` — Override Container Defaults
+
+```yaml
+services:
+  api:
+    image: node:20-alpine
+    working_dir: /app
+    command: ["node", "server.js"]       # Overrides CMD in Dockerfile
+
+  worker:
+    build: .
+    entrypoint: ["/bin/sh", "-c"]        # Overrides ENTRYPOINT
+    command: ["while true; do node worker.js; sleep 5; done"]
+```
+
+### `deploy` — Resource Limits (Compose v2)
+
+```yaml
+services:
+  api:
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"          # Max 50% of one CPU core
+          memory: "512M"       # Max 512 MB RAM — OOMKilled if exceeded
+        reservations:
+          cpus: "0.1"          # Guaranteed minimum CPU
+          memory: "128M"       # Guaranteed minimum RAM
+
+      # Number of replicas (docker compose --scale overrides this)
+      replicas: 1
+
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+```
+
+### `profiles` — Optional Services
+
+```yaml
+# Services only start when the named profile is active
+services:
+  adminer:                        # DB admin UI
+    image: adminer
+    ports: ["8080:8080"]
+    profiles: ["tools"]           # Only starts with: docker compose --profile tools up
+
+  mailhog:                        # Email testing
+    image: mailhog/mailhog
+    ports: ["1025:1025", "8025:8025"]
+    profiles: ["tools"]
+```
+
+---
+
+## The `networks` Block
+
+By default, Compose creates one bridge network named `<project>_default` and connects all services to it. Services discover each other by **service name** (used as DNS hostname):
+
+```bash
+# The 'api' container reaches postgres at hostname 'db'
+DATABASE_URL=postgres://user:pass@db:5432/myapp
+
+# It does NOT need the container name or IP address
+```
+
+### Custom Networks for Isolation
+
+```yaml
+networks:
+  frontend:
+    driver: bridge
+  backend:
+    driver: bridge
+  # External network (created outside Compose — used for cross-project communication)
+  shared-proxy:
+    external: true
+    name: nginx-proxy-net
+
+services:
+  nginx:
+    image: nginx:alpine
+    networks:
+      - frontend   # Can reach the internet
+      - backend    # Can reach the API
+
+  api:
+    build: .
+    networks:
+      - backend    # Can reach db and cache
+                   # Cannot be reached from the internet directly
+
+  db:
+    image: postgres:16-alpine
+    networks:
+      - backend    # Only reachable from backend network
+                   # Not exposed to nginx or internet
+```
+
+This isolation is a **security best practice** for production — your database is unreachable from the internet even if someone compromises the `nginx` container.
+
+---
+
+## The `volumes` Block
+
+```yaml
+volumes:
+  # Basic named volume (Docker-managed, stored in /var/lib/docker/volumes/)
+  postgres-data:
+
+  # With driver options (e.g., NFS for shared storage across servers)
+  shared-uploads:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: addr=192.168.1.100,rw
+      device: ":/exports/uploads"
+
+  # External volume (must be created before running Compose)
+  production-db:
+    external: true             # Docker won't create or delete this volume
+```
+
+```bash
+# List Docker volumes
+docker volume ls
+
+# Inspect a volume (shows where data is stored on disk)
+docker volume inspect myapp_postgres-data
+# Mountpoint: /var/lib/docker/volumes/myapp_postgres-data/_data
+
+# Back up a named volume
+docker run --rm \
+  -v myapp_postgres-data:/source:ro \
+  -v $(pwd):/backup \
+  busybox tar czf /backup/postgres-backup-$(date +%Y%m%d).tar.gz -C /source .
+```
+
+---
+
+## Essential `docker compose` Commands
+
+```bash
+# === Starting and stopping ===
+docker compose up                    # Start in foreground (streams logs)
+docker compose up -d                 # Start in background
+docker compose up -d --build         # Force rebuild all images before starting
+docker compose down                  # Stop and remove containers (keeps volumes)
+docker compose down -v               # Stop and remove containers AND volumes (data loss!)
+docker compose restart api           # Restart only the api service
+docker compose stop db               # Stop db without removing
+docker compose start db              # Start a stopped service
+
+# === Scaling ===
+docker compose up -d --scale api=3  # Run 3 replicas of api (needs a load balancer)
+
+# === Logs ===
+docker compose logs                  # All service logs
+docker compose logs api              # Just api logs
+docker compose logs -f               # Follow (tail -f equivalent)
+docker compose logs -f api --tail=50 # Last 50 lines, follow
+
+# === Inspecting ===
+docker compose ps                    # List containers and their status
+docker compose ps -a                 # Include stopped containers
+docker compose top                   # Show running processes in each container
+docker compose port api 3000         # Find host port mapped to api:3000
+
+# === Exec ===
+docker compose exec api /bin/sh      # Shell into the running api container
+docker compose exec db psql -U appuser -d myapp  # Run psql in db container
+docker compose run --rm api env      # Run a one-off command in a fresh container
+
+# === Build ===
+docker compose build                 # Build all services with build config
+docker compose build api --no-cache  # Force full rebuild of api
+
+# === Config ===
+docker compose config                # Validate and print merged compose config
+docker compose config --services     # List all service names
+```
+
+---
+
+## Full Annotated Production-Ready Example
+
+```yaml
+# docker-compose.yml — production-grade three-tier app
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runner              # Multi-stage: only production stage
+    ports:
+      - "127.0.0.1:3000:3000"    # Internal only — fronted by nginx
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}"
+      REDIS_URL: "redis://cache:6379"
+    depends_on:
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - backend
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: "512M" }
+        reservations: { cpus: "0.1", memory: "128M" }
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql  # Runs on first start
+    restart: unless-stopped
+    networks:
+      - backend
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: "1G" }
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  cache:
+    image: redis:7-alpine
+    command: redis-server --save 60 1 --loglevel warning --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    networks:
+      - backend
+    deploy:
+      resources:
+        limits: { cpus: "0.25", memory: "300M" }
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+networks:
+  backend:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  redis-data:
+```
+
+---
+
+## Summary
+
+Every key in the Compose YAML file has a specific purpose:
+- **`services`**: the core — defines each container with image/build, ports, environment, volumes, dependencies, health checks, restart policies, and resource limits
+- **`image`** pulls from a registry; **`build`** compiles from a local Dockerfile (with multi-stage `target` support)
+- **`ports`** maps host↔container; always bind to `127.0.0.1` for services not meant to be public
+- **`depends_on`** with `condition: service_healthy` ensures services start in the right order, waiting for real readiness (not just container start)
+- **`networks`** with custom segments isolates services — databases should only be reachable from the backend network
+- **`volumes`** named volumes persist database data; bind mounts (`./src:/app/src`) enable hot reload in development
+- **`restart: unless-stopped`** + `logging` with rotation = production-ready container management
+
+In the next lesson, you will build a complete three-tier full-stack application stack step by step.

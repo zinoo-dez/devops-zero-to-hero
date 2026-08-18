@@ -1,0 +1,334 @@
+---
+title: "Pushing Images to Docker Hub & GitHub GHCR"
+---
+
+# Container Registries: The Distribution Layer
+
+A container registry is the distribution layer between where you build your image (your laptop or CI server) and where you run it (production server, Kubernetes cluster). Without a registry, you'd have to manually copy image tarballs between machines.
+
+```mermaid
+flowchart LR
+    subgraph BUILD["Build"]
+        DEV["💻 Developer\nlaptop"]
+        CI["🔄 CI Server\n(GitHub Actions)"]
+    end
+
+    subgraph REGISTRY["Container Registry"]
+        HUB["Docker Hub\ndocker.io"]
+        GHCR["GitHub GHCR\nghcr.io"]
+        ECR["AWS ECR"]
+        GAR["Google Artifact\nRegistry"]
+    end
+
+    subgraph RUN["Run"]
+        PROD["🖥️ Production\nServer"]
+        K8S["☸️ Kubernetes\nCluster"]
+        ECS["Amazon ECS"]
+    end
+
+    DEV -->|"docker push"| HUB & GHCR
+    CI -->|"docker push"| HUB & GHCR & ECR & GAR
+    HUB & GHCR & ECR & GAR -->|"docker pull"| PROD & K8S & ECS
+```
+
+---
+
+## Image Naming: The Full Format
+
+Before you can push to a registry, the image must be tagged with the right name:
+
+```
+[registry/][namespace/]repository[:tag][@digest]
+
+registry   = docker.io (default), ghcr.io, ECR URL, etc.
+namespace  = Docker Hub username or org; GitHub org/user
+repository = image name
+tag        = version label (default: latest if omitted)
+digest     = sha256:abc123... (immutable, always points to same image)
+
+Examples:
+nginx                                          # docker.io/library/nginx:latest
+node:20-alpine                                 # docker.io/library/node:20-alpine
+johndoe/my-api:v1.2.3                          # docker.io/johndoe/my-api:v1.2.3
+ghcr.io/yourorg/backend:abc1234                # GitHub GHCR
+123456789.dkr.ecr.us-east-1.amazonaws.com/app  # AWS ECR
+nginx@sha256:a3b4c5d6...                        # Immutable digest reference
+```
+
+---
+
+## Docker Hub: The Default Public Registry
+
+Docker Hub (`docker.io`) is the default registry — the largest public repository of container images.
+
+### Setup and Login
+
+```bash
+# Create account at hub.docker.com first
+
+# Login interactively
+docker login
+# Username: johndoe
+# Password: ****
+# Login Succeeded
+
+# Login with a token (more secure — use an Access Token, not your password)
+# 1. Go to hub.docker.com → Account Settings → Security → New Access Token
+# 2. Copy the token
+echo "dckr_pat_..." | docker login --username johndoe --password-stdin
+# Login Succeeded
+
+# Credentials are stored in:
+cat ~/.docker/config.json
+# {"auths": {"https://index.docker.io/v1/": {"auth": "base64(user:token)"}}}
+```
+
+### Build, Tag, and Push
+
+```bash
+# Build your image
+docker build -t my-api:v1.0.0 .
+
+# Tag for Docker Hub (must prefix with your username)
+docker tag my-api:v1.0.0 johndoe/my-api:v1.0.0
+
+# Also tag as latest
+docker tag my-api:v1.0.0 johndoe/my-api:latest
+
+# Push both tags
+docker push johndoe/my-api:v1.0.0
+docker push johndoe/my-api:latest
+
+# Anyone can pull your public image:
+docker pull johndoe/my-api:v1.0.0
+```
+
+### Private Repositories on Docker Hub
+
+```bash
+# Create private repo at hub.docker.com → Repositories → Create Repository
+# Set visibility to Private
+
+# Push to private repo (same process — auth required on pull)
+docker push johndoe/my-private-api:v1.0.0
+
+# Pull from private repo (must be logged in)
+docker pull johndoe/my-private-api:v1.0.0
+
+# On servers/CI: pull with credentials
+echo "$DOCKER_TOKEN" | docker login --username "$DOCKER_USERNAME" --password-stdin
+docker pull johndoe/my-private-api:v1.0.0
+```
+
+---
+
+## GitHub Container Registry (GHCR): Recommended for GitHub Projects
+
+GHCR stores images right alongside your source code — access controlled by GitHub permissions, visible in the same repository.
+
+### Authentication
+
+```bash
+# Method 1: Personal Access Token (PAT)
+# Go to: GitHub → Settings → Developer Settings → Personal Access Tokens (classic)
+# Required scopes: read:packages, write:packages, delete:packages
+
+export CR_PAT="ghp_yourtokenhere"
+echo "$CR_PAT" | docker login ghcr.io --username YOUR_GITHUB_USERNAME --password-stdin
+# Login Succeeded
+
+# Method 2: In GitHub Actions (automatic, no manual token)
+# Uses the built-in GITHUB_TOKEN secret
+```
+
+### Build, Tag, and Push to GHCR
+
+```bash
+# GHCR image naming: ghcr.io/GITHUB_ORG_OR_USER/REPO_NAME:TAG
+
+# Build
+docker build -t my-api .
+
+# Tag for GHCR
+docker tag my-api ghcr.io/yourorg/my-api:v1.0.0
+docker tag my-api ghcr.io/yourorg/my-api:latest
+
+# Push
+docker push ghcr.io/yourorg/my-api:v1.0.0
+docker push ghcr.io/yourorg/my-api:latest
+
+# Pull (requires auth for private packages)
+docker pull ghcr.io/yourorg/my-api:v1.0.0
+```
+
+### Full GitHub Actions CI/CD Pipeline
+
+```yaml
+# .github/workflows/docker-publish.yml
+name: Build and Publish Docker Image
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*.*.*"]           # Trigger on version tags too
+  pull_request:
+    branches: [main]           # Build on PRs (but don't push)
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}   # = yourorg/my-api
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write            # Required to push to GHCR
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'   # Don't push on PRs
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}   # Auto-provided by GitHub Actions
+
+      - name: Extract metadata (tags and labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            # Tag with short git SHA (e.g., abc1234)
+            type=sha,prefix=,format=short
+            # Tag with semantic version from git tag (e.g., v1.2.3)
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            # Always tag main branch as 'latest'
+            type=raw,value=latest,enable={{is_default_branch}}
+            # Tag with branch name for non-main branches (e.g., feature-xyz)
+            type=ref,event=branch,enable=${{ github.ref != 'refs/heads/main' }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          target: runner                  # Only build the production stage
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Cache: reuse layers from the previous build (drastically speeds up CI)
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Image digest
+        run: echo "Pushed image digest: ${{ steps.build.outputs.digest }}"
+```
+
+---
+
+## AWS Elastic Container Registry (ECR)
+
+For AWS deployments (ECS, EKS, Lambda):
+
+```bash
+# Authenticate with ECR (token valid for 12 hours)
+aws ecr get-login-password --region us-east-1 | \
+  docker login --username AWS \
+  --password-stdin 123456789.dkr.ecr.us-east-1.amazonaws.com
+
+# Create a repository (if it doesn't exist)
+aws ecr create-repository --repository-name my-api --region us-east-1
+
+# Tag and push
+IMAGE_URI="123456789.dkr.ecr.us-east-1.amazonaws.com/my-api"
+docker tag my-api:latest $IMAGE_URI:latest
+docker tag my-api:latest $IMAGE_URI:$(git rev-parse --short HEAD)
+
+docker push $IMAGE_URI:latest
+docker push $IMAGE_URI:$(git rev-parse --short HEAD)
+
+# ECR image scanning (free vulnerability scanning)
+aws ecr describe-image-scan-findings \
+  --repository-name my-api \
+  --image-id imageTag=latest
+```
+
+---
+
+## Tagging Strategy: Semantic Versioning + Git SHA
+
+Never rely on `:latest` alone for production. A robust tagging strategy:
+
+```bash
+VERSION="v1.2.3"
+GIT_SHA=$(git rev-parse --short HEAD)
+BRANCH=$(git rev-parse --abbrev-ref HEAD)
+
+# Build once, tag multiple times
+docker build -t my-api .
+
+docker tag my-api ghcr.io/yourorg/my-api:${VERSION}         # Semantic version
+docker tag my-api ghcr.io/yourorg/my-api:${GIT_SHA}         # Immutable SHA reference
+docker tag my-api ghcr.io/yourorg/my-api:latest              # Mutable "current" pointer
+
+docker push ghcr.io/yourorg/my-api:${VERSION}
+docker push ghcr.io/yourorg/my-api:${GIT_SHA}
+docker push ghcr.io/yourorg/my-api:latest
+```
+
+| Tag | Example | Mutable? | Use for |
+|-----|---------|----------|---------|
+| Semantic version | `v1.2.3` | No | Production releases |
+| Git SHA | `abc1234` | No | Debugging, audit trail |
+| Branch name | `main` | Yes | Latest from that branch |
+| `latest` | `latest` | Yes | Convenience only |
+
+**Rule**: In production Kubernetes/Compose manifests, always reference a specific tag (`v1.2.3` or `abc1234`), never `:latest`. This makes rollbacks predictable.
+
+---
+
+## Image Management Locally
+
+```bash
+# List images
+docker images
+docker images my-api              # Filter by name
+docker images --filter "dangling=true"  # Untagged/orphaned images
+
+# Remove images
+docker rmi my-api:v1.0.0
+docker rmi -f my-api:v1.0.0       # Force (even if containers reference it)
+docker image prune                 # Remove dangling (untagged) images
+docker image prune -a              # Remove ALL unused images (careful!)
+
+# Inspect image metadata
+docker inspect my-api:v1.0.0
+docker inspect --format '{{.Config.Env}}' my-api:v1.0.0  # Print env vars
+docker inspect --format '{{.Config.Labels}}' my-api:v1.0.0
+
+# Save/load images (for offline/air-gapped transfers)
+docker save my-api:v1.0.0 | gzip > my-api-v1.tar.gz     # Export
+docker load < my-api-v1.tar.gz                            # Import
+```
+
+---
+
+## Summary
+
+Container registries are the backbone of the build→run pipeline:
+- **Docker Hub** is the public default — great for open-source images and personal projects; use Access Tokens, not passwords
+- **GitHub GHCR** is recommended for org projects — access control via GitHub permissions, images live alongside source code
+- **AWS ECR / Google GAR** for cloud-native production deployments within those platforms
+- Always tag images with semantic versions AND git SHAs — never rely on `:latest` alone in production
+- The GitHub Actions pipeline with `docker/build-push-action` + `cache-from: type=gha` is the fastest, most production-ready CI setup
+- Production manifests should always reference a specific, immutable tag for predictable rollbacks
+
+In the next lesson, you will learn how to harden your containers against security threats: non-root users, vulnerability scanning, and minimal base images.

@@ -1,0 +1,455 @@
+---
+title: "Pods: The Atomic Unit of Kubernetes"
+---
+
+# What Is a Pod?
+
+A Pod is the **smallest deployable unit in Kubernetes** — the atomic unit of scheduling and deployment. Every container in Kubernetes runs inside a Pod.
+
+A Pod is NOT just a wrapper for a single container. A Pod defines:
+- One or more containers that **always run together on the same node**
+- **Shared network namespace** — all containers in the pod share the same IP and port space
+- **Shared storage volumes** — containers can mount the same volumes
+- **Shared lifecycle** — containers start and stop together
+
+```mermaid
+flowchart TD
+    subgraph NODE["Worker Node"]
+        subgraph POD["Pod (IP: 10.42.0.15)"]
+            PAUSE["pause container\n(holds the network namespace)"]
+            APP["app container\nlistens on :3000"]
+            SIDECAR["sidecar container\nlog forwarder\nlistens on :9090"]
+            SHARED_VOL[("shared volume\n/var/log")]
+        end
+        POD --> NODE_NET["Node Network\n192.168.1.10"]
+    end
+
+    EXTERNAL["External traffic"] --> SVC["Service\n→ pod IP:3000"]
+    SVC --> APP
+    APP -->|"writes logs"| SHARED_VOL
+    SIDECAR -->|"reads logs, ships to Loki"| SHARED_VOL
+```
+
+---
+
+## Why the Pause Container Exists
+
+Every pod actually runs one extra container called the **pause** (or "infra") container. You never see it in `kubectl get pods` but it's always there. Its job is to hold the network namespace — it's the reason all containers in a pod share the same network:
+
+```bash
+# See the pause container on a node (via containerd)
+crictl ps | grep pause
+# k8s_POD_my-api-xxx_default_...   pause:3.9   Up 2 hours
+```
+
+---
+
+## The Minimal Pod Manifest
+
+```yaml
+# simple-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: hello-pod
+  namespace: default
+  labels:
+    app: hello
+    version: "1.0"
+spec:
+  containers:
+    - name: hello
+      image: nginx:alpine
+      ports:
+        - containerPort: 80   # Documentation only — doesn't restrict traffic
+```
+
+```bash
+kubectl apply -f simple-pod.yaml
+
+# Check it's running
+kubectl get pod hello-pod
+# NAME        READY   STATUS    RESTARTS   AGE
+# hello-pod   1/1     Running   0          30s
+
+# See the pod's IP address
+kubectl get pod hello-pod -o wide
+# NAME        READY   STATUS    IP           NODE
+# hello-pod   1/1     Running   10.42.0.15   worker-1
+
+# Access from inside the cluster
+kubectl run curl-test --image=curlimages/curl --restart=Never --rm -it -- \
+  curl http://10.42.0.15/
+```
+
+---
+
+## The Production-Grade Pod Spec
+
+In production, you never run bare Pods (a Deployment manages them). But understanding the full Pod spec is critical because Deployment's `template.spec` is identical to Pod's `spec`:
+
+```yaml
+# production-pod-spec.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: api-pod
+  namespace: production
+  labels:
+    app: api
+    version: "2.0"
+    tier: backend
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9090"
+    prometheus.io/path: "/metrics"
+spec:
+  # ── Scheduling ──────────────────────────────────────────────────────────
+  nodeSelector:
+    kubernetes.io/os: linux      # Only run on Linux nodes
+
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchLabels:
+              app: api
+          topologyKey: kubernetes.io/hostname  # No two api pods on the same node
+
+  # ── Security ────────────────────────────────────────────────────────────
+  securityContext:
+    runAsNonRoot: true           # Refuse to run as root at pod level
+    seccompProfile:
+      type: RuntimeDefault       # Apply default seccomp syscall filter
+
+  # ── Grace period ────────────────────────────────────────────────────────
+  terminationGracePeriodSeconds: 30   # Give app 30s to finish in-flight requests
+
+  containers:
+    - name: api
+      image: ghcr.io/youruser/my-api:v2.0.1
+      imagePullPolicy: Always       # Always pull (use IfNotPresent for immutable tags)
+      
+      ports:
+        - name: http              # Named ports can be referenced by name elsewhere
+          containerPort: 3000
+        - name: metrics
+          containerPort: 9090
+
+      # ── Environment ─────────────────────────────────────────────────────
+      env:
+        - name: NODE_ENV
+          value: "production"
+        - name: PORT
+          value: "3000"
+        # Inject pod metadata as env vars (Downward API)
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        # From Secrets (encrypted at rest in etcd)
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: app-secret
+              key: DATABASE_URL
+      
+      # Load all keys from a ConfigMap as env vars
+      envFrom:
+        - configMapRef:
+            name: api-config
+
+      # ── Resources ──────────────────────────────────────────────────────
+      resources:
+        requests:
+          cpu: "100m"        # Guaranteed: 0.1 CPU core
+          memory: "128Mi"    # Guaranteed: 128 MB
+        limits:
+          cpu: "500m"        # Throttled if exceeded
+          memory: "512Mi"    # OOMKilled if exceeded
+
+      # ── Health Probes ──────────────────────────────────────────────────
+      # Startup probe: don't start other probes until app fully initialized
+      startupProbe:
+        httpGet:
+          path: /health
+          port: 3000
+        failureThreshold: 12    # 12 × 5s = 60s max startup time
+        periodSeconds: 5
+
+      # Readiness probe: stop routing traffic if app is overloaded/not ready
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 3000
+        initialDelaySeconds: 5
+        periodSeconds: 10
+        timeoutSeconds: 3
+        failureThreshold: 3     # Remove from service after 3 consecutive failures
+
+      # Liveness probe: restart container if app is deadlocked
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 3000
+        initialDelaySeconds: 30
+        periodSeconds: 30
+        timeoutSeconds: 5
+        failureThreshold: 3     # Restart after 3 consecutive failures
+
+      # ── Security Context (per container) ──────────────────────────────
+      securityContext:
+        runAsUser: 1001              # Run as non-root user ID
+        runAsGroup: 1001
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true # Prevent writes to container filesystem
+        capabilities:
+          drop: ["ALL"]              # Drop all Linux capabilities
+          add: []                    # Add back only what's needed (e.g., NET_BIND_SERVICE)
+
+      # ── Volume Mounts ──────────────────────────────────────────────────
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp           # readOnlyRootFilesystem needs writable /tmp
+        - name: app-config
+          mountPath: /app/config
+          readOnly: true
+
+  # ── Volumes ──────────────────────────────────────────────────────────
+  volumes:
+    - name: tmp
+      emptyDir:
+        medium: Memory       # RAM-backed temp dir (fast, disappears on pod delete)
+        sizeLimit: 50Mi
+    - name: app-config
+      configMap:
+        name: api-config
+        items:
+          - key: config.json
+            path: config.json
+
+  # ── Image Pull Secret (for private registries) ────────────────────────
+  imagePullSecrets:
+    - name: ghcr-pull-secret
+```
+
+---
+
+## Pod Lifecycle and Status
+
+```mermaid
+stateDiagram-v2
+    [*] --> Pending: kubectl apply
+    Pending --> Running: Containers start successfully
+    Pending --> Failed: Image pull error / resource constraint
+    Running --> Succeeded: All containers exit 0 (batch jobs)
+    Running --> Failed: Container crashes and restarts exhausted
+    Running --> Terminating: kubectl delete / pod evicted
+    Terminating --> [*]: preStop hook + SIGTERM + grace period + SIGKILL
+```
+
+```bash
+# Possible pod phase values:
+# Pending   → Scheduled, waiting for images/resources
+# Running   → At least one container is running
+# Succeeded → All containers exited with code 0 (batch jobs)
+# Failed    → All containers exited, at least one non-zero
+# Unknown   → Node is unresponsive (network partition)
+
+# Container state within a Running pod:
+# Waiting     → image pull, init containers running
+# Running     → process is active
+# Terminated  → process exited (with exit code and reason)
+```
+
+---
+
+## Multi-Container Pod Patterns
+
+### Pattern 1: Sidecar
+
+A helper container that augments the main container. The sidecar shares the same network and volumes:
+
+```yaml
+# Log aggregation sidecar
+spec:
+  containers:
+    - name: api
+      image: my-api:v2
+      volumeMounts:
+        - name: logs
+          mountPath: /var/log/app
+
+    - name: log-shipper             # Sidecar reads logs and ships to Loki/Splunk
+      image: grafana/promtail:latest
+      volumeMounts:
+        - name: logs
+          mountPath: /var/log/app   # Same volume as main container
+  
+  volumes:
+    - name: logs
+      emptyDir: {}
+```
+
+### Pattern 2: Init Container
+
+Init containers run **to completion before the main container starts**. Use them for database migrations, config templating, or waiting for dependencies:
+
+```yaml
+spec:
+  # Init containers run sequentially, in order, before the main container
+  initContainers:
+    - name: wait-for-db
+      image: busybox:latest
+      command:
+        - /bin/sh
+        - -c
+        - |
+          until nc -z postgres.production.svc.cluster.local 5432; do
+            echo "Waiting for postgres..."
+            sleep 2
+          done
+          echo "Postgres is ready!"
+
+    - name: run-migrations
+      image: ghcr.io/youruser/my-api:v2
+      command: ["node", "scripts/migrate.js"]
+      env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: app-secret
+              key: DATABASE_URL
+
+  containers:
+    - name: api
+      image: ghcr.io/youruser/my-api:v2
+      # Main container only starts after BOTH init containers complete successfully
+```
+
+### Pattern 3: Ambassador
+
+A proxy container that handles network complexity on behalf of the main container:
+
+```yaml
+spec:
+  containers:
+    - name: api
+      image: my-api:v2
+      # API talks to localhost:5432 — simple!
+      env:
+        - name: DATABASE_URL
+          value: "postgres://user:pass@localhost:5432/mydb"
+
+    - name: cloudsql-proxy          # Ambassador handles actual DB connection
+      image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:latest
+      args:
+        - "--port=5432"
+        - "my-project:us-central1:my-instance"
+```
+
+---
+
+## Pod Networking: How Pods Communicate
+
+```mermaid
+flowchart TD
+    subgraph NODE1["Node 1"]
+        POD_A["Pod A\n10.42.0.5:3000"]
+        POD_B["Pod B\n10.42.0.6:5432"]
+    end
+
+    subgraph NODE2["Node 2"]
+        POD_C["Pod C\n10.42.1.5:3000"]
+    end
+
+    POD_A -->|"direct IP\n10.42.0.6:5432"| POD_B
+    POD_A -->|"via overlay network\n10.42.1.5:3000"| POD_C
+    
+    NOTE["✅ All pods can reach all other pods\nby IP address directly — no NAT\nThis is the Kubernetes networking model"]
+```
+
+**The three networking rules of Kubernetes:**
+1. All pods can communicate with all other pods without NAT
+2. All nodes can communicate with all pods without NAT
+3. The IP a pod sees of itself is the same IP others use to reach it
+
+This is implemented by the CNI plugin (Flannel, Calico, Cilium, etc.)
+
+---
+
+## Bare Pods vs Deployments
+
+<Callout type="warning" title="Never Run Bare Pods in Production">
+A Pod created directly with `kubectl apply -f pod.yaml` is **not managed** by anything. If it dies (OOMKilled, node failure), it stays dead — it is NOT recreated.
+
+Always use a **Deployment** (for stateless apps), **StatefulSet** (for databases), or **Job/CronJob** (for batch tasks) instead. They manage pods, ensure replicas, and handle rolling updates automatically.
+
+```bash
+# Bad: bare pod — no self-healing
+kubectl apply -f pod.yaml
+
+# Good: Deployment manages the pod
+kubectl apply -f deployment.yaml
+
+# The pod spec in a Deployment is identical to a bare Pod spec
+# (it's just nested under spec.template)
+```
+</Callout>
+
+---
+
+## Debugging Pod Failures: A Systematic Approach
+
+```bash
+# === The Pod Debugging Runbook ===
+
+# Step 1: What's the status?
+kubectl get pod POD_NAME -n NAMESPACE
+# CrashLoopBackOff → container keeps crashing (check logs)
+# ImagePullBackOff  → can't pull the image (wrong tag, no pull secret)
+# OOMKilled         → container exceeded memory limit (increase limit)
+# Pending           → scheduler can't place it (resource or constraint issue)
+# Evicted           → node ran out of resources (check node disk/memory)
+
+# Step 2: Events tell you WHY
+kubectl describe pod POD_NAME -n NAMESPACE | tail -20
+# Key: look for Warning events
+
+# Step 3: Read crash logs (from the killed container)
+kubectl logs POD_NAME -n NAMESPACE --previous
+
+# Step 4: Check resource usage if OOMKilled
+kubectl top pod POD_NAME -n NAMESPACE
+
+# Step 5: If running, exec in to inspect
+kubectl exec -it POD_NAME -n NAMESPACE -- /bin/sh
+# Inside: check env vars, connectivity, disk space
+env | grep -i database
+wget -qO- http://localhost:3000/health
+df -h
+```
+
+---
+
+## Summary
+
+A Pod is the fundamental unit of Kubernetes. Key concepts:
+
+- Every container in Kubernetes runs inside a Pod
+- Containers in the same Pod **share a network namespace** (same IP, same ports) and can share volumes
+- The **pause container** holds the network namespace — all other containers join it
+- A production-grade Pod spec includes: resource requests/limits, all 3 health probes, a non-root security context, and read-only filesystem
+- **Multi-container patterns**: sidecar (augmentation), init containers (sequenced startup), ambassador (proxy)
+- **Never run bare Pods in production** — always use Deployments or StatefulSets which self-heal and support rolling updates
+- Debug pod failures systematically: status → events → logs → exec
+
+In the next lesson, you will learn about Deployments and ReplicaSets — the controllers that make Pods self-healing and support zero-downtime rolling updates.

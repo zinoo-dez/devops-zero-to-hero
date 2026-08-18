@@ -1,0 +1,633 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ============================================================
+   CSS CUSTOM PROPERTIES — 60-20 White-Red Design Tokens
+   60% Dominant (Clean Canvas & Pure White Typography)
+   20% Secondary (Slate / Charcoal / Glassmorphism Structure)
+   20% Accent (Vibrant Crimson & Scarlet Red)
+   ============================================================ */
+
+:root {
+  /* Background layers (Dark Canvas) */
+  --color-bg-base: #09090d;
+  --color-bg-surface: #101017;
+  --color-bg-elevated: #181824;
+
+  /* Borders (20% Structure) */
+  --color-border: #282838;
+  --color-border-soft: #1c1c28;
+
+  /* 10% Accent — Vibrant Royal Blue */
+  --color-primary: #1C63ED;
+  --color-primary-dark: #1e40af;
+  --color-secondary: #3b82f6;
+  --color-accent: #60a5fa;
+  --color-glow: rgba(28, 99, 237, 0.25);
+
+  /* Semantic colors */
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-danger: #ef4444;
+  --color-info: #38bdf8;
+
+  /* 60% Dominant Text (High Contrast Pure White / Slate) */
+  --color-text-primary: #ffffff;
+  --color-text-muted: #94a3b8;
+  --color-text-subtle: #64748b;
+
+  /* Gradients */
+  --gradient-hero: linear-gradient(135deg, #ffffff 0%, #bfdbfe 35%, #1C63ED 100%);
+  --gradient-cta: linear-gradient(135deg, #1C63ED 0%, #2563eb 50%, #1e40af 100%);
+  --gradient-card: linear-gradient(135deg, #181824 0%, #12121c 100%);
+  --gradient-mesh:
+    radial-gradient(ellipse at 20% 50%, rgba(28, 99, 237, 0.08) 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 20%, rgba(59, 130, 246, 0.08) 0%, transparent 50%),
+    radial-gradient(ellipse at 60% 80%, rgba(28, 99, 237, 0.05) 0%, transparent 40%);
+
+  /* Fonts */
+  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+  --font-mono: "Geist Mono", "JetBrains Mono", "Fira Code", monospace;
+
+  /* Easing functions */
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-enter: cubic-bezier(0, 0, 0.2, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+
+  /* shadcn base tokens */
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.52 0.2 260);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.52 0.2 260);
+  --radius: 0.625rem;
+}
+
+/* ============================================================
+   LIGHT MODE OVERRIDES (60% Crisp White, 20% Slate, 20% Red)
+   ============================================================ */
+
+.light {
+  --color-bg-base: #fafafa;
+  --color-bg-surface: #ffffff;
+  --color-bg-elevated: #f1f5f9;
+  --color-border: #e2e8f0;
+  --color-border-soft: #f1f5f9;
+  --color-text-primary: #0f172a;
+  --color-text-muted: #475569;
+  --color-text-subtle: #94a3b8;
+  --color-glow: rgba(28, 99, 237, 0.15);
+  --gradient-mesh:
+    radial-gradient(ellipse at 20% 50%, rgba(28, 99, 237, 0.05) 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 20%, rgba(59, 130, 246, 0.04) 0%, transparent 50%);
+}
+
+/* ============================================================
+   BASE RESET & BODY
+   ============================================================ */
+
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background-color: var(--color-bg-base);
+    color: var(--color-text-primary);
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    min-height: 100dvh;
+    overflow-x: hidden;
+  }
+
+  /* ============================================================
+     TYPOGRAPHY
+     ============================================================ */
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-weight: 700;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+    color: var(--color-text-primary);
+  }
+
+  p {
+    color: var(--color-text-muted);
+    line-height: 1.75;
+  }
+
+  code,
+  pre,
+  kbd {
+    font-family: var(--font-mono);
+  }
+}
+
+/* ============================================================
+   FOCUS STYLES (Accessibility)
+   ============================================================ */
+
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ============================================================
+   SELECTION (Red Accent)
+   ============================================================ */
+
+::selection {
+  background-color: rgba(28, 99, 237, 0.3);
+  color: #ffffff;
+}
+
+/* ============================================================
+   CUSTOM SCROLLBAR
+   ============================================================ */
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-bg-surface);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-primary);
+}
+
+/* ============================================================
+   UTILITY CLASSES (White-Red 60-20 System)
+   ============================================================ */
+
+/* Gradient text (White to Red) */
+.gradient-text {
+  background: var(--gradient-hero);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Glassmorphism surface */
+.glass {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(12px) saturate(180%);
+  -webkit-backdrop-filter: blur(12px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.light .glass {
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+/* Mesh gradient background */
+.bg-mesh {
+  background-color: var(--color-bg-base);
+  background-image: var(--gradient-mesh);
+}
+
+/* Dot grid background */
+.bg-dot-grid {
+  background-image: radial-gradient(
+    circle,
+    rgba(28, 99, 237, 0.12) 1px,
+    transparent 1px
+  );
+  background-size: 32px 32px;
+}
+
+.light .bg-dot-grid {
+  background-image: radial-gradient(
+    circle,
+    rgba(28, 99, 237, 0.08) 1px,
+    transparent 1px
+  );
+}
+
+/* Glow effect */
+.glow {
+  box-shadow: 0 0 30px var(--color-glow);
+}
+
+.glow-sm {
+  box-shadow: 0 0 15px var(--color-glow);
+}
+
+/* ============================================================
+   PROSE STYLES (MDX Content)
+   ============================================================ */
+
+.prose-devops {
+  max-width: 72ch;
+  color: var(--color-text-muted);
+}
+
+.prose-devops h1 {
+  font-size: 2.25rem;
+  font-weight: 800;
+  margin-bottom: 1rem;
+  color: var(--color-text-primary);
+}
+
+.prose-devops h2 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin-top: 2.5rem;
+  margin-bottom: 0.75rem;
+  color: var(--color-text-primary);
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--color-border-soft);
+}
+
+.prose-devops h3 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin-top: 2rem;
+  margin-bottom: 0.5rem;
+  color: var(--color-text-primary);
+}
+
+.prose-devops h4 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-top: 1.5rem;
+  margin-bottom: 0.25rem;
+  color: var(--color-text-primary);
+}
+
+.prose-devops p {
+  margin-bottom: 1.25rem;
+  line-height: 1.8;
+}
+
+.prose-devops ul,
+.prose-devops ol {
+  margin-bottom: 1.25rem;
+  padding-left: 1.5rem;
+}
+
+.prose-devops li {
+  margin-bottom: 0.4rem;
+  line-height: 1.7;
+}
+
+.prose-devops strong {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.prose-devops a {
+  color: var(--color-primary);
+  text-decoration: underline;
+  text-decoration-color: rgba(28, 99, 237, 0.4);
+  text-underline-offset: 3px;
+  transition: color 0.15s;
+}
+
+.prose-devops a:hover {
+  color: var(--color-accent);
+}
+
+.prose-devops blockquote {
+  border-left: 3px solid var(--color-primary);
+  padding-left: 1rem;
+  margin-left: 0;
+  color: var(--color-text-subtle);
+  font-style: italic;
+}
+
+.prose-devops code:not(pre code) {
+  background: rgba(28, 99, 237, 0.1);
+  color: var(--color-accent);
+  padding: 0.15em 0.4em;
+  border-radius: 6px;
+  font-size: 0.875em;
+  border: 1px solid rgba(28, 99, 237, 0.25);
+}
+
+.prose-devops table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 1.5rem;
+  font-size: 0.9rem;
+}
+
+.prose-devops th {
+  background: var(--color-bg-elevated);
+  color: var(--color-text-primary);
+  font-weight: 600;
+  padding: 0.75rem 1rem;
+  text-align: left;
+  border: 1px solid var(--color-border);
+}
+
+.prose-devops td {
+  padding: 0.625rem 1rem;
+  border: 1px solid var(--color-border-soft);
+  color: var(--color-text-muted);
+}
+
+.prose-devops tr:hover td {
+  background: rgba(28, 99, 237, 0.04);
+}
+
+/* ============================================================
+   ANIMATION KEYFRAMES
+   ============================================================ */
+
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0px) rotate(0deg);
+  }
+  33% {
+    transform: translateY(-12px) rotate(3deg);
+  }
+  66% {
+    transform: translateY(-6px) rotate(-3deg);
+  }
+}
+
+@keyframes float-delayed {
+  0%,
+  100% {
+    transform: translateY(0px) rotate(0deg);
+  }
+  33% {
+    transform: translateY(-8px) rotate(-4deg);
+  }
+  66% {
+    transform: translateY(-14px) rotate(2deg);
+  }
+}
+
+@keyframes pulse-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 20px rgba(28, 99, 237, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 40px rgba(28, 99, 237, 0.5), 0 0 60px rgba(59, 130, 246, 0.2);
+  }
+}
+
+.animate-float {
+  animation: float 4s ease-in-out infinite;
+}
+
+.animate-float-delayed {
+  animation: float-delayed 5s ease-in-out infinite;
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2.5s ease-in-out infinite;
+}
+
+/* ============================================================
+   PREFERS REDUCED MOTION
+   ============================================================ */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ============================================================
+   REACT FLOW CUSTOM STYLES (White-Red)
+   ============================================================ */
+
+.react-flow__background {
+  background-color: transparent;
+}
+
+.react-flow__minimap {
+  background-color: var(--color-bg-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.react-flow__controls {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--color-bg-surface);
+}
+
+.react-flow__controls-button {
+  background: var(--color-bg-surface);
+  border: none;
+  border-bottom: 1px solid var(--color-border-soft);
+  color: var(--color-text-muted);
+}
+
+.react-flow__controls-button:hover {
+  background: var(--color-bg-elevated);
+  color: var(--color-text-primary);
+}
+
+.react-flow__edge-path {
+  stroke: var(--color-primary);
+  stroke-width: 2;
+  opacity: 0.7;
+}
+
+.react-flow__edge.animated path {
+  stroke-dasharray: 6;
+  animation: dashdraw 0.5s linear infinite;
+}
+
+@keyframes dashdraw {
+  from {
+    stroke-dashoffset: 12;
+  }
+}
+
+/* ============================================================
+   MERMAID DIAGRAM STYLES
+   ============================================================ */
+
+.mermaid-wrapper {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  padding: 1.5rem;
+  overflow-x: auto;
+  margin-bottom: 1.5rem;
+}
+
+.mermaid svg {
+  display: block;
+  margin: 0 auto;
+  font-family: var(--font-sans, Inter, system-ui, sans-serif) !important;
+}
+
+.mermaid svg text,
+.mermaid svg .nodeLabel,
+.mermaid svg .edgeLabel,
+.mermaid svg .cluster-label,
+.mermaid svg .actor {
+  font-family: var(--font-sans, Inter, system-ui, sans-serif) !important;
+  font-weight: 500 !important;
+}
+
+/* ============================================================
+   SKIP TO CONTENT (Accessibility)
+   ============================================================ */
+
+.skip-to-content {
+  position: absolute;
+  top: -100%;
+  left: 1rem;
+  z-index: 9999;
+  padding: 0.5rem 1rem;
+  background: var(--color-primary);
+  color: white;
+  border-radius: 0 0 8px 8px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: top 0.2s;
+}
+
+.skip-to-content:focus {
+  top: 0;
+}
+
+/* ============================================================
+   SCROLLBAR FOR SIDEBAR
+   ============================================================ */
+
+.sidebar-scroll {
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
+}
+
+.sidebar-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+
+.sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 999px;
+}
+
+@theme inline {
+  --font-heading: var(--font-sans);
+  --font-sans: var(--font-sans);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+.dark {
+  --background: oklch(0.12 0 0);
+  --foreground: oklch(0.99 0 0);
+  --card: oklch(0.18 0 0);
+  --card-foreground: oklch(0.99 0 0);
+  --popover: oklch(0.18 0 0);
+  --popover-foreground: oklch(0.99 0 0);
+  --primary: oklch(0.55 0.2 260);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.25 0 0);
+  --secondary-foreground: oklch(0.99 0 0);
+  --muted: oklch(0.25 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.25 0 0);
+  --accent-foreground: oklch(0.99 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.55 0.2 260);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+}

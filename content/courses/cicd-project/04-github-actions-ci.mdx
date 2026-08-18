@@ -1,0 +1,468 @@
+---
+title: "Configuring the Automated CI Pipeline (Lint, Test, Security)"
+---
+
+# Building a Real CI Pipeline
+
+Continuous Integration is not just "run some tests." A production-grade CI pipeline is your automated quality gate. It enforces consistency across every contributor and every commit. Nothing broken merges to `main`.
+
+In this lesson you'll build a GitHub Actions CI workflow that:
+1. **Checks code style** with ESLint — catches anti-patterns before review
+2. **Verifies types** with TypeScript — catches bugs the linter can't see
+3. **Runs unit tests** with Vitest — catches regressions automatically
+4. **Scans for vulnerabilities** with Trivy — catches CVEs before they reach production
+5. **Runs jobs in parallel** — all four checks run simultaneously to minimize wall-clock time
+
+---
+
+## How GitHub Actions Works (Quick Recap)
+
+```mermaid
+flowchart TD
+    PUSH[git push / PR opened] -->|triggers| WF[Workflow YAML\n.github/workflows/ci.yml]
+    WF --> R1[Runner VM\nubuntu-22.04]
+    R1 --> J1[Job: lint]
+    R1 --> J2[Job: type-check]
+    R1 --> J3[Job: test]
+    R1 --> J4[Job: security-scan]
+    J1 & J2 & J3 & J4 -->|all must pass| MR[Merge allowed ✅]
+    J1 & J2 & J3 & J4 -->|any fails| BLOCK[Merge blocked ❌]
+```
+
+Each **job** runs on a separate VM (runner). Jobs within the same workflow run **in parallel** by default, unless you specify `needs:`.
+
+A **step** is a single shell command or a reusable action (`uses:`).
+
+---
+
+## The Complete CI Workflow
+
+Create `.github/workflows/ci.yml`:
+
+```yaml
+# .github/workflows/ci.yml
+# Triggered on every push and pull request that targets the main branch.
+# All four jobs run in parallel to minimize total pipeline duration.
+
+name: CI Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    # Also run on PRs targeting release branches
+    paths-ignore:
+      - "**.md"          # Don't run CI for documentation changes
+      - "docs/**"        # Don't run CI for changes in docs/ folder
+      - ".gitignore"     # Don't run CI for gitignore changes
+
+# Cancel in-progress runs for the same branch when a new push arrives.
+# Prevents wasted minutes on outdated runs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  # ============================================================
+  # Job 1: ESLint — Code Style & Best Practices
+  # ============================================================
+  lint:
+    name: 🔍 ESLint
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"  # Cache ~/.npm to speed up npm ci
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint
+
+  # ============================================================
+  # Job 2: TypeScript Type Check — Type Safety
+  # ============================================================
+  type-check:
+    name: 🏷️ TypeScript
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run TypeScript type checker
+        run: npm run type-check
+        # Equivalent to: npx tsc --noEmit
+        # --noEmit: check types only, don't emit .js files
+
+  # ============================================================
+  # Job 3: Vitest — Unit Tests with Coverage
+  # ============================================================
+  test:
+    name: 🧪 Unit Tests
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests with coverage
+        run: npm run test -- --coverage
+        env:
+          # Tests mock the DB, but some modules import DATABASE_URL at module load time
+          DATABASE_URL: "postgres://test:test@localhost:5432/test"
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()  # Upload even if tests fail — helps debug
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 7
+
+  # ============================================================
+  # Job 4: Trivy — Container Security Scanning
+  # ============================================================
+  security-scan:
+    name: 🔒 Security Scan
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    # This job needs write permission to upload SARIF to GitHub Security tab
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image for scanning
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false          # Don't push — we're only scanning
+          load: true           # Load into local Docker daemon for Trivy
+          tags: capstone-app:scan
+          # Use cache to speed up builds
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "capstone-app:scan"
+          format: "sarif"
+          output: "trivy-results.sarif"
+          severity: "CRITICAL,HIGH"
+          # Exit with error if CRITICAL or HIGH CVEs are found
+          exit-code: "1"
+          ignore-unfixed: true  # Ignore CVEs with no available fix yet
+
+      - name: Upload Trivy SARIF to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()  # Upload even on failure (to see what Trivy found)
+        with:
+          sarif_file: "trivy-results.sarif"
+          category: "trivy-container-scan"
+```
+
+---
+
+## Understanding Each Job in Detail
+
+### Job 1: ESLint
+
+ESLint enforces consistent code style and catches common bugs that TypeScript doesn't check. Your `next.config.ts` already includes `eslint` in the build, but running it as a separate CI job gives faster feedback.
+
+```bash
+# What runs in the CI job
+npm run lint
+# Equivalent to: next lint
+```
+
+Common ESLint rules that Next.js enforces by default:
+- `no-unused-vars` — catch dead code
+- `react-hooks/rules-of-hooks` — hooks must be called at the top level
+- `react-hooks/exhaustive-deps` — useEffect dependency arrays must be complete
+- `@next/next/no-img-element` — use `<Image>` instead of `<img>` for performance
+
+To see your full ESLint config:
+```bash
+cat .eslintrc.json
+# { "extends": ["next/core-web-vitals", "next/typescript"] }
+```
+
+### Job 2: TypeScript Type Check
+
+`tsc --noEmit` validates all TypeScript types across the entire codebase without emitting any `.js` files. This catches:
+- Passing wrong argument types to functions
+- Accessing properties that don't exist on an object
+- Unhandled null/undefined values
+- Mismatched return types
+
+```bash
+npm run type-check
+# Equivalent to: npx tsc --noEmit
+
+# Example output (failure):
+# app/api/items/route.ts:25:15 - error TS2345:
+#   Argument of type 'string | undefined' is not assignable to parameter
+#   of type 'string'.
+```
+
+### Job 3: Vitest Tests
+
+Vitest is a Vite-native test runner — 10-100x faster than Jest for TypeScript projects because it uses esbuild for transpilation instead of Babel.
+
+```bash
+npm run test -- --coverage
+```
+
+The `--coverage` flag generates a coverage report. Configure thresholds in `vitest.config.ts`:
+
+```typescript
+// vitest.config.ts (add coverage configuration)
+export default defineConfig({
+  test: {
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "json", "html"],
+      thresholds: {
+        branches: 70,
+        functions: 70,
+        lines: 70,
+        statements: 70,
+      },
+      exclude: [
+        "node_modules/**",
+        ".next/**",
+        "vitest.setup.ts",
+        "vitest.config.ts",
+      ],
+    },
+  },
+});
+```
+
+<Callout type="tip" title="Start with Realistic Coverage Targets">
+Don't set coverage thresholds at 100% on day one — it leads to writing tests that pass without testing anything meaningful. Start at 70% and increase it as the codebase matures.
+</Callout>
+
+### Job 4: Trivy Security Scan
+
+Trivy scans your Docker image for known CVEs (Common Vulnerabilities and Exposures) from multiple databases:
+- **NVD** — NIST National Vulnerability Database
+- **GitHub Advisory Database** — GitHub's open source advisory database
+- **OS-specific databases** — Alpine Linux's security database, Debian, etc.
+
+The `--ignore-unfixed` flag is important: it skips vulnerabilities that have no available fix. If you don't use this flag, you'll get alerts for vulnerabilities that you literally cannot fix by upgrading any package.
+
+```bash
+# Run Trivy locally before pushing
+trivy image --severity CRITICAL,HIGH capstone-app:local
+
+# Example clean output:
+# capstone-app:local (alpine 3.19.0)
+# ===================================
+# Total: 0 (CRITICAL: 0, HIGH: 0)
+```
+
+---
+
+## Caching for Speed
+
+Without caching, every CI job runs `npm ci` from scratch — downloading 200+ packages from the npm registry every time. With `cache: "npm"` in the `setup-node` action, the `~/.npm` global cache is restored between runs.
+
+```mermaid
+flowchart LR
+    subgraph nocache["Without cache"]
+        NC1[npm ci] -->|2-4 minutes| NC2[All deps downloaded]
+    end
+
+    subgraph withcache["With cache: 'npm'"]
+        WC1[Restore ~/.npm cache] --> WC2[npm ci]
+        WC2 -->|20-30 seconds| WC3[Cache HIT: deps from cache]
+    end
+```
+
+For Docker layer caching in the security-scan job, GitHub Actions Cache (`type=gha`) is used:
+```yaml
+cache-from: type=gha    # Read from GitHub Actions cache
+cache-to: type=gha,mode=max  # Write all layers to cache
+```
+
+This means the Docker build layers are cached. On the second run, only the layers that changed (e.g., your source code) are rebuilt.
+
+---
+
+## The `concurrency` Block: No Wasted Minutes
+
+```yaml
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+```
+
+This is one of the most important performance optimizations for active repositories.
+
+**Scenario:** A developer pushes 3 commits rapidly to a feature branch. Without `concurrency`, GitHub starts 3 separate CI runs — burning 3× the compute minutes. With `concurrency`, the moment the second push arrives, the first CI run is cancelled. The third push cancels the second. You only pay for the latest run.
+
+---
+
+## Viewing CI Results
+
+After pushing to GitHub and opening a pull request:
+
+1. **PR Checks**: GitHub shows a status for each job (✅ or ❌) directly on the PR page
+2. **Job Logs**: Click any job to see detailed step-by-step output
+3. **Security Tab**: Trivy SARIF results appear in the repository's Security → Code scanning alerts
+4. **Artifacts**: The coverage report is downloadable from the workflow run page
+
+```mermaid
+flowchart TD
+    PR_PAGE["PR Page\n✅ lint · ✅ type-check · ✅ test · ✅ security-scan"]
+    PR_PAGE --> MERGE[Merge button enabled]
+    PR_PAGE --> CHECKS[Click any check → Job logs]
+    PR_PAGE --> SECURITY[Security tab → Trivy alerts]
+    PR_PAGE --> ARTIFACTS[Actions tab → Download coverage]
+```
+
+---
+
+## Branch Protection Rules: Enforcing the Pipeline
+
+The CI workflow is useless if developers can bypass it by pushing directly to `main`. Enforce it:
+
+1. Go to **Repository → Settings → Branches → Add branch protection rule**
+2. Branch name pattern: `main`
+3. Enable:
+   - ✅ **Require a pull request before merging**
+   - ✅ **Require status checks to pass before merging**
+     - Add: `lint`, `type-check`, `test`, `security-scan`
+   - ✅ **Require branches to be up to date before merging**
+   - ✅ **Do not allow bypassing the above settings**
+
+After this configuration, **no one** — not even repository administrators — can merge a broken PR to `main`.
+
+---
+
+## Adding More Checks Over Time
+
+This CI pipeline is a foundation. As your project grows, you'll add:
+
+```yaml
+# Additional checks to add later
+
+# Dependency audit
+- name: npm audit
+  run: npm audit --audit-level=high
+
+# Check for outdated dependencies
+- name: Check for outdated packages
+  run: npm outdated || true  # Warning only, don't fail
+
+# Bundle size analysis
+- name: Analyze bundle size
+  run: |
+    npm run build
+    du -sh .next/
+
+# Integration tests (separate job with a real database)
+integration-test:
+  services:
+    postgres:
+      image: postgres:16-alpine
+      env:
+        POSTGRES_USER: test
+        POSTGRES_PASSWORD: test
+        POSTGRES_DB: testdb
+      ports:
+        - 5432:5432
+      options: --health-cmd pg_isready --health-interval 5s --health-retries 5
+  steps:
+    - run: npm run test:integration
+      env:
+        DATABASE_URL: postgres://test:test@localhost:5432/testdb
+```
+
+---
+
+## Troubleshooting Common CI Failures
+
+### "ESLint found errors"
+```bash
+# Run locally first
+npm run lint
+npm run lint -- --fix  # Auto-fix some issues
+```
+
+### "TypeScript errors found"
+```bash
+# Run locally
+npm run type-check
+# The exact error and line number are in the output
+```
+
+### "Tests failed"
+```bash
+# Run locally with the same env vars CI uses
+DATABASE_URL="postgres://test:test@localhost:5432/test" npm test
+```
+
+### "Trivy found CRITICAL CVEs"
+```bash
+# Check which package has the CVE
+trivy image --severity CRITICAL capstone-app:local
+
+# Update the vulnerable package
+npm update package-name
+# Or update the base image
+# Change: FROM node:20-alpine
+# To:     FROM node:20-alpine (docker pull will get the latest patch)
+```
+
+---
+
+## Summary
+
+You now have a GitHub Actions CI pipeline that:
+- Runs **four quality checks** in parallel on every PR: ESLint, TypeScript, Vitest, Trivy
+- **Cancels stale runs** automatically when new commits are pushed (saves CI minutes)
+- **Caches npm dependencies** and Docker layers for 10-30x faster builds
+- **Uploads coverage reports** and **Trivy SARIF** to GitHub for visibility
+- Can be **enforced with branch protection rules** to block broken merges
+
+In the next lesson, you will add a CD workflow that builds the Docker image with the Git SHA as the tag and pushes it to GitHub Container Registry.

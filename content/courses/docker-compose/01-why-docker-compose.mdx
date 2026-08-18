@@ -1,0 +1,195 @@
+---
+title: "Why Docker Compose?"
+---
+
+# The Problem: Managing Containers by Hand
+
+In the Docker course you ran individual containers with `docker run`. That works perfectly for a single, isolated container. But real production applications are never just one container — they're a **system** of cooperating services.
+
+A typical three-tier web application looks like this:
+
+```mermaid
+flowchart LR
+    USER["👤 User\nbrowser"] -->|"HTTP :3000"| API["Node.js API\ncontainer"]
+    API -->|"SQL :5432"| DB[("PostgreSQL\ncontainer")]
+    API -->|"Redis :6379"| CACHE["Redis\ncontainer"]
+    DB --> VOL_DB[("postgres-data\nnamed volume")]
+    CACHE --> VOL_CACHE[("redis-data\nnamed volume")]
+```
+
+To run this stack manually with bare `docker run` commands:
+
+```bash
+# Step 1: Create a shared network so containers can talk to each other
+docker network create myapp-net
+
+# Step 2: Start PostgreSQL (don't forget the volume, the network, every env var...)
+docker run -d \
+  --name myapp-db \
+  --network myapp-net \
+  -e POSTGRES_USER=appuser \
+  -e POSTGRES_PASSWORD=supersecret \
+  -e POSTGRES_DB=myapp \
+  -v postgres-data:/var/lib/postgresql/data \
+  postgres:16-alpine
+
+# Step 3: Start Redis
+docker run -d \
+  --name myapp-cache \
+  --network myapp-net \
+  redis:7-alpine
+
+# Step 4: Build your API image first
+docker build -t myapp-api .
+
+# Step 5: Start the API — and pray Postgres has finished initializing
+docker run -d \
+  --name myapp-api \
+  --network myapp-net \
+  -p 3000:3000 \
+  -e DATABASE_URL=postgres://appuser:supersecret@myapp-db:5432/myapp \
+  -e REDIS_URL=redis://myapp-cache:6379 \
+  myapp-api
+
+# Total: 5 commands, 15+ flags, exact order matters, zero error handling
+```
+
+**Problems with this approach:**
+- New developer joins → reads the README, misses one flag, gets a cryptic error at midnight
+- You rename a container → must update every downstream reference manually
+- Postgres hasn't fully initialized when the API starts → `ECONNREFUSED` on boot
+- No `--restart` flags → containers die on reboot and stay dead
+- Impossible to manage across multiple environments (dev, staging, prod) consistently
+
+---
+
+## Docker Compose: The Solution
+
+Docker Compose lets you describe your **entire application stack** — all services, networks, volumes, environment variables, and dependencies — in a single declarative YAML file. Then one command manages the whole thing:
+
+```bash
+# Start everything (builds images, creates network, starts containers, streams logs)
+docker compose up
+
+# Start everything in the background (detached)
+docker compose up -d
+
+# Stop and remove containers (keeps volumes — data is safe)
+docker compose down
+
+# Stop and remove EVERYTHING including volumes (⚠️ data loss)
+docker compose down --volumes
+```
+
+The same three-tier stack from above becomes:
+
+```yaml
+# docker-compose.yml
+services:
+  api:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgres://appuser:supersecret@db:5432/myapp
+      REDIS_URL: redis://cache:6379
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: appuser
+      POSTGRES_PASSWORD: supersecret
+      POSTGRES_DB: myapp
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U appuser"]
+      interval: 5s
+      retries: 10
+
+  cache:
+    image: redis:7-alpine
+
+volumes:
+  postgres-data:
+```
+
+**What you gain:**
+- **One file** checked into version control — everyone on the team runs the same stack
+- **Service discovery by name** — `api` reaches the database at hostname `db` automatically
+- **Dependency ordering** — `api` won't start until `db` passes its health check
+- **Reproducible everywhere** — dev laptop, CI, staging server, production VPS
+
+---
+
+## How Compose Works Under the Hood
+
+```mermaid
+flowchart TD
+    subgraph HOST["Your Machine / Server"]
+        COMPOSE_CMD["docker compose up"]
+        COMPOSE_CMD --> PARSE["Parse docker-compose.yml\n+ override files"]
+        PARSE --> NETWORK["Create network:\nmyapp_default\n(if not exists)"]
+        PARSE --> VOLUMES["Create named volumes:\npostgres-data\n(if not exists)"]
+        NETWORK & VOLUMES --> PULL["Pull / build images"]
+        PULL --> ORDER["Resolve dependency order:\ndb → cache → api"]
+        ORDER --> START["Start containers\nin dependency order"]
+        START --> HEALTH["Wait for healthchecks\nbefore dependent services"]
+    end
+```
+
+Compose reads your YAML, computes a dependency graph from `depends_on`, creates the network and volumes (idempotent — safe to re-run), then starts containers in the correct order, waiting for health checks where configured.
+
+---
+
+## `docker compose` vs `docker-compose`
+
+```bash
+# Old (Compose v1 — Python binary, being deprecated)
+docker-compose up   # hyphen
+
+# New (Compose v2 — Go plugin, built into Docker CLI)
+docker compose up   # space
+```
+
+Compose v2 is the current standard as of Docker Engine 20.10+. Always use `docker compose` (with a space). The hyphenated version (`docker-compose`) is a legacy Python binary that is no longer maintained.
+
+```bash
+# Verify you have Compose v2
+docker compose version
+# Docker Compose version v2.27.0
+```
+
+---
+
+## What Docker Compose Is NOT
+
+Compose is excellent for development and single-server production deployments. But it has hard architectural limits:
+
+| Capability | Docker Compose | Kubernetes |
+|-----------|---------------|------------|
+| **Multi-server** | ❌ Single host only | ✅ Cluster of servers |
+| **Auto-scaling** | ❌ Manual only | ✅ HPA by CPU/memory |
+| **Cross-node self-healing** | ❌ Single node restart only | ✅ Pods reschedule across nodes |
+| **Rolling zero-downtime updates** | ⚠️ Brief downtime | ✅ Guaranteed zero downtime |
+| **Load balancing across nodes** | ❌ | ✅ |
+| **Learning curve** | ✅ Low (< 1 day) | ❌ Steep (weeks) |
+| **Right for** | Dev + small prod | Large-scale production |
+
+For a single VPS hosting a startup's backend, Docker Compose is the right choice. When you need multiple servers, auto-scaling, or zero-downtime at scale — that's when you graduate to K3s or Kubernetes.
+
+---
+
+## Summary
+
+- Real applications need multiple containers (API, database, cache) that must communicate, start in the right order, and restart reliably
+- Managing this with bare `docker run` commands is error-prone, hard to share, and not reproducible
+- `docker-compose.yml` declares the entire stack — services, networks, volumes, dependencies — in one file checked into version control
+- `docker compose up -d` starts everything; `docker compose down` stops everything cleanly
+- Always use `docker compose` (v2, space) — the old `docker-compose` (hyphen) is deprecated
+- Compose is ideal for development and single-server production; Kubernetes handles multi-server scale
+
+In the next lesson, you will dissect every section of the `docker-compose.yml` file in detail.

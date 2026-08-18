@@ -1,0 +1,490 @@
+---
+title: "Installing K3s on Linux / VPS with One Command"
+---
+
+# Installing K3s: From Zero to Running Cluster
+
+K3s has one of the simplest installation procedures of any production software. A single `curl` command downloads, installs, and starts a complete Kubernetes cluster. This lesson covers not just the happy path, but every configuration option you'll need for real-world deployments.
+
+---
+
+## Prerequisites
+
+Before installing K3s, prepare your server:
+
+### Supported Operating Systems
+
+| OS | Version | Architecture | Status |
+|----|---------|-------------|--------|
+| Ubuntu | 22.04 LTS, 24.04 LTS | amd64, arm64 | ✅ Recommended |
+| Debian | 11, 12 | amd64, arm64 | ✅ Supported |
+| RHEL/Rocky | 8, 9 | amd64, arm64 | ✅ Supported |
+| Raspberry Pi OS | Bullseye, Bookworm | arm64 | ✅ Supported |
+| Alpine Linux | 3.17+ | amd64 | ⚠️ Limited support |
+| macOS | Any | — | ❌ Not supported (use k3d) |
+
+### Hardware Requirements
+
+| Scenario | RAM | CPU | Disk |
+|----------|-----|-----|------|
+| Learning / single app | 1 GB | 1 vCPU | 10 GB |
+| Small production | 2–4 GB | 2 vCPU | 40 GB |
+| Medium production | 4–8 GB | 4 vCPU | 80 GB |
+
+### Required Ports
+
+Open these in your firewall **before** installing:
+
+```bash
+# If using UFW on Ubuntu
+sudo ufw allow 22/tcp       # SSH
+sudo ufw allow 6443/tcp     # Kubernetes API server (kubectl remote access)
+sudo ufw allow 80/tcp       # HTTP (Traefik Ingress)
+sudo ufw allow 443/tcp      # HTTPS (Traefik Ingress)
+sudo ufw enable
+sudo ufw status verbose
+```
+
+For multi-node setups, also open:
+```bash
+sudo ufw allow 8472/udp     # Flannel VXLAN (pod networking between nodes)
+sudo ufw allow 10250/tcp    # kubelet API (needed for kubectl exec/logs)
+sudo ufw allow 2379-2380/tcp  # etcd (only if using embedded HA etcd)
+```
+
+---
+
+## Server Hardening Before K3s
+
+Before running K3s, harden your server:
+
+```bash
+# Update all packages
+sudo apt-get update && sudo apt-get upgrade -y
+
+# Create a non-root user for day-to-day operations
+sudo adduser k3sadmin
+sudo usermod -aG sudo k3sadmin
+
+# Disable root SSH login
+sudo sed -i 's/PermitRootLogin yes/PermitRootLogin no/' /etc/ssh/sshd_config
+sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
+sudo systemctl restart sshd
+
+# Enable automatic security updates
+sudo apt-get install -y unattended-upgrades
+sudo dpkg-reconfigure -plow unattended-upgrades
+
+# Install helpful tools
+sudo apt-get install -y curl wget git jq htop net-tools
+```
+
+---
+
+## The One-Command Installation
+
+```bash
+# Install the latest stable K3s version
+curl -sfL https://get.k3s.io | sh -
+```
+
+What this script does, step by step:
+1. Detects your CPU architecture (amd64, arm64, armhf)
+2. Downloads the `k3s` binary to `/usr/local/bin/k3s`
+3. Makes it executable (`chmod +x`)
+4. Creates a systemd unit file at `/etc/systemd/system/k3s.service`
+5. Enables the service (`systemctl enable k3s`)
+6. Starts the service (`systemctl start k3s`)
+7. Generates `/etc/rancher/k3s/k3s.yaml` (the kubeconfig)
+8. Creates `/var/lib/rancher/k3s/server/node-token` (the join token for agent nodes)
+
+---
+
+## Verify the Installation
+
+```bash
+# Check that the systemd service is running
+sudo systemctl status k3s
+# ● k3s.service - Lightweight Kubernetes
+#    Loaded: loaded (/etc/systemd/system/k3s.service; enabled)
+#    Active: active (running) since ...
+
+# Watch the startup logs in real time
+sudo journalctl -u k3s -f --no-pager
+# (press Ctrl+C when you see "Node is ready")
+
+# Verify the node is Ready (takes 30-60 seconds after install)
+sudo k3s kubectl get nodes
+# NAME        STATUS   ROLES                  AGE   VERSION
+# my-server   Ready    control-plane,master   90s   v1.29.4+k3s1
+
+# Check all system pods are running
+sudo k3s kubectl get pods -A
+# NAMESPACE     NAME                                     READY   STATUS
+# kube-system   coredns-xxx                              1/1     Running
+# kube-system   local-path-provisioner-xxx               1/1     Running
+# kube-system   metrics-server-xxx                       1/1     Running
+# kube-system   svclb-traefik-xxx                        2/2     Running
+# kube-system   traefik-xxx                              1/1     Running
+```
+
+<Callout type="tip" title="K3s Has Its Own kubectl">
+K3s ships its own `kubectl` as `k3s kubectl`. You can use it without any configuration while on the server:
+```bash
+sudo k3s kubectl get nodes
+sudo k3s kubectl get pods -A
+```
+For remote access from your laptop, you'll configure a separate `kubectl` in the next section.
+</Callout>
+
+---
+
+## Configure Remote kubectl Access
+
+Managing your cluster from your laptop is much more convenient than SSH-ing in every time.
+
+<Steps>
+<Step>
+**Copy the kubeconfig from your server to your laptop:**
+
+```bash
+# On your LOCAL machine (replace YOUR_VPS_IP with the actual IP)
+scp root@YOUR_VPS_IP:/etc/rancher/k3s/k3s.yaml ~/.kube/k3s-config
+
+# The file contains 127.0.0.1 as the server address — fix it:
+sed -i '' "s/127.0.0.1/YOUR_VPS_IP/g" ~/.kube/k3s-config
+# Note: macOS needs '' after -i (GNU sed on Linux doesn't need it)
+```
+</Step>
+
+<Step>
+**Set file permissions (kubectl refuses to use world-readable kubeconfigs):**
+
+```bash
+chmod 600 ~/.kube/k3s-config
+```
+</Step>
+
+<Step>
+**Configure kubectl to use this kubeconfig:**
+
+```bash
+# Option A: Set KUBECONFIG environment variable (temporary)
+export KUBECONFIG=~/.kube/k3s-config
+
+# Option B: Merge into the default ~/.kube/config (permanent)
+KUBECONFIG=~/.kube/config:~/.kube/k3s-config \
+  kubectl config view --flatten > ~/.kube/config-merged && \
+  mv ~/.kube/config-merged ~/.kube/config
+
+# Option C: Set KUBECONFIG permanently in your shell profile
+echo 'export KUBECONFIG=~/.kube/k3s-config' >> ~/.zshrc
+source ~/.zshrc
+```
+</Step>
+
+<Step>
+**Verify remote access works:**
+
+```bash
+kubectl get nodes
+# NAME        STATUS   ROLES                  AGE   VERSION
+# my-server   Ready    control-plane,master   5m    v1.29.4+k3s1
+
+# Check you can see all pods
+kubectl get pods -A
+```
+</Step>
+
+<Step>
+**Set up shell autocomplete (optional but very helpful):**
+
+```bash
+# Bash
+echo 'source <(kubectl completion bash)' >> ~/.bashrc
+
+# Zsh
+echo 'source <(kubectl completion zsh)' >> ~/.zshrc
+
+# Create a 'k' alias
+echo 'alias k=kubectl' >> ~/.zshrc
+echo 'complete -F __start_kubectl k' >> ~/.zshrc
+
+source ~/.zshrc
+```
+</Step>
+</Steps>
+
+---
+
+## Common Installation Variants
+
+### Install a Specific K3s Version
+
+Always pin versions in production scripts:
+
+```bash
+# List available versions: https://github.com/k3s-io/k3s/releases
+curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.29.4+k3s1 sh -
+
+# Verify the installed version
+k3s --version
+# k3s version v1.29.4+k3s1 (abc12345)
+# go version go1.21.8
+```
+
+### Disable Traefik (Use NGINX Instead)
+
+```bash
+curl -sfL https://get.k3s.io | sh -s - --disable traefik
+
+# Then install NGINX Ingress Controller
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.10.1/deploy/static/provider/cloud/deploy.yaml
+```
+
+### Use Embedded etcd (For Multi-Server HA)
+
+```bash
+# First server node with embedded etcd (instead of SQLite)
+curl -sfL https://get.k3s.io | sh -s - --cluster-init
+
+# Additional server nodes join the cluster
+curl -sfL https://get.k3s.io | sh -s - \
+  --server https://FIRST_SERVER_IP:6443 \
+  --token YOUR_NODE_TOKEN \
+  --cluster-init
+```
+
+### Configure with a Config File
+
+Instead of long command-line flags, use a YAML config file:
+
+```yaml
+# /etc/rancher/k3s/config.yaml
+# Create this BEFORE running the installer, or restart k3s after
+
+# Disable components you don't need
+disable:
+  - traefik        # If using NGINX
+  - servicelb      # If using MetalLB for LoadBalancer IPs
+
+# Write kubeconfig with readable permissions
+write-kubeconfig-mode: "644"
+
+# TLS SAN: add your VPS IP and domain to the API server certificate
+tls-san:
+  - "YOUR_VPS_IP"
+  - "k8s.yourdomain.com"
+
+# Data directory (change if /var is small)
+data-dir: /opt/k3s-data
+
+# etcd snapshots (if using embedded etcd)
+etcd-snapshot-schedule-cron: "0 */6 * * *"
+etcd-snapshot-retention: 5
+```
+
+```bash
+# Install K3s (it reads config.yaml automatically)
+curl -sfL https://get.k3s.io | sh -
+
+# Verify config was applied
+sudo k3s kubectl get nodes -o wide
+```
+
+### Air-Gapped Installation (No Internet Access)
+
+For servers that don't have internet access:
+
+```bash
+# On a machine WITH internet: download the release
+VERSION=v1.29.4+k3s1
+wget https://github.com/k3s-io/k3s/releases/download/${VERSION}/k3s
+wget https://github.com/k3s-io/k3s/releases/download/${VERSION}/k3s-airgap-images-amd64.tar.zst
+wget https://github.com/k3s-io/k3s/releases/download/${VERSION}/install.sh
+
+# Copy files to the air-gapped server via USB/private network
+scp k3s k3s-airgap-images-amd64.tar.zst install.sh root@AIR_GAPPED_SERVER:/tmp/
+
+# On the air-gapped server:
+sudo cp /tmp/k3s /usr/local/bin/k3s
+sudo chmod +x /usr/local/bin/k3s
+sudo mkdir -p /var/lib/rancher/k3s/agent/images/
+sudo cp /tmp/k3s-airgap-images-amd64.tar.zst /var/lib/rancher/k3s/agent/images/
+INSTALL_K3S_SKIP_DOWNLOAD=true bash /tmp/install.sh
+```
+
+---
+
+## Understanding K3s File Locations
+
+After installation, K3s creates files in predictable locations:
+
+```
+/usr/local/bin/
+├── k3s                          ← The main binary
+├── k3s-uninstall.sh             ← Complete uninstall script
+└── k3s-killall.sh               ← Stop all K3s processes (don't delete data)
+
+/etc/rancher/k3s/
+├── k3s.yaml                     ← Kubeconfig (copy this to your laptop)
+└── config.yaml                  ← Optional: K3s server configuration
+
+/etc/systemd/system/
+└── k3s.service                  ← Systemd unit file
+
+/var/lib/rancher/k3s/
+├── server/
+│   ├── db/
+│   │   └── state.db             ← SQLite database (cluster state)
+│   ├── node-token               ← Join token for worker nodes
+│   ├── tls/                     ← CA certificates and server certs
+│   └── manifests/               ← Auto-applied manifests (Helm charts, etc.)
+└── storage/                     ← local-path-provisioner PVC data
+```
+
+<Callout type="warning" title="Back Up These Directories">
+`/var/lib/rancher/k3s/server/db/` contains your entire cluster state. `/var/lib/rancher/k3s/storage/` contains your PVC data (databases, uploaded files). Back up both regularly. Lesson 7 covers automated backup strategies.
+</Callout>
+
+---
+
+## Managing the K3s Service
+
+```bash
+# Check service status
+sudo systemctl status k3s
+
+# Stop K3s (stops the cluster — pods stop running)
+sudo systemctl stop k3s
+
+# Start K3s
+sudo systemctl start k3s
+
+# Restart K3s (apply config changes)
+sudo systemctl restart k3s
+
+# Disable auto-start on boot
+sudo systemctl disable k3s
+
+# View live logs
+sudo journalctl -u k3s -f
+
+# View logs from the last hour
+sudo journalctl -u k3s --since "1 hour ago"
+```
+
+---
+
+## Upgrading K3s
+
+```bash
+# Upgrade to a specific version (re-run the installer)
+curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.30.0+k3s1 sh -
+
+# The installer:
+# 1. Drains the node (marks unschedulable, waits for pods to terminate)
+# 2. Replaces the k3s binary
+# 3. Restarts the k3s service
+# 4. Un-cordons the node
+
+# Verify upgrade
+k3s --version
+kubectl get nodes
+```
+
+For automated upgrades, use the [K3s System Upgrade Controller](https://github.com/rancher/system-upgrade-controller):
+
+```yaml
+# system-upgrade-plan.yaml
+apiVersion: upgrade.cattle.io/v1
+kind: Plan
+metadata:
+  name: k3s-latest
+  namespace: system-upgrade
+spec:
+  concurrency: 1          # Upgrade one node at a time
+  serviceAccountName: system-upgrade
+  channel: https://update.k3s.io/v1-release/channels/stable
+  upgrade:
+    image: rancher/k3s-upgrade
+```
+
+---
+
+## Uninstalling K3s
+
+```bash
+# Complete uninstall — removes ALL K3s data including PVCs!
+/usr/local/bin/k3s-uninstall.sh
+
+# Graceful stop (keeps data intact, can reinstall later)
+/usr/local/bin/k3s-killall.sh
+```
+
+<Callout type="caution" title="k3s-uninstall.sh Deletes All Data">
+The uninstall script removes `/var/lib/rancher/k3s/` — including your SQLite database and all local-path PVC data (databases, files). Before uninstalling, either back up this directory or ensure you have remote copies of all important data.
+</Callout>
+
+---
+
+## Troubleshooting Common Installation Issues
+
+### "K3s fails to start — address already in use"
+```bash
+# Another process is using port 6443
+sudo ss -tlnp | grep 6443
+# Kill the conflicting process or stop it:
+sudo systemctl stop whatever-service-is-on-6443
+```
+
+### "Node stays in NotReady state"
+```bash
+# Check K3s logs for the root cause
+sudo journalctl -u k3s -n 100 --no-pager
+
+# Common causes:
+# 1. Flannel can't create the VXLAN interface (needs NET_ADMIN capability)
+# 2. /etc/hosts doesn't have the hostname resolving to an IP
+# 3. Container images can't be pulled (check internet connectivity)
+echo "$(hostname -I | awk '{print $1}')  $(hostname)" | sudo tee -a /etc/hosts
+```
+
+### "kubectl connection refused from laptop"
+```bash
+# Verify K3s API server is listening on all interfaces, not just localhost
+sudo ss -tlnp | grep 6443
+# tcp LISTEN 0 4096 0.0.0.0:6443 ← Good (all interfaces)
+# tcp LISTEN 0 4096 127.0.0.1:6443 ← Bad (localhost only)
+
+# If localhost only, add to /etc/rancher/k3s/config.yaml:
+# tls-san: ["YOUR_VPS_IP"]
+# Then restart: sudo systemctl restart k3s
+
+# Also verify port 6443 is open in your VPS firewall
+```
+
+### "Pods stuck in Pending — no storage available"
+```bash
+# Check if local-path-provisioner is running
+kubectl get pods -n kube-system | grep local-path
+# If it's not running, the PVC provisioner is broken
+
+# Check events on the PVC
+kubectl describe pvc YOUR_PVC_NAME
+```
+
+---
+
+## Summary
+
+K3s installs with a single `curl` command and is fully operational in under 60 seconds. Key points:
+
+- The installer downloads the binary, creates a systemd service, generates a kubeconfig, and starts the cluster automatically
+- Copy `/etc/rancher/k3s/k3s.yaml` to `~/.kube/k3s-config` on your laptop and update the server IP for remote `kubectl` access
+- Open ports 22, 6443, 80, and 443 in your firewall
+- K3s state lives in `/var/lib/rancher/k3s/` — back up the `server/db/` subdirectory regularly
+- Use `/etc/rancher/k3s/config.yaml` for persistent configuration instead of long command-line flags
+- Re-run the installer script to upgrade K3s to a new version
+
+In the next lesson, you will explore K3s's built-in Traefik Ingress Controller and learn how to route external HTTP/HTTPS traffic to your applications.

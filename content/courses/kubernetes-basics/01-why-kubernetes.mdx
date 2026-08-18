@@ -1,0 +1,245 @@
+---
+title: "Why Kubernetes? Orchestration Explained"
+---
+
+# The Problem Docker Compose Can't Solve
+
+Docker and Docker Compose are excellent tools. They package your application into a portable, reproducible container and let you run multi-service stacks with a single `docker-compose up`. For local development and even small single-server production workloads, they're often the right choice.
+
+But as a product grows, real problems emerge that Docker Compose is architecturally incapable of solving:
+
+---
+
+## The Scaling Problem
+
+```mermaid
+flowchart TD
+    subgraph single["Docker Compose — Single Server"]
+        USER1 & USER2 & USER3 & USER4 & USER5 & USER6 -->|"All 6 users hit the\nsame server"| SERVER
+        SERVER --> COMPOSE_API[api container]
+        COMPOSE_API --> DB[(postgres container)]
+        
+        NOTE["❌ Traffic spike?\nYou can't add a second server.\nDockerfile knows only one host."]
+    end
+```
+
+```mermaid
+flowchart TD
+    subgraph k8s["Kubernetes — Multi-Server Cluster"]
+        USERS[Users] --> LB[Load Balancer]
+        LB --> API1[api Pod on Node 1]
+        LB --> API2[api Pod on Node 2]
+        LB --> API3[api Pod on Node 3]
+        API1 & API2 & API3 --> DB[(RDS / PVC)]
+        
+        HPA[HPA scales 3→10 replicas\non traffic spike] -.->|"auto-scales"| API1 & API2 & API3
+        NOTE["✅ Traffic spike?\nK8s auto-scales from 3 to 10 replicas\nacross multiple nodes."]
+    end
+```
+
+---
+
+## The Self-Healing Problem
+
+With Docker Compose, if a container crashes:
+1. The process exits with a non-zero code
+2. Docker may restart it (if `restart: always`) — but only on the **same machine**
+3. If the machine itself dies, **everything is gone**
+
+With Kubernetes:
+1. The pod controller detects a pod death within seconds
+2. It automatically schedules a replacement pod on a **healthy node**
+3. If an entire node dies, all its workloads are rescheduled to remaining nodes
+4. This happens with **zero manual intervention**, at any time of day
+
+---
+
+## The Zero-Downtime Deployment Problem
+
+```mermaid
+sequenceDiagram
+    participant DEV as Developer
+    participant COMPOSE as Docker Compose
+    participant USERS as Users (Traffic)
+
+    DEV->>COMPOSE: docker-compose up (new version)
+    COMPOSE->>COMPOSE: Stop old container
+    Note over USERS,COMPOSE: ❌ 5-30 seconds of downtime
+    COMPOSE->>COMPOSE: Start new container
+    Note over USERS,COMPOSE: Users see "502 Bad Gateway"
+    COMPOSE-->>USERS: Service restored
+```
+
+```mermaid
+sequenceDiagram
+    participant DEV as Developer
+    participant K8S as Kubernetes
+    participant USERS as Users (Traffic)
+
+    DEV->>K8S: kubectl apply (new image tag)
+    K8S->>K8S: Start 1 new pod (v2)
+    K8S->>K8S: Wait for readiness probe ✅
+    K8S->>K8S: Route traffic to new pod
+    K8S->>K8S: Terminate 1 old pod (v1)
+    Note over USERS,K8S: ✅ Zero requests dropped — users see nothing
+    K8S->>K8S: Repeat for all replicas
+```
+
+---
+
+## The Five Core Problems Kubernetes Solves
+
+| Problem | Docker Compose | Kubernetes |
+|---------|---------------|------------|
+| **Scale across multiple servers** | ❌ Single host only | ✅ Distribute pods across unlimited nodes |
+| **Self-heal from crashes** | ⚠️ Restarts locally, can't survive node failure | ✅ Reschedules pods to healthy nodes automatically |
+| **Zero-downtime deployments** | ❌ Brief downtime on every update | ✅ Rolling updates replace pods one at a time |
+| **Service discovery between apps** | ⚠️ Only within same Docker network | ✅ Built-in DNS: `service-name.namespace.svc.cluster.local` |
+| **Traffic load balancing** | ❌ No built-in balancing | ✅ Every Service load-balances across all healthy pod endpoints |
+
+---
+
+## What Exactly Is Kubernetes?
+
+Kubernetes (K8s) is an open-source **container orchestration platform** — a distributed system that:
+
+1. **Schedules** containers onto servers based on available resources
+2. **Monitors** every running container and restarts failed ones
+3. **Updates** running applications without interrupting users
+4. **Scales** workloads automatically based on CPU/memory usage
+5. **Routes** network traffic to healthy containers
+6. **Stores** secrets, configuration, and manages persistent storage
+
+> Think of Kubernetes as the **operating system for your data center**. Just as an OS manages processes on a single machine (scheduling CPU time, managing memory, handling I/O), Kubernetes manages containers across a fleet of machines.
+
+---
+
+## The Kubernetes "Desired State" Model
+
+The most important mental model for Kubernetes is **declarative infrastructure**:
+
+```yaml
+# You declare WHAT you want — not HOW to achieve it
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-api
+spec:
+  replicas: 3         # "I want 3 copies of my app running"
+  # ... container spec
+```
+
+You apply this to Kubernetes. From that moment on, Kubernetes **continuously reconciles** the actual state of the cluster toward your desired state:
+
+```
+Loop every few seconds:
+  1. Observe: Count running pods → 2 (one crashed)
+  2. Compare: Desired = 3, Actual = 2 → drift detected
+  3. Act: Create 1 new pod → actual = 3 ✅
+```
+
+This is why Kubernetes is called **self-healing** — it never stops trying to match your declared intent. You don't need to monitor for failures and react. Kubernetes does it for you.
+
+---
+
+## Kubernetes Core Concepts: A Preview
+
+You'll learn all of these deeply in the upcoming lessons:
+
+```mermaid
+flowchart TD
+    POD["Pod\nSmallest deployable unit\n1+ containers that share network + storage"]
+    DEPLOY["Deployment\nDeclares desired Pod count\nManages rolling updates + rollbacks"]
+    RS["ReplicaSet\nManaged by Deployment\nEnsures N pods are running"]
+    SVC["Service\nStable DNS + virtual IP\nLoad balances across Pod endpoints"]
+    INGRESS["Ingress\nHTTP routing: hostname + path rules\nTLS termination"]
+    CM["ConfigMap\nNon-secret app config\n(env vars, config files)"]
+    SECRET["Secret\nEncrypted sensitive data\n(passwords, API keys, TLS certs)"]
+    PVC["PersistentVolumeClaim\nRequests durable storage\n(survives pod restarts)"]
+    NS["Namespace\nVirtual cluster partition\n(dev, staging, production)"]
+
+    DEPLOY --> RS --> POD
+    POD --> SVC --> INGRESS
+    CM & SECRET --> POD
+    PVC --> POD
+    NS -.->|"isolates"| DEPLOY & SVC & CM & SECRET
+```
+
+---
+
+## Kubernetes vs Docker Compose: The Complete Comparison
+
+| Feature | Docker Compose | Kubernetes |
+|---------|---------------|------------|
+| **Multi-server** | ❌ Single host | ✅ Unlimited nodes |
+| **Self-healing** | ⚠️ `restart: always` (same host only) | ✅ Cross-node pod rescheduling |
+| **Rolling deployments** | ❌ Brief downtime | ✅ Zero downtime |
+| **Auto-scaling** | ❌ Manual | ✅ HPA by CPU/memory/custom metrics |
+| **Load balancing** | ❌ No built-in | ✅ Every Service load-balances |
+| **Service discovery** | ⚠️ Same network only | ✅ Built-in DNS cluster-wide |
+| **Secrets management** | ⚠️ `.env` files | ✅ Encrypted Secrets resource |
+| **Storage management** | ⚠️ Volume mounts | ✅ PV/PVC with dynamic provisioning |
+| **TLS management** | ❌ Manual | ✅ cert-manager + Let's Encrypt |
+| **Health monitoring** | ❌ No | ✅ Liveness + readiness probes |
+| **RBAC / Access control** | ❌ No | ✅ Fine-grained role-based access |
+| **Learning curve** | ✅ Low | ❌ Steep |
+| **Best for** | Dev + single-server prod | Multi-server production |
+
+---
+
+## Where Does Kubernetes Run?
+
+| Environment | Options | Best For |
+|------------|---------|---------|
+| **Local development** | minikube, kind, k3d, Docker Desktop | Learning and testing |
+| **Managed cloud** | AWS EKS, Google GKE, Azure AKS | Production (someone else manages the control plane) |
+| **Self-hosted lightweight** | K3s (next course!) | VPS production, edge, home lab |
+| **Self-hosted full** | kubeadm, RKE2 | On-premise data centers |
+
+### Cloud Managed Kubernetes Pricing (Rough Estimate)
+
+| Provider | Control Plane Cost | Min Worker Cost | Notes |
+|----------|------------------|-----------------|-------|
+| **AWS EKS** | ~$72/month | ~$30/month (t3.small) | Expensive for small teams |
+| **Google GKE** | Free (Autopilot) | ~$45/month | Free control plane is a big deal |
+| **Azure AKS** | Free | ~$30/month | Free control plane |
+| **K3s on Hetzner** | Included | ~€6/month | Your own VM, full control |
+
+For this course, you can follow along using:
+- `kind` (Kubernetes in Docker) — free, runs on your laptop
+- `minikube` — free, runs on your laptop
+- Any managed cloud cluster (EKS/GKE/AKS free tiers work)
+
+---
+
+## Is Kubernetes Right For You?
+
+Kubernetes is powerful, but it comes with real operational overhead. Consider these honest tradeoffs:
+
+**You probably need Kubernetes if:**
+- You have multiple services that need to scale independently
+- Downtime costs you money or customers
+- You have a team of 3+ engineers and multiple environments (staging, prod)
+- You need to run 10+ services
+
+**You probably DON'T need Kubernetes yet if:**
+- You're a solo developer with a simple app
+- Your traffic is under 1,000 users
+- You can absorb a few minutes of downtime during deployments
+- You're still figuring out product-market fit
+
+Docker Compose → K3s (single VPS Kubernetes) is often the right evolution path before jumping to full managed Kubernetes.
+
+---
+
+## Summary
+
+Kubernetes is the industry-standard container orchestration platform that solves the fundamental limitations of single-server deployments:
+
+- **Self-healing**: crashed pods are automatically replaced, even when entire nodes fail
+- **Zero-downtime rolling updates**: new pods are verified healthy before old ones are removed
+- **Horizontal auto-scaling**: HPA adds/removes pods based on real traffic load
+- **Multi-server scheduling**: workloads are distributed optimally across the cluster
+- **Declarative model**: you describe *what* you want, Kubernetes continuously reconciles *how* to achieve it
+
+In the next lesson, you will dissect the Kubernetes architecture — understanding every component in the Control Plane and Worker Nodes, and how they work together to power this orchestration engine.

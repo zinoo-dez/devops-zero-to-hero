@@ -1,0 +1,379 @@
+---
+title: "Git Best Practices & .gitignore"
+---
+
+# Professional Git Habits
+
+The difference between a junior and senior engineer's Git history isn't just the code — it's the hygiene. Clean commits, comprehensive `.gitignore`, meaningful messages, and disciplined stash usage are habits that make collaboration and debugging dramatically easier.
+
+---
+
+## The `.gitignore` File: What Never to Commit
+
+The `.gitignore` file tells Git which files and directories to completely ignore. Set this up **before** your first commit — it's much harder to remove files from Git history after they've been committed.
+
+### Comprehensive Template for Full-Stack DevOps Projects
+
+```gitignore
+# ================================================================
+# Dependencies — never commit these, always install from lock file
+# ================================================================
+node_modules/
+.pnp/
+.pnp.js
+vendor/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# ================================================================
+# 🚨 CRITICAL: Secrets and credentials — NEVER commit these
+# ================================================================
+.env
+.env.local
+.env.development
+.env.staging
+.env.production
+.env.test
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+*_rsa
+*_ecdsa
+*.ppk
+service-account*.json
+*-credentials.json
+google-services.json
+GoogleService-Info.plist
+kubeconfig
+.kube/
+
+# ================================================================
+# Build outputs — can be regenerated, no need to track
+# ================================================================
+dist/
+build/
+out/
+.next/
+.nuxt/
+.svelte-kit/
+target/          # Java/Rust
+bin/             # Go
+*.class          # Java
+*.jar
+*.war
+*.o              # C/C++
+*.so
+*.exe
+
+# ================================================================
+# Test and coverage output
+# ================================================================
+coverage/
+.nyc_output/
+test-results/
+playwright-report/
+.jest-cache/
+
+# ================================================================
+# Docker — don't track override files with local settings
+# ================================================================
+docker-compose.override.yml
+docker-compose.local.yml
+
+# ================================================================
+# Infrastructure — state files often contain secrets
+# ================================================================
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl    # ← This one IS safe to commit (lock file)
+*.tfvars               # May contain secrets — review carefully
+
+# ================================================================
+# OS and IDE files — irrelevant to other developers
+# ================================================================
+.DS_Store
+.DS_Store?
+Thumbs.db
+desktop.ini
+.vscode/               # Personal editor settings (share via .vscode/*.recommended.json)
+.idea/
+*.swp
+*.swo
+*~
+
+# ================================================================
+# Logs — should be streamed, not stored in repo
+# ================================================================
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+```
+
+### `.gitignore` Debugging
+
+```bash
+# Check if a specific file is being ignored (and why)
+git check-ignore -v node_modules/lodash/
+# .gitignore:1:node_modules/  node_modules/lodash/
+
+# See ALL currently ignored files
+git ls-files --others --ignored --exclude-standard
+
+# Force-add an ignored file (escape the ignore rule)
+git add -f some-file.log   # Only if you really mean it
+
+# The file is already committed — .gitignore won't help now
+# Remove it from tracking (but keep it on disk)
+git rm --cached .env
+git commit -m "chore: remove accidentally committed .env"
+```
+
+---
+
+## Conventional Commits: The Industry Standard
+
+The [Conventional Commits](https://www.conventionalcommits.org) specification creates machine-readable, human-friendly commit history. It powers automatic changelog generation, semantic versioning, and better git log filtering.
+
+### Format
+
+```
+<type>[optional scope]: <description>
+
+[optional body]
+
+[optional footers]
+```
+
+### Complete Type Reference
+
+| Type | Purpose | Triggers SemVer? |
+|------|---------|----------------|
+| `feat` | New feature for users | Minor version bump (`v1.2.0 → v1.3.0`) |
+| `fix` | Bug fix | Patch version bump (`v1.2.0 → v1.2.1`) |
+| `feat!` / `fix!` | Breaking change (! = BREAKING) | Major version bump (`v1.2.0 → v2.0.0`) |
+| `docs` | Documentation only | No |
+| `style` | Formatting (no logic change) | No |
+| `refactor` | Code restructure (no feature/fix) | No |
+| `perf` | Performance improvement | Patch |
+| `test` | Adding or fixing tests | No |
+| `ci` | CI/CD pipeline changes | No |
+| `chore` | Build tools, dependencies | No |
+| `revert` | Reverting a previous commit | Depends |
+
+### Real Examples
+
+```bash
+# Feature
+git commit -m "feat(auth): add Google OAuth2 login"
+
+# Bug fix with scope
+git commit -m "fix(api): handle null userId in payment endpoint"
+
+# Breaking change (two ways to mark it)
+git commit -m "feat!: require email verification before login
+
+BREAKING CHANGE: Users must now verify email before they can log in.
+Existing users with unverified emails will be prompted on next login."
+
+# Docs
+git commit -m "docs(readme): add Kubernetes deployment instructions"
+
+# CI
+git commit -m "ci: add Trivy vulnerability scan to GitHub Actions pipeline"
+
+# Chore
+git commit -m "chore(deps): update express to 4.19.2 (security patch)"
+
+# Performance
+git commit -m "perf(db): add index on users.email to speed up login queries"
+
+# Revert
+git commit -m "revert: feat(auth): add Google OAuth2 login
+
+Reverts commit abc1234.
+Reason: OAuth credentials not yet approved for production."
+```
+
+### Enforce Conventions with Commitlint
+
+```bash
+# Install commitlint
+npm install --save-dev @commitlint/cli @commitlint/config-conventional
+
+# Create config
+echo "module.exports = {extends: ['@commitlint/config-conventional']}" > commitlint.config.js
+
+# Set up husky to check every commit
+npm install --save-dev husky
+npx husky init
+echo "npx --no -- commitlint --edit \$1" > .husky/commit-msg
+
+# Now this will be rejected:
+git commit -m "updated stuff"
+# ✖ subject may not be empty [subject-empty]
+# ✖ type may not be empty [type-empty]
+```
+
+---
+
+## The Atomic Commit Principle
+
+An **atomic commit** makes one logical change that:
+1. Can be described in one sentence
+2. Passes all tests by itself (doesn't break the build)
+3. Can be reverted without affecting unrelated work
+
+```bash
+# ❌ Anti-pattern: mega-commit
+git commit -m "fix bug in checkout, add new user settings page, update dependencies, change navbar color, refactor database queries"
+# This is impossible to review, impossible to revert cleanly
+
+# ✅ Atomic commits
+git commit -m "fix(checkout): prevent double-charge on page refresh"
+git commit -m "feat(settings): add user notification preferences page"
+git commit -m "chore(deps): update to express 4.19.2"
+git commit -m "style(navbar): change background to indigo-900 per design system"
+git commit -m "perf(db): optimize user lookup query with composite index"
+```
+
+---
+
+## `git stash`: Shelving Unfinished Work
+
+The most practical use of stash: you're in the middle of a feature when an urgent bug report comes in.
+
+```bash
+# === The Scenario ===
+# You're working on feature/redesign — lots of uncommitted changes
+# A P1 bug just came in on main — you need to fix it NOW
+
+# Step 1: Stash your current work
+git stash push -m "redesign work — WIP, 60% complete"
+# Saves all modified tracked files (and optionally untracked files)
+
+# Step 2: Switch to main and fix the bug
+git switch main
+git switch -c fix/p1-payment-null-check
+# ... fix the bug ...
+git add .
+git commit -m "fix(payments): handle null response from Stripe API"
+git push -u origin fix/p1-payment-null-check
+# Open a PR, get it merged
+
+# Step 3: Return to feature work
+git switch feature/redesign
+git stash pop
+# Your uncommitted changes are back exactly as you left them
+
+# === Full stash command reference ===
+git stash                    # Stash tracked, modified files
+git stash -u                 # Also stash untracked files
+git stash -a                 # Also stash ignored files
+git stash push -m "name"     # Stash with description
+git stash list               # List all stashes
+git stash show stash@{0}     # Show what's in a stash
+git stash show -p stash@{0}  # Show full diff of a stash
+git stash pop                # Apply most recent + remove from list
+git stash apply stash@{1}    # Apply specific stash (keep in list)
+git stash branch new-branch stash@{0}  # Create branch from stash
+git stash drop stash@{0}     # Delete specific stash
+git stash clear              # Delete ALL stashes
+```
+
+---
+
+## Git Hooks: Automate Quality at Commit Time
+
+Git hooks are scripts that run at specific events in the Git lifecycle — before commits, before pushes, etc:
+
+```bash
+# Hooks live in .git/hooks/ (not committed to repo)
+# Use Husky to make hooks shareable (committed to repo)
+
+npm install --save-dev husky
+npx husky init
+
+# === Pre-commit hook: run linter before every commit ===
+cat > .husky/pre-commit << 'EOF'
+#!/bin/sh
+echo "🔍 Running pre-commit checks..."
+
+# Lint staged files only (much faster than full lint)
+npx lint-staged
+
+# Type check
+npx tsc --noEmit || { echo "❌ TypeScript errors found"; exit 1; }
+
+echo "✅ Pre-commit checks passed"
+EOF
+
+# Configure lint-staged (in package.json)
+# "lint-staged": {
+#   "*.{ts,tsx}": ["eslint --fix", "prettier --write"],
+#   "*.{json,md,yml}": ["prettier --write"]
+# }
+
+# === Commit-msg hook: enforce conventional commits ===
+cat > .husky/commit-msg << 'EOF'
+#!/bin/sh
+npx --no -- commitlint --edit "$1"
+EOF
+
+# === Pre-push hook: run full test suite before push ===
+cat > .husky/pre-push << 'EOF'
+#!/bin/sh
+echo "🧪 Running tests before push..."
+npm run test:unit -- --passWithNoTests || { echo "❌ Tests failed"; exit 1; }
+echo "✅ Tests passed — pushing"
+EOF
+```
+
+---
+
+## Useful Git Commands for Daily Work
+
+```bash
+# === Explore history ===
+git log --oneline --graph --all                    # Visual branch graph
+git log --author="Jane" --since="1 week ago"      # Filter by author/time
+git log --oneline -- src/payments/                 # History of a directory
+git log --oneline -S "calculateTotal"              # Commits touching a function name
+git bisect start HEAD v1.0.0                       # Binary search for bug-introducing commit
+
+# === Navigate ===
+git switch -                   # Switch to previous branch (like cd -)
+git checkout HEAD~3 -- file.ts # Restore a file from 3 commits ago
+
+# === Clean up ===
+git clean -fd                  # Remove untracked files and directories
+git clean -n                   # Dry-run (preview what would be removed)
+git reflog                     # View recent HEAD positions (rescue lost commits)
+
+# === Debug ===
+git blame src/auth/login.ts    # Who wrote each line and when
+git blame -L 20,30 src/auth/login.ts   # Specific line range
+git log -p src/auth/login.ts   # Full diff history of one file
+```
+
+---
+
+## Summary
+
+| Practice | Why It Matters |
+|---------|---------------|
+| **`.gitignore` before first commit** | Prevent secrets, node_modules, build artifacts from entering history |
+| **Conventional Commits** | Machine-readable, enables auto-changelog and semantic versioning |
+| **Atomic commits** | One logical change per commit — reviewable, revertable independently |
+| **`git stash`** | Context-switch cleanly without dirty commits |
+| **Git hooks (Husky)** | Enforce quality at commit time — lint, typecheck, conventional messages |
+
+In the next lesson, you will learn real-world Git workflows: Trunk-Based Development for modern CI/CD teams and Git Flow for release-based software.

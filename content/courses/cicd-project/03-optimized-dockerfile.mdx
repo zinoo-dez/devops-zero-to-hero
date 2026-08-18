@@ -1,0 +1,361 @@
+---
+title: "Writing the Hardened Multi-Stage Dockerfile"
+---
+
+# Why Your Dockerfile Matters in Production
+
+Most tutorials show you a 5-line Dockerfile that works on a laptop. Production requires something different. A production Dockerfile must be:
+
+1. **Small** — Every megabyte increases pull time during rolling updates. Smaller = faster deployments.
+2. **Secure** — No build tools, no package managers, no shell in the final image. Fewer binaries = smaller attack surface.
+3. **Deterministic** — Same source code must always produce the same image. No `apt-get update` surprises.
+4. **Non-root** — If your container is compromised, the attacker gets a restricted user, not root.
+5. **Health-checkable** — Docker and Kubernetes must be able to verify the app is alive.
+
+This lesson covers all five.
+
+---
+
+## Understanding Multi-Stage Builds
+
+A multi-stage Dockerfile uses multiple `FROM` statements. Each stage is a separate build environment. Only the files you explicitly copy from one stage to the next end up in the final image.
+
+```mermaid
+flowchart LR
+    subgraph Stage1["Stage 1: deps (Alpine + Node)"]
+        PKG[package.json\npackage-lock.json]
+        NCI[npm ci --omit=dev]
+        NM[node_modules/\nproduction only]
+        PKG --> NCI --> NM
+    end
+
+    subgraph Stage2["Stage 2: builder (Alpine + Node)"]
+        NM2[node_modules/ from deps]
+        SRC[Source Code\n*.ts, *.tsx, app/]
+        BUILD[npm run build]
+        NEXT[.next/standalone/\nserver.js]
+        NM2 --> BUILD
+        SRC --> BUILD
+        BUILD --> NEXT
+    end
+
+    subgraph Stage3["Stage 3: runner (Alpine + Node, FINAL)"]
+        SA[.next/standalone/\ncopied from builder]
+        STATIC[.next/static/\ncopied from builder]
+        PUB[public/\ncopied from builder]
+        NONROOT["User: nextjs (uid 1001)"]
+        START["CMD: node server.js"]
+    end
+
+    NM -->|COPY --from=deps| NM2
+    NEXT -->|COPY --from=builder| SA
+    NEXT -->|COPY --from=builder| STATIC
+    NEXT -->|COPY --from=builder| PUB
+```
+
+**What gets discarded between stages:**
+- Stage 1 → Stage 2: The Alpine OS, build-time `libc6-compat`, `npm` itself
+- Stage 2 → Stage 3: TypeScript compiler, ESLint, Next.js build cache, all of `node_modules/` except what standalone needs
+
+**Size comparison:**
+| Approach | Image Size |
+|----------|-----------|
+| Single-stage (no optimization) | ~1.4 GB |
+| Multi-stage without standalone | ~600 MB |
+| Multi-stage with `output: standalone` | **~180 MB** |
+
+---
+
+## The Complete Production Dockerfile
+
+```dockerfile
+# =============================================================
+# Stage 1: deps
+# Install ONLY production dependencies in a clean Alpine layer.
+# Result: a node_modules/ with no devDependencies.
+# =============================================================
+FROM node:20-alpine AS deps
+
+# libc6-compat is needed for native Node.js addons on Alpine
+# (required by some npm packages that use N-API bindings)
+RUN apk add --no-cache libc6-compat
+
+WORKDIR /app
+
+# Copy ONLY the dependency manifests first.
+# This enables Docker layer caching: if package.json doesn't change,
+# npm ci is skipped on the next build (saves 30-120 seconds).
+COPY package.json package-lock.json ./
+
+# npm ci: clean install (ignores package-lock conflicts, reproducible)
+# --omit=dev: skip devDependencies (TypeScript, ESLint, Vitest, etc.)
+RUN npm ci --omit=dev && npm cache clean --force
+
+
+# =============================================================
+# Stage 2: builder
+# Compile the TypeScript / Next.js application.
+# =============================================================
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# We need ALL dependencies (including devDeps) to compile TypeScript
+COPY package.json package-lock.json ./
+RUN npm ci && npm cache clean --force
+
+# Copy the application source code
+COPY . .
+
+# Build-time environment variables
+# These are embedded into the compiled output — NOT secrets
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV NODE_ENV=production
+
+# Run the Next.js production build
+# Produces .next/standalone/ (the minimal server bundle)
+RUN npm run build
+
+
+# =============================================================
+# Stage 3: runner
+# The FINAL, minimal image that will run in production.
+# This is the only layer shipped to the container registry.
+# =============================================================
+FROM node:20-alpine AS runner
+
+WORKDIR /app
+
+# Security: Create a system group and user.
+# Using a numeric UID/GID avoids issues with missing /etc/passwd entries.
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 --ingroup nodejs nextjs
+
+# Runtime environment variables
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV PORT=3000
+ENV HOSTNAME="0.0.0.0"
+
+# Copy the standalone bundle from the builder stage.
+# --chown ensures the nextjs user owns these files (needed to write .next/cache)
+COPY --from=builder --chown=nextjs:nodejs /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+# Switch to non-root user BEFORE any further operations
+USER nextjs
+
+# Health check: Kubernetes prefers probes defined in the manifest,
+# but this provides a fallback for docker run and docker compose.
+HEALTHCHECK \
+  --interval=30s \
+  --timeout=10s \
+  --start-period=20s \
+  --retries=3 \
+  CMD wget -qO- http://localhost:3000/api/health || exit 1
+
+EXPOSE 3000
+
+# server.js is the minimal entry point generated by Next.js standalone output.
+# It replaces `next start` and has no external dependencies.
+CMD ["node", "server.js"]
+```
+
+---
+
+## The `.dockerignore` File
+
+Without `.dockerignore`, Docker sends your entire project directory to the build daemon — including `node_modules/` (potentially 500+ MB), `.git/`, and local `.env` files. This slows builds dramatically and can leak secrets.
+
+```plaintext
+# .dockerignore
+
+# Version control
+.git
+.gitignore
+
+# Build artifacts
+.next
+out
+
+# Dependencies (will be reinstalled inside the container)
+node_modules
+
+# Development environment files
+.env
+.env.local
+.env.development
+.env.development.local
+
+# Secrets (CRITICAL — never send to Docker daemon)
+*.pem
+*.key
+*.cert
+
+# Documentation
+README.md
+docs/
+
+# Kubernetes manifests (not needed in the image)
+k8s/
+
+# Editor and OS files
+.idea
+.vscode
+*.swp
+.DS_Store
+
+# Docker files themselves (avoid recursive inclusion)
+Dockerfile
+.dockerignore
+docker-compose*.yml
+```
+
+<Callout type="caution" title="Never Copy .env Files into Docker Images">
+Your `.env.local` contains database credentials. Even if you delete it in a later layer, Docker preserves every layer — the file is still accessible by anyone with image pull access. The `.dockerignore` prevents it from ever entering the build context. Runtime secrets are injected via Kubernetes Secrets (covered in Lesson 7).
+</Callout>
+
+---
+
+## Layer Caching Strategy
+
+Docker caches each layer. A cache miss on any layer invalidates all subsequent layers. Order your `COPY` and `RUN` instructions from **least frequently changing** to **most frequently changing**:
+
+```dockerfile
+# ✅ CORRECT ORDER (cache-friendly)
+COPY package.json package-lock.json ./   # Changes rarely
+RUN npm ci                                # Expensive, but cached when package.json unchanged
+COPY . .                                  # Changes on every commit — but npm ci is already cached
+RUN npm run build
+
+# ❌ WRONG ORDER (cache-busting)
+COPY . .                                  # Changes on every commit
+RUN npm ci                                # Now re-runs npm ci even if package.json didn't change
+RUN npm run build
+```
+
+**Impact:** With the correct order, a code change that doesn't touch `package.json` only re-runs `npm run build` (~30s). With the wrong order, every build re-runs `npm ci` (~120s).
+
+---
+
+## Build and Test the Image Locally
+
+Before pushing to CI, always verify the image builds and runs correctly on your machine:
+
+```bash
+# Build the production image (may take 2-5 minutes on first build)
+docker build -t capstone-app:local .
+
+# Inspect the final image size
+docker images capstone-app:local
+# REPOSITORY     TAG     IMAGE ID       SIZE
+# capstone-app   local   abc123def456   182MB
+
+# Inspect what's in the image (no surprises)
+docker run --rm capstone-app:local ls -la
+docker run --rm capstone-app:local id
+# uid=1001(nextjs) gid=1001(nodejs) groups=1001(nodejs)  ← non-root ✅
+
+# Run the image (connect to your local dev PostgreSQL)
+docker run --rm \
+  -p 3000:3000 \
+  -e DATABASE_URL="postgres://appuser:apppass@host.docker.internal:5432/capstone" \
+  capstone-app:local
+
+# Test the endpoints
+curl http://localhost:3000/api/health
+curl http://localhost:3000/api/items
+```
+
+<Callout type="tip" title="host.docker.internal">
+On Mac and Windows, `host.docker.internal` resolves to the Docker host machine. This lets the container connect to a PostgreSQL instance running on your laptop (outside Docker). On Linux, use `--network=host` or your machine's actual LAN IP instead.
+</Callout>
+
+---
+
+## Security Analysis: What Trivy Will Find (And Not Find)
+
+In Lesson 4, you'll add Trivy to scan this image for CVEs. Let's preview what a clean image looks like:
+
+```bash
+# Install Trivy locally
+brew install trivy
+
+# Scan the image
+trivy image capstone-app:local
+
+# Expected output for a clean build:
+# Total: 0 (UNKNOWN: 0, LOW: 0, MEDIUM: 0, HIGH: 0, CRITICAL: 0)
+```
+
+Why this image scans clean:
+- **Alpine Linux** — minimal base OS, updated frequently, far fewer packages than Ubuntu/Debian
+- **No build tools** — `npm`, TypeScript compiler, ESLint are not in the final image
+- **Pinned Node version** — `node:20-alpine` uses the latest patch of Node 20 LTS
+
+To pin to a specific digest for maximum reproducibility (recommended for regulated environments):
+```dockerfile
+# Instead of: FROM node:20-alpine
+FROM node:20-alpine@sha256:abc123...  # Exact immutable digest
+
+# Get the current digest:
+docker pull node:20-alpine
+docker inspect node:20-alpine | jq '.[0].RepoDigests'
+```
+
+---
+
+## Advanced: Build Args for Multi-Environment Images
+
+Sometimes you need different behavior for staging vs production:
+
+```dockerfile
+# Dockerfile
+ARG NODE_ENV=production
+ARG APP_VERSION=unknown
+
+ENV NODE_ENV=$NODE_ENV
+ENV APP_VERSION=$APP_VERSION
+```
+
+```bash
+# Build for staging
+docker build \
+  --build-arg NODE_ENV=staging \
+  --build-arg APP_VERSION=$(git rev-parse --short HEAD) \
+  -t capstone-app:staging .
+
+# Build for production
+docker build \
+  --build-arg APP_VERSION=$(git rev-parse --short HEAD) \
+  -t capstone-app:prod .
+```
+
+In GitHub Actions (Lesson 5), you'll pass `APP_VERSION` as the Git SHA automatically.
+
+---
+
+## Image Scanning in CI vs Local
+
+| Aspect | Local (`trivy image`) | CI (Lesson 4) |
+|--------|----------------------|---------------|
+| When | After `docker build` | On every PR |
+| Output | Terminal table | GitHub Security tab (SARIF format) |
+| Blocking | Manual decision | Pipeline fails on CRITICAL/HIGH |
+| History | None | Tracked in GitHub Security tab |
+
+---
+
+## Summary
+
+You now have a production-hardened Dockerfile that:
+- Uses three stages (`deps` → `builder` → `runner`) to produce a ~180 MB image
+- Requires `output: 'standalone'` in `next.config.ts` for the minimal server bundle
+- Runs as a non-root user (`nextjs`, uid 1001) to limit container breakout risk
+- Uses Alpine Linux to minimize the OS attack surface
+- Has proper Docker layer caching (dependencies cached separately from source code)
+- Includes a `HEALTHCHECK` instruction for container runtimes that don't configure probes separately
+- Has a `.dockerignore` that prevents `.env` files and `node_modules` from entering the build context
+
+In the next lesson, you will build the GitHub Actions CI pipeline that runs linting, type checking, unit tests, and Trivy scanning automatically on every pull request.

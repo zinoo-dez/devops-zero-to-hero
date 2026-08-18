@@ -1,0 +1,443 @@
+---
+title: "Zero-Downtime Rolling Updates & Rollbacks"
+---
+
+# The Goal: Ship Code Without Dropping a Single Request
+
+The ability to update a running production application without interrupting users is one of Kubernetes' most valuable features. No maintenance windows. No "we'll deploy at 3 AM." No scrambling to restart services manually. Just `kubectl apply` and Kubernetes handles the rest.
+
+This lesson covers the full deployment lifecycle: strategy configuration, triggering updates, monitoring progress, pausing mid-rollout, and rolling back instantly when something goes wrong.
+
+---
+
+## How Rolling Updates Work: A Visual Walkthrough
+
+Given a Deployment with `replicas: 3`, `maxSurge: 1`, `maxUnavailable: 0`:
+
+```mermaid
+sequenceDiagram
+    participant SVC as Service (traffic)
+    participant RS_V1 as ReplicaSet v1 (old)
+    participant RS_V2 as ReplicaSet v2 (new)
+
+    Note over RS_V1: [v1] [v1] [v1] — 3 pods serving traffic
+
+    SVC->>RS_V1: All traffic to v1 pods
+
+    Note over RS_V2: Create 1 new v2 pod (maxSurge=1)
+    RS_V2-->>RS_V2: [v2] starts, readiness probe running...
+
+    Note over RS_V2: readiness probe ✅ — v2 pod is Ready
+    SVC-->>RS_V2: Add v2-pod-1 to endpoints
+    Note over RS_V1: Remove v1-pod-1 (maxUnavailable=0 → must be Ready first)
+    RS_V1-->>RS_V1: v1-pod-1 receives SIGTERM, drains connections
+
+    Note over RS_V2: Create 2nd v2 pod
+    RS_V2-->>RS_V2: readiness probe ✅
+    SVC-->>RS_V2: Add v2-pod-2 to endpoints
+    RS_V1-->>RS_V1: v1-pod-2 SIGTERM + drain
+
+    Note over RS_V2: Create 3rd v2 pod
+    RS_V2-->>RS_V2: readiness probe ✅
+    SVC-->>RS_V2: Add v2-pod-3 to endpoints
+    RS_V1-->>RS_V1: v1-pod-3 SIGTERM + drain
+
+    Note over RS_V1: Scaled to 0 (kept for rollback)
+    Note over RS_V2: [v2] [v2] [v2] — 3 pods serving traffic ✅
+```
+
+At every step, the Service only routes to **Ready** pods. Users never experience a request to an unready or terminating pod.
+
+---
+
+## Step 1: Configure the Strategy
+
+Every production Deployment should explicitly set its update strategy:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-api
+  namespace: production
+  annotations:
+    # Always document the change — appears in `kubectl rollout history`
+    kubernetes.io/change-cause: "v2.0.0: Initial deployment"
+spec:
+  replicas: 3
+
+  strategy:
+    type: RollingUpdate     # Default strategy
+    rollingUpdate:
+      maxSurge: 1           # How many extra pods can exist above `replicas` during update
+                            # Can be a number (1) or percentage ("33%")
+      maxUnavailable: 0     # How many pods can be unavailable during update
+                            # Set to 0 for zero-downtime guarantee
+
+  # Keep 10 old ReplicaSets (for rollback to specific revision)
+  revisionHistoryLimit: 10
+
+  # A pod must be Ready for this long before counting as "available"
+  # Prevents premature "success" signals for slow-warming apps
+  minReadySeconds: 10
+
+  selector:
+    matchLabels:
+      app: my-api
+
+  template:
+    metadata:
+      labels:
+        app: my-api
+    spec:
+      # Give the app 30 seconds to finish in-flight requests after SIGTERM
+      terminationGracePeriodSeconds: 30
+
+      containers:
+        - name: api
+          image: ghcr.io/youruser/my-api:v2.0.0
+          ports:
+            - containerPort: 3000
+
+          resources:
+            requests: { cpu: "100m", memory: "128Mi" }
+            limits: { cpu: "500m", memory: "512Mi" }
+
+          # readinessProbe is the SAFETY NET for rolling updates
+          # Traffic only goes to pods that pass this probe
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            failureThreshold: 12
+            periodSeconds: 5
+```
+
+### Understanding maxSurge and maxUnavailable
+
+```
+replicas: 3, maxSurge: 1, maxUnavailable: 0
+
+At any point during update:
+  Max pods running:     3 + 1 = 4  (replicas + maxSurge)
+  Min pods available:   3 - 0 = 3  (replicas - maxUnavailable)
+  → 3 pods always Ready and serving traffic ✅
+
+replicas: 10, maxSurge: "25%", maxUnavailable: "25%"
+  Max pods running:     10 + 3 = 13  (rounded up)
+  Min pods available:   10 - 3 = 7   (rounded down)
+  → Faster update (3 pods replaced at once) but 3 unavailable at a time
+```
+
+---
+
+## Step 2: Trigger the Rolling Update
+
+### Method A: Declarative (Preferred for GitOps)
+
+Edit `deployment.yaml`, change the image tag, then apply:
+
+```bash
+# Edit deployment.yaml: change image tag from v2.0.0 → v2.1.0
+# Then apply with change-cause annotation
+kubectl apply -f deployment.yaml && \
+  kubectl annotate deployment/my-api \
+    kubernetes.io/change-cause="v2.1.0: Add search endpoint, fix pagination" \
+    -n production --overwrite
+```
+
+### Method B: Imperative (Quick Updates, CI/CD)
+
+```bash
+# Update the image directly (used by CI/CD pipelines)
+kubectl set image deployment/my-api api=ghcr.io/youruser/my-api:v2.1.0 -n production
+
+# Always annotate changes for audit history
+kubectl annotate deployment/my-api \
+  kubernetes.io/change-cause="v2.1.0: Add search endpoint" \
+  -n production --overwrite
+```
+
+### Method C: Force Rolling Restart (Same Image, No Code Change)
+
+Sometimes you need to restart all pods (pick up new ConfigMap env vars, clear in-memory state):
+
+```bash
+# Triggers a rolling restart without changing any spec field
+kubectl rollout restart deployment/my-api -n production
+
+# This works because it adds/updates a "restartedAt" annotation to the pod template
+# causing the Deployment controller to see it as a changed spec → triggers new RS
+```
+
+---
+
+## Step 3: Monitor the Rollout
+
+```bash
+# === Real-time rollout progress ===
+kubectl rollout status deployment/my-api -n production
+# Waiting for deployment "my-api" rollout to finish: 0 of 3 updated replicas are available...
+# Waiting for deployment "my-api" rollout to finish: 1 of 3 updated replicas are available...
+# Waiting for deployment "my-api" rollout to finish: 2 of 3 updated replicas are available...
+# deployment "my-api" successfully rolled out ✅
+
+# === Watch pods being replaced ===
+kubectl get pods -n production -l app=my-api -w
+# NAME               READY   STATUS              RESTARTS   AGE
+# my-api-v1-aaa      1/1     Running             0          5d
+# my-api-v1-bbb      1/1     Running             0          5d
+# my-api-v1-ccc      1/1     Running             0          5d
+#                                          ← Update triggered
+# my-api-v2-xxx      0/1     ContainerCreating   0          2s
+# my-api-v2-xxx      0/1     Running             0          5s   ← starting
+# my-api-v2-xxx      1/1     Running             0          15s  ← readiness ✅
+# my-api-v1-aaa      1/1     Terminating         0          5d   ← old pod dying
+# my-api-v2-yyy      0/1     ContainerCreating   0          1s
+# ... (repeats for each replica)
+
+# === Check deployment status in detail ===
+kubectl describe deployment my-api -n production | grep -A15 "Conditions:"
+# Conditions:
+#   Type           Status  Reason
+#   ----           ------  ------
+#   Available      True    MinimumReplicasAvailable
+#   Progressing    True    ReplicaSetUpdated (during update)
+#   Progressing    True    NewReplicaSetAvailable (after completion)
+
+# === See old and new ReplicaSets ===
+kubectl get rs -n production -l app=my-api
+# NAME              DESIRED   CURRENT   READY   AGE
+# my-api-v2-xxx     3         3         3       5m   ← NEW (active)
+# my-api-v1-yyy     0         0         0       5d   ← OLD (kept for rollback)
+```
+
+---
+
+## Step 4: Rollout History and Rollback
+
+```bash
+# View all revisions (shows change-cause annotation)
+kubectl rollout history deployment/my-api -n production
+# REVISION  CHANGE-CAUSE
+# 1         v2.0.0: Initial deployment
+# 2         v2.0.1: Fix DB connection pooling
+# 3         v2.1.0: Add search endpoint, fix pagination
+
+# Inspect a specific revision's pod spec
+kubectl rollout history deployment/my-api --revision=2 -n production
+# Shows the full pod template for revision 2 (image version, env vars, etc.)
+
+# === ROLLBACK ===
+
+# Option A: Rollback to immediately previous revision
+kubectl rollout undo deployment/my-api -n production
+# deployment.apps/my-api rolled back
+
+# Option B: Rollback to a specific revision
+kubectl rollout undo deployment/my-api --to-revision=2 -n production
+
+# Monitor rollback (same as a forward update — rolling, zero downtime)
+kubectl rollout status deployment/my-api -n production
+
+# Verify we're now running the old image
+kubectl get pods -n production -l app=my-api -o jsonpath='{.items[0].spec.containers[0].image}'
+# ghcr.io/youruser/my-api:v2.0.1  ← rolled back ✅
+```
+
+---
+
+## Step 5: Pause and Resume (Mid-Rollout Canary)
+
+Pause a rollout to manually validate the new version with partial traffic before completing:
+
+```bash
+# Trigger update
+kubectl set image deployment/my-api api=ghcr.io/youruser/my-api:v2.1.0 -n production
+
+# Immediately pause after 1 pod is updated (you now have 1 v2.1 pod + 2 v2.0 pods)
+kubectl rollout pause deployment/my-api -n production
+
+# Now check: 1 of 3 pods is v2.1, serving ~33% of traffic
+kubectl get pods -n production -l app=my-api
+# NAME               READY   STATUS    IMAGE
+# my-api-v2.1-xxx    1/1     Running   my-api:v2.1.0  ← new
+# my-api-v2.0-yyy    1/1     Running   my-api:v2.0.1  ← old
+# my-api-v2.0-zzz    1/1     Running   my-api:v2.0.1  ← old
+
+# Monitor the new pod's error rate for 10-15 minutes
+# kubectl logs my-api-v2.1-xxx -n production -f
+# Check Grafana dashboards for error spikes
+
+# If v2.1.0 looks good → resume
+kubectl rollout resume deployment/my-api -n production
+# Remaining pods updated to v2.1.0
+
+# If v2.1.0 has problems → rollback (even while paused)
+kubectl rollout undo deployment/my-api -n production
+```
+
+---
+
+## The Recreate Strategy (With Downtime)
+
+For applications that cannot run two versions simultaneously (e.g., incompatible database schema changes):
+
+```yaml
+spec:
+  strategy:
+    type: Recreate      # Stop ALL old pods, THEN start new pods
+    # No rollingUpdate section needed
+```
+
+```
+Timeline with Recreate:
+1. All v1 pods terminated (service goes down)
+2. [downtime begins]
+3. All v2 pods start
+4. v2 pods pass readiness
+5. [downtime ends — service restores]
+
+Typical downtime: 10-60 seconds
+Use only when: running DB migrations that MUST run before the new app version
+```
+
+---
+
+## Production Deployment Workflow (CI/CD Integration)
+
+A complete GitHub Actions workflow using `kubectl`:
+
+```yaml
+# .github/workflows/deploy.yml
+name: Deploy to Production
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and push Docker image
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/my-api
+          TAG: ${{ github.sha }}
+        run: |
+          docker build -t $IMAGE:$TAG .
+          echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          docker push $IMAGE:$TAG
+
+      - name: Configure kubectl
+        uses: azure/k8s-set-context@v3
+        with:
+          kubeconfig: ${{ secrets.KUBECONFIG }}
+
+      - name: Deploy to production
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/my-api
+          TAG: ${{ github.sha }}
+        run: |
+          # Update image and annotate
+          kubectl set image deployment/my-api api=$IMAGE:$TAG -n production
+          kubectl annotate deployment/my-api \
+            kubernetes.io/change-cause="$TAG: ${{ github.event.head_commit.message }}" \
+            -n production --overwrite
+
+          # Wait for rollout with timeout
+          kubectl rollout status deployment/my-api -n production --timeout=5m
+
+      - name: Smoke test new version
+        run: |
+          # Hit the health endpoint to verify the new version is serving
+          curl -f https://api.yourdomain.com/health || exit 1
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          kubectl rollout undo deployment/my-api -n production
+          echo "🚨 Deployment failed — rolled back to previous version"
+```
+
+---
+
+## Deployment Checklist Before Going Live
+
+Before triggering a production deployment:
+
+- [ ] **Image tag is immutable** — use a specific SHA or semver tag, never `latest`
+- [ ] **Readiness probe is configured** — without it, rolling updates are unsafe
+- [ ] **`terminationGracePeriodSeconds`** is set to allow in-flight requests to complete
+- [ ] **`minReadySeconds`** is set to catch pods that fail shortly after becoming Ready
+- [ ] **`maxUnavailable: 0`** is set to guarantee zero downtime
+- [ ] **`revisionHistoryLimit`** is set (default 10) — keep rollback history
+- [ ] **`kubernetes.io/change-cause`** is annotated — maintain a human-readable audit trail
+- [ ] **Database migrations are backward-compatible** — old app must work with new schema
+- [ ] **Rollback procedure is documented** — team knows the command to run on failure
+- [ ] **Monitoring dashboards are open** — watch error rates during and after rollout
+
+---
+
+## Troubleshooting Stuck Rollouts
+
+```bash
+# === Rollout hangs at "X of N replicas are available" ===
+
+# Step 1: Find which pods aren't becoming Ready
+kubectl get pods -n production -l app=my-api
+# new pods showing 0/1 or not appearing = problem with new version
+
+# Step 2: Check new pod events
+kubectl describe pod my-api-NEWREPLICA-xxx -n production | tail -20
+# Common causes:
+# - ImagePullBackOff → wrong image tag or missing registry credentials
+# - CrashLoopBackOff → app crashing on startup (check logs)
+# - Readiness probe failing → app started but not healthy (DB connection issues?)
+
+# Step 3: Check logs of the new (failing) pod
+kubectl logs my-api-NEWREPLICA-xxx -n production
+
+# Step 4: If the rollout is taking too long, abort and rollback
+kubectl rollout undo deployment/my-api -n production
+
+# === "Rollout stuck due to deployment quota exceeded" ===
+kubectl describe deployment my-api -n production
+# "Cannot create pod: pods 'my-api-xxx' is forbidden: exceeded quota"
+# Fix: increase ResourceQuota or reduce replicas
+```
+
+---
+
+## Summary: The Complete Deployment Lifecycle
+
+```mermaid
+flowchart LR
+    WRITE["Write code\nPush to git"] --> BUILD["CI builds Docker image\ntagged with git SHA"]
+    BUILD --> APPLY["kubectl set image\nor apply -f deployment.yaml"]
+    APPLY --> WATCH["kubectl rollout status\n(watch progress)"]
+    WATCH --> SMOKE["Smoke test:\ncurl /health"]
+    SMOKE -->|"✅ Pass"| DONE["Deployment complete\nAll pods on new version"]
+    SMOKE -->|"❌ Fail"| ROLLBACK["kubectl rollout undo\nInstant rollback"]
+    ROLLBACK --> INVESTIGATE["Investigate logs\nFix the bug"]
+    INVESTIGATE --> WRITE
+```
+
+Zero-downtime deployments rely on four things working together:
+1. **`maxUnavailable: 0`** — never remove an old pod before a new one is Ready
+2. **Readiness probe** — new pods only receive traffic once they signal Ready
+3. **`terminationGracePeriodSeconds`** — old pods finish in-flight requests before dying
+4. **`minReadySeconds`** — pods must be stable for N seconds before being counted as available
+
+**Congratulations — you have completed the Kubernetes Basics course!**
+
+You now have a deep understanding of every fundamental Kubernetes concept: the architecture, the CLI, Pods, Deployments, Services, ConfigMaps, Secrets, Ingress, Resource Management, Health Probes, Storage, and Rolling Updates. You are ready to build and operate production Kubernetes workloads — and for the next course, running lightweight production clusters with **K3s**.

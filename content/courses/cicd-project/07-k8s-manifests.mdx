@@ -1,0 +1,521 @@
+---
+title: "Writing Production Kubernetes Manifests"
+---
+
+# Kubernetes Manifests: Declaring Your Desired State
+
+Kubernetes is declarative: you tell it *what* you want (a Deployment with 3 replicas of image X), and it figures out *how* to make that happen. The manifests in this lesson are the complete, production-quality configuration for your application.
+
+You'll create six manifest files in a `k8s/` directory at the root of your repository:
+
+```
+k8s/
+├── namespace.yaml      ← Namespace and resource quotas
+├── configmap.yaml      ← Non-secret configuration (NODE_ENV, etc.)
+├── secret.yaml         ← Template only! Real values set by CI/CD
+├── deployment.yaml     ← Application Pods with probes and resource limits
+├── service.yaml        ← Internal cluster networking
+└── ingress.yaml        ← External traffic routing with TLS
+```
+
+---
+
+## Manifest 1: Namespace with Resource Quotas
+
+```yaml
+# k8s/namespace.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: production
+  labels:
+    environment: production
+    managed-by: github-actions
+
+---
+# ResourceQuota: Hard limits on what all pods in this namespace can consume.
+# This prevents a runaway deployment from consuming all server resources.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: production-quota
+  namespace: production
+spec:
+  hard:
+    # Compute limits
+    requests.cpu: "4"          # Total CPU requests allowed (4 cores)
+    requests.memory: 4Gi       # Total memory requests allowed
+    limits.cpu: "8"            # Total CPU limits allowed
+    limits.memory: 8Gi         # Total memory limits allowed
+
+    # Object count limits
+    pods: "20"                 # Maximum 20 pods in this namespace
+    services: "10"
+    persistentvolumeclaims: "5"
+
+---
+# LimitRange: Default resource limits applied to pods that don't specify their own.
+# Prevents pods with no resource definitions from consuming unlimited resources.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: production-limit-range
+  namespace: production
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: "500m"             # Default limit: 0.5 CPU cores
+        memory: "512Mi"         # Default limit: 512 MB
+      defaultRequest:
+        cpu: "100m"             # Default request: 0.1 CPU cores
+        memory: "128Mi"         # Default request: 128 MB
+      max:
+        cpu: "2"                # No single container may use > 2 cores
+        memory: "2Gi"           # No single container may use > 2 GB
+```
+
+---
+
+## Manifest 2: ConfigMap
+
+A ConfigMap stores non-sensitive configuration. The values here are safe to commit to Git.
+
+```yaml
+# k8s/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: production
+  labels:
+    app: capstone-app
+data:
+  # Application configuration
+  NODE_ENV: "production"
+  PORT: "3000"
+  HOSTNAME: "0.0.0.0"
+  NEXT_TELEMETRY_DISABLED: "1"
+
+  # Database pool configuration (non-secret settings)
+  DB_MAX_CONNECTIONS: "5"
+  DB_IDLE_TIMEOUT_MS: "30000"
+
+  # Application feature flags
+  ENABLE_METRICS: "true"
+  LOG_LEVEL: "info"
+```
+
+---
+
+## Manifest 3: Secret Template
+
+<Callout type="caution" title="Never Commit Real Secrets to Git">
+The `secret.yaml` file in your repository should only contain **placeholder values**. The real values (DATABASE_URL with real credentials) are set by the CD pipeline using `kubectl create secret` with actual GitHub Secrets. If you commit real credentials, rotate them immediately and consider your system compromised.
+</Callout>
+
+```yaml
+# k8s/secret.yaml — TEMPLATE ONLY, placeholder values
+# The CD workflow creates the real secret via:
+# kubectl create secret generic app-secret \
+#   --from-literal=DATABASE_URL="$DATABASE_URL" \
+#   --namespace production \
+#   --dry-run=client -o yaml | kubectl apply -f -
+apiVersion: v1
+kind: Secret
+metadata:
+  name: app-secret
+  namespace: production
+  labels:
+    app: capstone-app
+type: Opaque
+stringData:
+  # DO NOT PUT REAL VALUES HERE
+  # These are overwritten by the CD pipeline
+  DATABASE_URL: "PLACEHOLDER_SET_BY_CD_PIPELINE"
+```
+
+---
+
+## Manifest 4: Deployment
+
+This is the most important manifest. It defines exactly how your application runs in production.
+
+```yaml
+# k8s/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: capstone-app
+  namespace: production
+  labels:
+    app: capstone-app
+    version: "1"              # Updated to the Git SHA by the CD pipeline
+  annotations:
+    # Deployment description (shows in kubectl describe)
+    kubernetes.io/change-cause: "Initial deployment"
+    # Prometheus scraping annotations (used in Lesson 10)
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "3000"
+    prometheus.io/path: "/api/metrics"
+spec:
+  # Run 3 replicas for high availability and zero-downtime rolling updates
+  replicas: 3
+
+  # Label selector: which Pods does this Deployment manage?
+  selector:
+    matchLabels:
+      app: capstone-app
+
+  # Rolling update strategy: replace pods gradually, never have 0 available
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1        # Allow 1 extra pod above desired count during update
+      maxUnavailable: 0  # Never terminate a pod before its replacement is ready
+
+  # Minimum seconds a new pod must be Running before it's considered "available"
+  # Prevents premature rollout completion when a pod crashes immediately after start
+  minReadySeconds: 10
+
+  # If a rollout doesn't succeed in 10 minutes, mark it as Failed
+  progressDeadlineSeconds: 600
+
+  template:
+    metadata:
+      labels:
+        app: capstone-app
+      annotations:
+        # Restart pods when the ConfigMap changes (even if the Deployment spec didn't)
+        # This is a hash of the configmap — update it to trigger a restart
+        configmap-hash: "PLACEHOLDER"  # Updated by CD pipeline
+    spec:
+      # Spread pods across different nodes (if multiple nodes are available)
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: capstone-app
+
+      # Termination grace period: give pods 60 seconds to finish in-flight requests
+      terminationGracePeriodSeconds: 60
+
+      containers:
+        - name: app
+          # IMPORTANT: This tag is updated to sha-XXXXXXX by the CD pipeline
+          image: ghcr.io/YOUR_GITHUB_USERNAME/capstone-app:sha-PLACEHOLDER
+          imagePullPolicy: Always   # Always pull to ensure latest tagged image
+
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+
+          # ── Environment Variables ──────────────────────────────────────
+          # Load non-secret config from ConfigMap
+          envFrom:
+            - configMapRef:
+                name: app-config
+
+          # Load secret values individually (more explicit than envFrom for secrets)
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: app-secret
+                  key: DATABASE_URL
+
+          # ── Resource Limits and Requests ───────────────────────────────
+          resources:
+            requests:
+              # Guaranteed minimum resources allocated to this container
+              cpu: "100m"       # 100 millicores = 0.1 CPU cores
+              memory: "256Mi"   # 256 MB
+            limits:
+              # Maximum resources this container may use
+              cpu: "500m"       # 500 millicores = 0.5 CPU cores
+              memory: "512Mi"   # 512 MB
+              # OOMKilled: if the container exceeds memory limit, K8s kills it
+
+          # ── Health Probes ──────────────────────────────────────────────
+          # Startup probe: Kubernetes won't start liveness/readiness checks
+          # until the startup probe succeeds. Gives the app time to initialize.
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            failureThreshold: 12   # 12 × 10s = 120s max startup time
+            periodSeconds: 10
+            timeoutSeconds: 5
+
+          # Readiness probe: Is this pod ready to receive traffic?
+          # If readiness fails, pod is removed from Service endpoints (no traffic)
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3   # 3 consecutive failures → pod removed from Service
+            successThreshold: 1   # 1 success → pod added back to Service
+
+          # Liveness probe: Is this pod still alive?
+          # If liveness fails, K8s kills and restarts the pod (CrashLoopBackOff)
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3   # 3 consecutive failures → pod restarted
+            successThreshold: 1
+
+          # ── Security Context ───────────────────────────────────────────
+          securityContext:
+            runAsNonRoot: true            # Enforce non-root (matches Dockerfile USER)
+            runAsUser: 1001               # uid=1001 (nextjs user from Dockerfile)
+            runAsGroup: 1001              # gid=1001 (nodejs group from Dockerfile)
+            readOnlyRootFilesystem: true  # Prevent writes to container filesystem
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]              # Drop all Linux capabilities
+
+          # ── Volume Mounts for writable directories ─────────────────────
+          # With readOnlyRootFilesystem: true, we need writable tmpfs for:
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp           # Required by many Node.js libraries
+            - name: nextjs-cache
+              mountPath: /app/.next/cache  # Next.js cache directory
+
+      # ── Volumes ─────────────────────────────────────────────────────────
+      volumes:
+        - name: tmp
+          emptyDir:
+            medium: Memory      # Backed by RAM (faster, more secure than disk)
+            sizeLimit: 100Mi    # Limit tmpfs size
+        - name: nextjs-cache
+          emptyDir:
+            sizeLimit: 500Mi    # Next.js ISR cache can grow large
+```
+
+---
+
+## Manifest 5: Service
+
+```yaml
+# k8s/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: capstone-app-service
+  namespace: production
+  labels:
+    app: capstone-app
+spec:
+  # ClusterIP: The service gets a stable virtual IP inside the cluster.
+  # Pods and Ingress use this IP. It never changes, even as pods restart.
+  type: ClusterIP
+
+  selector:
+    app: capstone-app   # Selects all pods with this label
+
+  ports:
+    - name: http
+      port: 80          # Port that other services/ingress use to reach this service
+      targetPort: 3000  # Port that the container actually listens on
+      protocol: TCP
+```
+
+---
+
+## Manifest 6: Ingress
+
+```yaml
+# k8s/ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: capstone-app-ingress
+  namespace: production
+  annotations:
+    # Use Traefik as the ingress controller
+    kubernetes.io/ingress.class: "traefik"
+
+    # cert-manager: automatically issue a Let's Encrypt certificate
+    # Use 'letsencrypt-staging' first, switch to 'letsencrypt-prod' when working
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+
+    # Traefik middleware: redirect HTTP to HTTPS
+    traefik.ingress.kubernetes.io/router.middlewares: "production-redirect-https@kubernetescrd"
+
+    # Security headers
+    traefik.ingress.kubernetes.io/router.entrypoints: "websecure"
+
+spec:
+  tls:
+    - hosts:
+        - app.yourdomain.com   # ← Replace with your actual domain
+      secretName: capstone-app-tls  # cert-manager creates this Secret
+
+  rules:
+    - host: app.yourdomain.com   # ← Replace with your actual domain
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: capstone-app-service
+                port:
+                  number: 80
+
+---
+# HTTPS redirect middleware
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: redirect-https
+  namespace: production
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: true   # 301 redirect (permanent, browsers cache it)
+```
+
+---
+
+## Applying All Manifests
+
+```bash
+# From your local machine (with kubectl configured to your K3s cluster):
+
+# Apply in the right order: namespace first, then dependencies
+kubectl apply -f k8s/namespace.yaml
+kubectl apply -f k8s/configmap.yaml
+
+# For the secret: inject the real value from your local environment
+# (The CD pipeline does this in Lesson 8, but for initial setup do it manually)
+kubectl create secret generic app-secret \
+  --from-literal=DATABASE_URL="postgres://appuser:REAL_PASSWORD@YOUR_DB_HOST:5432/capstone" \
+  --namespace production \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl apply -f k8s/deployment.yaml
+kubectl apply -f k8s/service.yaml
+kubectl apply -f k8s/ingress.yaml
+
+# Watch the rollout
+kubectl -n production rollout status deployment/capstone-app
+# Waiting for deployment "capstone-app" rollout to finish: 0 of 3 updated replicas are available...
+# deployment "capstone-app" successfully rolled out
+```
+
+---
+
+## Verifying the Deployment
+
+```bash
+# Are all pods Running?
+kubectl -n production get pods
+# NAME                           READY   STATUS    RESTARTS   AGE
+# capstone-app-xxx-aaa           1/1     Running   0          2m
+# capstone-app-xxx-bbb           1/1     Running   0          2m
+# capstone-app-xxx-ccc           1/1     Running   0          2m
+
+# Check detailed pod status (look at Events section if pods aren't starting)
+kubectl -n production describe pod capstone-app-xxx-aaa
+
+# Check the health of each probe
+kubectl -n production describe pod capstone-app-xxx-aaa | grep -A 15 Liveness
+
+# Check logs
+kubectl -n production logs -l app=capstone-app --tail=50
+
+# Check the Service has endpoints
+kubectl -n production get endpoints capstone-app-service
+# NAME                   ENDPOINTS                                         AGE
+# capstone-app-service   10.42.0.5:3000,10.42.0.6:3000,10.42.0.7:3000   2m
+
+# Is the TLS certificate issued?
+kubectl -n production get certificate
+# NAME               READY   SECRET              AGE
+# capstone-app-tls   True    capstone-app-tls    2m
+
+# Port-forward to test without a domain
+kubectl -n production port-forward svc/capstone-app-service 8080:80
+# Then in another terminal:
+curl http://localhost:8080/api/health
+```
+
+---
+
+## Understanding Probe Configuration
+
+```mermaid
+sequenceDiagram
+    participant K8S as Kubernetes
+    participant POD as New Pod
+
+    K8S->>POD: Pod created, container starts
+    K8S->>K8S: startupProbe begins (every 10s, max 120s)
+    POD-->>K8S: HTTP 200 /api/health (startup success!)
+    K8S->>K8S: Start readinessProbe + livenessProbe
+
+    loop Every 10 seconds
+        K8S->>POD: GET /api/health (readiness)
+        POD-->>K8S: 200 OK → Pod in Service endpoints ✅
+    end
+
+    loop Every 30 seconds
+        K8S->>POD: GET /api/health (liveness)
+        POD-->>K8S: 200 OK → Pod alive ✅
+    end
+
+    Note over K8S,POD: If liveness returns non-200 3 times:
+    K8S->>POD: SIGTERM (graceful shutdown)
+    K8S->>POD: SIGKILL after terminationGracePeriodSeconds
+    K8S->>K8S: Start new replacement pod
+```
+
+---
+
+## Understanding Resource Requests vs Limits
+
+```mermaid
+graph LR
+    subgraph node["VPS Node (4 GB RAM)"]
+        subgraph pod1["Pod 1: requests 256Mi"]
+            C1["Container\nactual: 300Mi"]
+        end
+        subgraph pod2["Pod 2: requests 256Mi"]
+            C2["Container\nactual: 450Mi"]
+        end
+        subgraph pod3["Pod 3: requests 256Mi"]
+            C3["Container\nactual: 512Mi ← LIMIT HIT"]
+        end
+    end
+```
+
+- **Request**: The minimum guaranteed resources. Kubernetes uses this for scheduling decisions.
+- **Limit**: The maximum allowed. If exceeded, CPU is throttled. Memory causes OOMKill.
+- **Never set limits without requests** — it causes unpredictable throttling.
+- **Start conservative** — you can increase limits based on real production metrics.
+
+---
+
+## Summary
+
+You now have a complete set of production Kubernetes manifests:
+- **Namespace** with ResourceQuota and LimitRange to protect the server from runaway pods
+- **ConfigMap** for non-secret configuration (committed to Git)
+- **Secret template** — real values injected by CD pipeline, never committed to Git
+- **Deployment** with 3 replicas, rolling update strategy, startup/readiness/liveness probes, resource limits, and read-only filesystem
+- **Service** providing a stable ClusterIP for the Ingress
+- **Ingress** routing external HTTPS traffic to the Service via Traefik, with cert-manager TLS
+
+In the next lesson, you will automate applying these manifests — and updating the Deployment image — through the GitHub Actions CD pipeline.

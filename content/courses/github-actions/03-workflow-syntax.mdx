@@ -1,0 +1,391 @@
+---
+title: "Workflow YAML Syntax: Complete Reference"
+---
+
+# The Complete Workflow Anatomy
+
+A GitHub Actions workflow file is YAML — whitespace-sensitive, indentation-critical (spaces, never tabs). Let's cover every major keyword from top-level structure down to step-level options.
+
+---
+
+## Top-Level Structure
+
+```yaml
+name: CI Pipeline                     # [Required] Workflow name in Actions UI
+run-name: CI for ${{ github.actor }}  # [Optional] Dynamic run name per execution
+
+on: { ... }                           # [Required] Triggers — when this runs
+
+env:                                  # [Optional] Workflow-level environment variables
+  NODE_ENV: production
+
+defaults:                             # [Optional] Default settings for all run steps
+  run:
+    shell: bash
+    working-directory: ./src
+
+concurrency:                          # [Optional] Prevent parallel runs
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:                          # [Optional] Restrict GITHUB_TOKEN scope
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:                                 # [Required] The actual work
+  job-name:
+    ...
+```
+
+---
+
+## `on`: All Trigger Types
+
+### Push and Pull Request
+
+```yaml
+on:
+  push:
+    branches:
+      - main
+      - 'release/**'    # Glob pattern: any branch starting with "release/"
+    branches-ignore:
+      - 'dependabot/**' # Don't run CI on Dependabot branches
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'  # Regex-like: v1.2.3 format
+    paths:
+      - 'src/**'         # Only trigger if these paths changed
+      - 'package.json'
+    paths-ignore:
+      - 'docs/**'        # Skip if ONLY docs changed (save CI minutes)
+      - '**.md'
+
+  pull_request:
+    types: [opened, synchronize, reopened]  # Default: all three
+    branches: [main]
+```
+
+### Schedule (Cron)
+
+```yaml
+on:
+  schedule:
+    # Nightly security scan at 2:30 AM UTC
+    - cron: '30 2 * * *'
+    # Every Monday morning at 9 AM UTC (e.g., weekly dependency audit)
+    - cron: '0 9 * * 1'
+    # Every 6 hours
+    - cron: '0 */6 * * *'
+```
+
+**Cron format**: `minute hour day-of-month month day-of-week`
+
+```
+0 2 * * *      → 2:00 AM every day
+30 9 * * 1     → 9:30 AM every Monday
+0 0 1 * *      → Midnight on the 1st of every month
+*/5 * * * *    → Every 5 minutes (be careful — expensive!)
+```
+
+### Manual Trigger with Inputs
+
+```yaml
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options: [development, staging, production]
+        default: staging
+      
+      image-tag:
+        description: 'Docker image tag to deploy'
+        required: true
+        type: string
+      
+      dry-run:
+        description: 'Dry run — simulate without making changes'
+        type: boolean
+        default: false
+```
+
+```yaml
+# Use the inputs in steps
+steps:
+  - name: Deploy to ${{ inputs.environment }}
+    if: ${{ !inputs.dry-run }}
+    run: ./deploy.sh ${{ inputs.image-tag }} ${{ inputs.environment }}
+```
+
+### Other Useful Triggers
+
+```yaml
+on:
+  workflow_call:            # This workflow can be called by another workflow
+  release:
+    types: [published]      # Triggered when a GitHub Release is published
+  issues:
+    types: [opened]         # Triggered when a new issue is opened
+  issue_comment:
+    types: [created]        # /deploy comment on a PR triggers deployment
+  workflow_run:
+    workflows: ["CI"]       # Run AFTER another workflow completes
+    types: [completed]
+```
+
+---
+
+## `jobs`: Structure and Options
+
+```yaml
+jobs:
+  my-job:
+    # Required: which runner to use
+    runs-on: ubuntu-latest
+
+    # Optional: display name in the UI
+    name: "🧪 Run Unit Tests"
+
+    # Optional: prevent runaway jobs
+    timeout-minutes: 30
+
+    # Optional: run only if this condition is true
+    if: github.ref == 'refs/heads/main'
+
+    # Optional: depend on other jobs (ensures sequential execution)
+    needs: [lint, security-scan]
+
+    # Optional: environment (enables protection rules and secrets)
+    environment:
+      name: production
+      url: https://yourapp.com
+
+    # Optional: override GitHub token permissions for this job
+    permissions:
+      contents: read
+      packages: write
+
+    # Optional: Matrix strategy (run job N times with different variables)
+    strategy:
+      matrix:
+        node-version: [18, 20, 22]
+        os: [ubuntu-latest, windows-latest]
+      fail-fast: false    # Don't cancel other matrix jobs if one fails
+
+    # Optional: outputs to pass to downstream jobs
+    outputs:
+      image-digest: ${{ steps.build.outputs.digest }}
+
+    steps: [...]
+```
+
+---
+
+## `steps`: All Step Options
+
+```yaml
+steps:
+  - name: My step name                    # Required: human-readable label
+
+    # Option A: use a pre-built action
+    uses: actions/checkout@v4
+    with:                                  # Action-specific inputs
+      fetch-depth: 0                       # Full git history
+      ref: ${{ github.head_ref }}
+
+    # Option B: run shell commands
+    run: |
+      echo "Hello from ${{ github.actor }}"
+      npm ci
+
+    # Per-step environment variables
+    env:
+      NODE_ENV: test
+      DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
+
+    # Continue even if this step fails
+    continue-on-error: true
+
+    # Only run this step if a condition is met
+    if: ${{ success() && github.ref == 'refs/heads/main' }}
+
+    # Give this step an ID to reference its outputs
+    id: build
+
+    # Change the working directory just for this step
+    working-directory: ./packages/api
+
+    # Change the shell (default: bash on Linux/macOS, pwsh on Windows)
+    shell: python3 {0}    # Run with Python!
+```
+
+---
+
+## Matrix Builds: Test Against Multiple Versions
+
+Matrix builds run your job multiple times with different variable values — perfect for testing cross-compatibility:
+
+```yaml
+jobs:
+  test:
+    strategy:
+      matrix:
+        # All combinations are tested: 3 node versions × 2 OSes = 6 jobs
+        node-version: [18, 20, 22]
+        os: [ubuntu-latest, windows-latest]
+        
+        # Include additional entries (not all combinations)
+        include:
+          - node-version: 20
+            os: macos-latest
+            experimental: true   # Custom variable
+        
+        # Exclude specific combinations
+        exclude:
+          - node-version: 18
+            os: windows-latest   # Skip Node 18 on Windows
+
+      fail-fast: false           # All jobs run even if some fail
+
+    runs-on: ${{ matrix.os }}    # Use the matrix value
+    name: Node ${{ matrix.node-version }} on ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}    # Use matrix value
+      - run: npm ci
+      - run: npm test
+        continue-on-error: ${{ matrix.experimental == true }}
+```
+
+---
+
+## Expressions and Context
+
+GitHub Actions has a powerful expression syntax: `${{ expression }}`
+
+### Commonly Used Contexts
+
+```yaml
+# github context — metadata about the workflow run
+${{ github.sha }}              # Full commit SHA
+${{ github.sha }}              # Short: github.sha | head -c 7
+${{ github.ref }}              # refs/heads/main or refs/tags/v1.0.0
+${{ github.ref_name }}         # main or v1.0.0 (short name)
+${{ github.actor }}            # Username who triggered the run
+${{ github.repository }}       # owner/repo
+${{ github.event_name }}       # push, pull_request, schedule, etc.
+${{ github.run_number }}       # Sequential run number (1, 2, 3...)
+${{ github.run_id }}           # Unique ID for this run
+${{ github.workflow }}         # Workflow name
+${{ github.head_ref }}         # Source branch (on pull_request)
+${{ github.base_ref }}         # Target branch (on pull_request)
+${{ github.event.pull_request.number }}  # PR number
+
+# env context — environment variables
+${{ env.MY_VAR }}
+
+# secrets context — encrypted secrets
+${{ secrets.MY_SECRET }}
+${{ secrets.GITHUB_TOKEN }}    # Automatically provided
+
+# steps context — outputs from previous steps
+${{ steps.my-step-id.outputs.result }}
+${{ steps.my-step-id.outcome }}    # success, failure, cancelled, skipped
+
+# jobs context — for reusable workflows
+${{ jobs.build.outputs.image-digest }}
+```
+
+### Conditional Expressions
+
+```yaml
+# Functions
+if: ${{ success() }}            # Previous steps all succeeded
+if: ${{ failure() }}            # Previous step(s) failed
+if: ${{ cancelled() }}          # Workflow was cancelled
+if: ${{ always() }}             # Always run (even on failure)
+
+# Conditions
+if: github.ref == 'refs/heads/main'           # Only on main branch
+if: github.event_name == 'push'               # Only on push events
+if: contains(github.ref, 'refs/tags/')        # Only on tag pushes
+if: startsWith(github.ref, 'refs/tags/v')     # Only on version tags
+
+# Combining conditions
+if: |
+  github.ref == 'refs/heads/main' &&
+  github.event_name == 'push'
+
+# Ternary-style
+run: echo "Branch is ${{ github.ref_name == 'main' && 'MAIN' || 'not main' }}"
+```
+
+---
+
+## Setting Outputs Between Steps and Jobs
+
+```yaml
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      # Declare what this job will output
+      image-tag: ${{ steps.meta.outputs.version }}
+    
+    steps:
+      - name: Generate metadata
+        id: meta         # Give this step an ID
+        run: |
+          VERSION=$(git describe --tags --always)
+          # Set output using environment file (modern syntax)
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "date=$(date -u +%Y%m%d)" >> $GITHUB_OUTPUT
+
+      - name: Use the output in the same job
+        run: echo "Building version ${{ steps.meta.outputs.version }}"
+
+  deploy:
+    needs: build         # Declare dependency
+    runs-on: ubuntu-latest
+    steps:
+      - name: Use output from another job
+        run: |
+          echo "Deploying ${{ needs.build.outputs.image-tag }}"
+```
+
+---
+
+## `concurrency`: Prevent Parallel Runs
+
+```yaml
+# Global: only one run per branch at a time
+# New push cancels the in-progress run on the same branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Don't cancel production deployments (dangerous mid-deploy)
+concurrency:
+  group: ${{ github.workflow }}-production
+  cancel-in-progress: false   # Queue instead of cancel
+```
+
+---
+
+## Summary
+
+Key workflow syntax elements:
+- **`on`**: push/PR with branch/path filters; schedule with cron; `workflow_dispatch` with inputs
+- **`jobs`**: parallel by default; use `needs:` to sequence; `strategy.matrix` for combinations
+- **`steps`**: `uses:` for actions; `run:` for shell; `id:` to expose outputs; `if:` for conditions
+- **`${{ }}`**: expression syntax — access `github.sha`, `secrets.X`, `steps.id.outputs.Y`
+- **`concurrency`**: prevents parallel deploys; `cancel-in-progress: true` for fast feedback
+- **`outputs`**: pass data between steps (via `$GITHUB_OUTPUT`) and between jobs (via `needs.job.outputs`)
+
+In the next lesson, you will master all trigger types and event filters in depth — including path filters that save CI minutes and PR-specific events.

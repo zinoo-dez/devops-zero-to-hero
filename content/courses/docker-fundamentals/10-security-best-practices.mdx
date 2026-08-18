@@ -1,0 +1,404 @@
+---
+title: "Non-Root Users, Scanning & Container Hardening"
+---
+
+# Container Security: Defense in Depth
+
+A container is not a security boundary by itself. If a vulnerability in your application allows code execution inside the container, the quality of your container configuration determines how much damage an attacker can do. This lesson covers a systematic set of hardening practices that every production container should implement.
+
+```mermaid
+flowchart TD
+    subgraph LAYERS["Defense-in-Depth Layers"]
+        L1["Layer 1: Minimal base image\n(distroless / alpine — no shell, no curl)"]
+        L2["Layer 2: Non-root USER\n(attackers get limited privileges)"]
+        L3["Layer 3: Read-only root filesystem\n(can't write malware to disk)"]
+        L4["Layer 4: No privileged mode\n(can't escape to host kernel)"]
+        L5["Layer 5: Dropped capabilities\n(can't bind port 80, etc.)"]
+        L6["Layer 6: Vulnerability scanning\n(Trivy — catch CVEs before deploy)"]
+        L7["Layer 7: Secret scanning\n(no API keys in image layers)"]
+        L1 --> L2 --> L3 --> L4 --> L5 --> L6 --> L7
+    end
+```
+
+---
+
+## Hardening 1: Never Run as Root
+
+By default, the process inside a Docker container runs as `root` (UID 0). If an attacker exploits a vulnerability in your app, they have root inside the container — making container escape attacks against the Linux kernel much more likely to succeed.
+
+### Adding a Non-Root User
+
+```dockerfile
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Create a system group and user (before COPY or anything else)
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+# -S = system user (no login shell, no home directory)
+# appuser UID is typically 100-499
+
+COPY package*.json ./
+RUN npm ci --only=production
+
+COPY . .
+
+# Transfer ownership of the app directory to the new user
+RUN chown -R appuser:appgroup /app
+
+# Switch to non-root user for all subsequent commands and at runtime
+USER appuser
+
+EXPOSE 3000
+CMD ["node", "server.js"]
+```
+
+```bash
+# Verify the container is not running as root
+docker run --rm my-api whoami
+# appuser  ✅
+
+docker run --rm my-api id
+# uid=101(appuser) gid=101(appgroup) groups=101(appgroup)
+```
+
+### Using Numeric UIDs (for distroless/scratch images)
+
+```dockerfile
+# distroless images don't have adduser — use numeric UID
+FROM gcr.io/distroless/nodejs20-debian12
+
+WORKDIR /app
+COPY --chown=65532:65532 . .
+
+USER 65532:65532    # 65532 = the 'nonroot' user in distroless
+
+EXPOSE 3000
+CMD ["server.js"]
+```
+
+---
+
+## Hardening 2: Read-Only Root Filesystem
+
+If your container's filesystem is read-only, an attacker who achieves code execution cannot write malware, modify configuration files, or install attack tools:
+
+```bash
+# Run container with read-only root filesystem
+docker run -d \
+  --read-only \               # Root filesystem is read-only
+  --tmpfs /tmp \              # Allow writes to /tmp (RAM-backed, not disk)
+  --tmpfs /run \              # /run dir for PID files
+  --tmpfs /var/cache/nginx \  # Nginx needs to write cache
+  my-api
+
+# Test: attacker can't write to filesystem
+docker exec my-api touch /bin/evil-tool
+# touch: /bin/evil-tool: Read-only file system  ✅ Blocked!
+```
+
+In `docker-compose.yml`:
+```yaml
+services:
+  api:
+    read_only: true
+    tmpfs:
+      - /tmp:size=100m
+      - /run:size=10m
+```
+
+---
+
+## Hardening 3: Drop Linux Capabilities
+
+Linux capabilities break down root's privileges into individual units. By default, Docker grants containers a set of ~14 capabilities. Drop all and only add back what you need:
+
+```bash
+# Run with all capabilities dropped, then add only what's needed
+docker run -d \
+  --cap-drop ALL \              # Drop every capability
+  --cap-add NET_BIND_SERVICE \  # Allow binding to ports < 1024 (if needed)
+  my-api
+
+# For a database like Postgres:
+docker run -d \
+  --cap-drop ALL \
+  --cap-add CHOWN \          # Change file ownership during startup
+  --cap-add SETUID \         # Switch to postgres user
+  --cap-add SETGID \
+  --cap-add DAC_OVERRIDE \   # Read/write postgres data files
+  postgres:16-alpine
+```
+
+Common capabilities and their risks:
+| Capability | Risk | Required by |
+|-----------|------|-------------|
+| `SYS_ADMIN` | Can mount filesystems, change namespaces | ❌ Avoid in production |
+| `NET_ADMIN` | Can modify network interfaces | Only network tools |
+| `SYS_PTRACE` | Can trace/debug other processes | Debuggers only |
+| `NET_BIND_SERVICE` | Bind ports < 1024 | Web servers on port 80 |
+| `CHOWN` | Change file ownership | Databases, some app init |
+
+```yaml
+# docker-compose.yml
+services:
+  api:
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE  # Only if binding port 80
+```
+
+---
+
+## Hardening 4: Vulnerability Scanning with Trivy
+
+[Trivy](https://github.com/aquasecurity/trivy) is the industry-standard open-source container vulnerability scanner. It checks your image against a database of CVEs (Common Vulnerabilities and Exposures) across OS packages, language packages (npm, pip, Maven), and misconfigurations.
+
+```bash
+# Install Trivy
+brew install trivy                  # macOS
+# Or via Docker (no install needed):
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+  aquasec/trivy image my-api:latest
+
+# Scan your image
+trivy image my-api:latest
+
+# Output (example):
+# my-api (alpine 3.19.1)
+# ========================
+# Total: 0 (UNKNOWN: 0, LOW: 0, MEDIUM: 0, HIGH: 0, CRITICAL: 0) ✅
+# 
+# Node.js (node-pkg)
+# ==================
+# ┌───────────┬────────────────┬──────────┬────────┬───────────┐
+# │ Library   │ Vulnerability  │ Severity │ Status │ Fixed     │
+# ├───────────┼────────────────┼──────────┼────────┼───────────┤
+# │ lodash    │ CVE-2021-23337 │ HIGH     │ fixed  │ 4.17.21   │
+# └───────────┴────────────────┴──────────┴────────┴───────────┘
+
+# Fail CI if HIGH or CRITICAL vulnerabilities found
+trivy image --exit-code 1 --severity HIGH,CRITICAL my-api:latest
+
+# Scan as part of GitHub Actions
+# (In .github/workflows/build.yml)
+# - name: Run Trivy vulnerability scanner
+#   uses: aquasecurity/trivy-action@master
+#   with:
+#     image-ref: ghcr.io/yourorg/my-api:latest
+#     format: 'sarif'
+#     output: 'trivy-results.sarif'
+#     severity: 'CRITICAL,HIGH'
+#     exit-code: '1'
+
+# Fix HIGH CVEs: usually just upgrade the base image
+# FROM node:20-alpine          ← old, has CVEs
+# FROM node:20.14.0-alpine3.20 ← pinned, often cleaner
+```
+
+### Scanning the Filesystem and IaC
+
+```bash
+# Scan for secrets in your source code (before building)
+trivy fs . --scanners secret
+# 2024-08-18 10:00:00 [WARN] Secret detected: AWS Secret Key in config.js
+
+# Scan Dockerfiles for misconfigurations
+trivy config .
+# Dockerfile:
+# - Running as root (DS002) HIGH
+# - No HEALTHCHECK (DS026) LOW
+# - ADD used instead of COPY (DS005) LOW
+
+# Scan Kubernetes manifests
+trivy config ./k8s/
+```
+
+---
+
+## Hardening 5: Use Minimal Base Images
+
+The attack surface of a container is directly proportional to the software inside it. Every extra package is a potential vulnerability. Choose the smallest base that meets your needs:
+
+```
+Hierarchy (smallest → largest attack surface):
+scratch             → only what you explicitly add (Go, Rust static binaries)
+distroless          → OS libraries only, no shell, no package manager (Node, Python, Java, Go)
+alpine:latest       → 5 MB, musl libc, busybox shell, apk package manager
+<lang>-alpine       → node:20-alpine, python:3.12-alpine — runtime + Alpine
+debian:slim         → small Debian variant (good for apps needing glibc)
+<lang>              → full Debian: node:20, python:3.12 — largest, most compatible
+ubuntu / centos     → ❌ Avoid for app images — not designed for single-service containers
+```
+
+```dockerfile
+# Avoid: full Ubuntu base for a Node.js app
+FROM ubuntu:22.04
+RUN apt-get update && apt-get install -y nodejs npm
+# → 500+ MB image, hundreds of unneeded packages
+
+# Better: official node image
+FROM node:20
+# → 340 MB — still has full Debian but node is pre-installed
+
+# Better: Alpine variant
+FROM node:20-alpine
+# → 120 MB — musl libc instead of glibc, much smaller
+
+# Best: distroless (no shell, no package manager)
+FROM gcr.io/distroless/nodejs20-debian12
+# → 90 MB — only Node runtime, no exploitable shell commands
+```
+
+---
+
+## Hardening 6: Don't Bake Secrets into Images
+
+Any `ENV` or `ARG` instruction (with a secret value) that appears in a Dockerfile layer is **permanently readable** from the image:
+
+```bash
+# ❌ NEVER DO THIS
+docker build --build-arg DATABASE_URL=postgres://user:pass@host/db -t my-api .
+
+# The secret is now in the image layers forever:
+docker history --no-trunc my-api | grep DATABASE_URL
+# ... --build-arg DATABASE_URL=postgres://user:pass@host/db ...
+# Anyone who can pull the image can see your production password!
+```
+
+**The right way — BuildKit secrets**:
+
+```dockerfile
+# Dockerfile — using BuildKit secret mount
+RUN --mount=type=secret,id=npmtoken \
+    NPM_TOKEN=$(cat /run/secrets/npmtoken) \
+    npm install
+# The secret is NEVER written to any layer
+```
+
+```bash
+# Pass the secret at build time
+docker build \
+  --secret id=npmtoken,env=NPM_TOKEN \
+  -t my-api .
+```
+
+---
+
+## Complete Hardened Dockerfile Checklist
+
+```dockerfile
+# ✅ Production-hardened Dockerfile
+FROM node:20-alpine AS builder        # ✅ Pinned major version, Alpine base
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+FROM node:20-alpine AS runner         # ✅ Fresh minimal stage
+
+# ✅ Labels for traceability
+LABEL org.opencontainers.image.source="https://github.com/yourorg/api"
+
+WORKDIR /app
+
+# ✅ Non-root user
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+
+ENV NODE_ENV=production
+ENV PORT=3000
+
+# ✅ Correct ownership on copy
+COPY --from=builder --chown=appuser:appgroup /app/dist ./dist
+COPY --from=builder --chown=appuser:appgroup /app/node_modules ./node_modules
+
+# ✅ Switch to non-root
+USER appuser
+
+EXPOSE 3000
+
+# ✅ Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
+  CMD wget -qO- http://localhost:3000/health || exit 1
+
+# ✅ Exec form (not shell form) for proper signal handling
+CMD ["node", "dist/server.js"]
+```
+
+```bash
+# ✅ Run with additional security flags
+docker run -d \
+  --read-only \                         # ✅ Read-only filesystem
+  --tmpfs /tmp \                        # ✅ Allow /tmp writes
+  --cap-drop ALL \                      # ✅ Drop all capabilities
+  --cap-add NET_BIND_SERVICE \          # ✅ Only add what's needed
+  --security-opt no-new-privileges:true \  # ✅ Prevent privilege escalation
+  --memory 512m \                       # ✅ Memory limit
+  --cpus 0.5 \                          # ✅ CPU limit
+  my-api:v1.0.0
+```
+
+---
+
+## Security Scanning in CI/CD Pipeline
+
+```yaml
+# .github/workflows/security.yml
+name: Security Scan
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 6 * * 1'  # Also scan every Monday morning
+
+jobs:
+  trivy-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image for scanning
+        run: docker build -t my-api:scan .
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: my-api:scan
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+          exit-code: 1      # Fail the build if CVEs found
+
+      - name: Upload Trivy results to GitHub Security
+        if: always()        # Upload even if scan fails
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+
+      - name: Scan Dockerfile for misconfigurations
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: config
+          scan-ref: .
+          exit-code: 1
+```
+
+---
+
+## Summary: Production Container Security Checklist
+
+- [ ] **Non-root user**: `adduser` in Dockerfile + `USER appuser` before `CMD`
+- [ ] **Minimal base image**: Alpine or distroless — no shell, no package manager
+- [ ] **Read-only filesystem**: `--read-only` + `--tmpfs /tmp` for necessary write paths
+- [ ] **Drop capabilities**: `--cap-drop ALL` then add only what's needed
+- [ ] **No privilege escalation**: `--security-opt no-new-privileges:true`
+- [ ] **No secrets in layers**: Use BuildKit `--mount=type=secret` or runtime env vars
+- [ ] **Resource limits**: `--memory` and `--cpus` prevent noisy-neighbor problems
+- [ ] **Vulnerability scanning**: Trivy in CI pipeline with `exit-code: 1` for HIGH/CRITICAL
+- [ ] **Pinned base image tag**: `node:20-alpine` not `node:latest`
+- [ ] **Health check**: `HEALTHCHECK` instruction in Dockerfile
+
+Applying all of these practices gives you a container that minimizes its attack surface, limits blast radius if compromised, and automatically fails CI when known vulnerabilities are detected.

@@ -1,0 +1,391 @@
+---
+title: "Writing Production-Grade Dockerfiles"
+---
+
+# Dockerfiles: Every Instruction Explained
+
+A `Dockerfile` is the recipe for building a Docker image. Every line is an instruction that either adds a new layer or modifies metadata. Let's go from a minimal beginner example to a production-hardened Dockerfile.
+
+---
+
+## Every Core Instruction
+
+### `FROM` — The Base Image
+
+```dockerfile
+# Minimal: official node on Debian
+FROM node:20
+
+# Better: Alpine variant (5MB base vs 200MB Debian)
+FROM node:20-alpine
+
+# Best for production: specific version pinning
+FROM node:20.14.0-alpine3.20   # Pin major.minor.patch + OS version
+
+# Multi-stage: use different bases per stage
+FROM node:20-alpine AS builder
+FROM node:20-alpine AS runner
+
+# Scratch: empty image for Go/Rust binaries (nothing inside)
+FROM scratch
+```
+
+<Callout type="warning" title="Never Use :latest in Production">
+`FROM node:latest` means different images on different days — your prod image built today might use Node 20, but the same Dockerfile next week uses Node 22 (potentially breaking changes). Always pin to at least a major version: `node:20-alpine`.
+</Callout>
+
+### `WORKDIR` — Set Working Directory
+
+```dockerfile
+# Creates the directory if it doesn't exist
+# All subsequent COPY/RUN/CMD are relative to this
+WORKDIR /app
+
+# Never use / as WORKDIR — you'd clutter the root filesystem
+# Never chain with RUN mkdir — WORKDIR does this automatically
+```
+
+### `COPY` and `ADD`
+
+```dockerfile
+# COPY: copies files from build context (your project directory) into the image
+COPY package.json package-lock.json ./    # Copy to WORKDIR
+COPY src/ ./src/                          # Copy entire directory
+COPY --chown=node:node . .               # Copy with correct ownership
+
+# ADD: like COPY but with extra powers (usually avoid)
+ADD https://example.com/file.tar.gz /tmp/  # Can download URLs (security risk)
+ADD file.tar.gz /tmp/                      # Auto-extracts archives
+
+# Rule: always prefer COPY over ADD — it's explicit and predictable
+```
+
+### `RUN` — Execute Commands During Build
+
+```dockerfile
+# Each RUN creates a new layer — chain commands to reduce layers
+# Bad (3 layers, each layer carries the package list cache):
+RUN apt-get update
+RUN apt-get install -y curl
+RUN rm -rf /var/lib/apt/lists/*
+
+# Good (1 layer, cache cleaned in the same step):
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# Alpine package manager (apk)
+RUN apk add --no-cache curl wget openssl
+
+# Use heredoc for multi-line scripts (Docker 1.4+)
+RUN <<EOF
+  set -e
+  npm ci --only=production
+  npx prisma generate
+  rm -rf /root/.npm /tmp/*
+EOF
+```
+
+### `ENV` — Set Environment Variables
+
+```dockerfile
+# Set at build time AND available at runtime
+ENV NODE_ENV=production
+ENV PORT=3000
+ENV TZ=UTC
+
+# Multiple in one instruction (efficient)
+ENV NODE_ENV=production \
+    PORT=3000 \
+    LOG_LEVEL=info
+
+# Access in subsequent RUN instructions
+RUN echo "Building for $NODE_ENV"
+```
+
+### `ARG` — Build-Time Arguments Only
+
+```dockerfile
+# Available ONLY during build (not at runtime — unlike ENV)
+ARG NODE_VERSION=20
+ARG BUILD_DATE
+ARG GIT_COMMIT=unknown
+
+# Use the arg
+FROM node:${NODE_VERSION}-alpine
+
+# Pass at build time:
+# docker build --build-arg NODE_VERSION=18 .
+
+# Useful for labels:
+LABEL org.opencontainers.image.revision="${GIT_COMMIT}"
+LABEL org.opencontainers.image.created="${BUILD_DATE}"
+```
+
+### `EXPOSE` — Document Port
+
+```dockerfile
+# Documentation only — doesn't publish the port
+# The actual publishing happens with docker run -p
+EXPOSE 3000
+EXPOSE 3000/tcp
+EXPOSE 53/udp    # DNS
+```
+
+### `CMD` vs `ENTRYPOINT`
+
+This is the most confused pair of instructions:
+
+```dockerfile
+# CMD: default command — easily overridden by docker run args
+CMD ["node", "server.js"]
+# Override: docker run my-image node other.js
+
+# ENTRYPOINT: the executable — harder to override (must use --entrypoint flag)
+ENTRYPOINT ["node"]
+CMD ["server.js"]
+# The container always runs node, but you can change the file:
+# docker run my-image other.js
+
+# Shell form vs Exec form:
+CMD node server.js          # Shell form: /bin/sh -c "node server.js"
+                            # Problem: node is a child of sh — signals (SIGTERM) may not reach it
+CMD ["node", "server.js"]   # Exec form: runs node directly as PID 1
+                            # Signals go directly to node — graceful shutdown works
+```
+
+<Callout type="tip" title="Always Use Exec Form (JSON Array)">
+Use `CMD ["executable", "arg"]` not `CMD executable arg`. The shell form wraps your command in `/bin/sh -c`, making `sh` PID 1 instead of your app — causing SIGTERM not to reach your process during `docker stop`.
+</Callout>
+
+### `USER` — Set the Running User
+
+```dockerfile
+# Always run as a non-root user in production
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+USER appuser
+
+# Or use a numeric UID (works even without useradd in distroless images)
+USER 1001:1001
+```
+
+### `HEALTHCHECK` — Built-in Health Monitoring
+
+```dockerfile
+# Docker daemon checks this and reports health status in docker ps
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
+  CMD wget -qO- http://localhost:3000/health || exit 1
+
+# Or for a database check:
+HEALTHCHECK --interval=5s --timeout=5s --retries=10 \
+  CMD pg_isready -U postgres || exit 1
+
+# Disable health check from base image:
+HEALTHCHECK NONE
+```
+
+---
+
+## Complete Production-Grade Dockerfile (Node.js)
+
+```dockerfile
+# Dockerfile — Production-grade Node.js API
+# Multi-stage: deps → builder → runner
+
+# ── Stage 1: Install ALL dependencies (for building) ────────────────────
+FROM node:20-alpine AS deps
+
+# Install build tools needed for native npm modules
+RUN apk add --no-cache python3 make g++
+
+WORKDIR /app
+
+# Copy ONLY package files — maximize layer cache
+COPY package.json package-lock.json ./
+
+# Install all dependencies (including devDependencies for build)
+RUN npm ci
+
+# ── Stage 2: Build the application ──────────────────────────────────────
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Copy deps from previous stage
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+
+# Generate Prisma client
+RUN npx prisma generate
+
+# Build Next.js app
+ENV NEXT_TELEMETRY_DISABLED=1
+RUN npm run build
+
+# ── Stage 3: Production runtime (minimal) ───────────────────────────────
+FROM node:20-alpine AS runner
+
+# Metadata (OCI standard labels)
+LABEL org.opencontainers.image.title="my-api"
+LABEL org.opencontainers.image.description="Production API"
+LABEL org.opencontainers.image.version="1.0.0"
+LABEL org.opencontainers.image.source="https://github.com/yourorg/api"
+
+WORKDIR /app
+
+# Security: create non-root user before any file operations
+RUN addgroup -S appgroup \
+    && adduser -S appuser -G appgroup
+
+# Runtime environment
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
+    PORT=3000 \
+    TZ=UTC
+
+# Copy ONLY what's needed at runtime
+COPY --from=builder --chown=appuser:appgroup /app/.next/standalone ./
+COPY --from=builder --chown=appuser:appgroup /app/.next/static ./.next/static
+COPY --from=builder --chown=appuser:appgroup /app/public ./public
+
+# Copy Prisma schema (needed by runtime)
+COPY --from=builder --chown=appuser:appgroup /app/prisma ./prisma
+COPY --from=builder --chown=appuser:appgroup /app/node_modules/.prisma ./node_modules/.prisma
+
+# Switch to non-root user
+USER appuser
+
+EXPOSE 3000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+  CMD wget -qO- http://localhost:3000/health || exit 1
+
+# Exec form — PID 1 receives SIGTERM correctly
+CMD ["node", "server.js"]
+```
+
+---
+
+## Complete Production-Grade Dockerfile (Go Binary)
+
+```dockerfile
+# Go produces a static binary — final image can be near-scratch
+FROM golang:1.22-alpine AS builder
+
+# Install build tools for CGO (if needed)
+RUN apk add --no-cache git ca-certificates tzdata
+
+WORKDIR /app
+
+# Download dependencies (cached if go.mod/go.sum unchanged)
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source and build
+COPY . .
+
+# Build flags:
+# -ldflags "-w -s" strips debug info and symbol table (smaller binary)
+# CGO_ENABLED=0 produces a truly static binary (no shared libs)
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -ldflags="-w -s" \
+    -o /app/server ./cmd/server
+
+# Final stage: distroless (no shell, no package manager — minimal attack surface)
+FROM gcr.io/distroless/static-debian12
+
+COPY --from=builder /app/server /server
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
+
+USER 65532:65532    # nonroot user in distroless image
+
+EXPOSE 8080
+ENTRYPOINT ["/server"]
+```
+
+The resulting image is typically **5–15 MB** — vs 400+ MB for a standard Go image.
+
+---
+
+## The `.dockerignore` File
+
+Like `.gitignore` but for Docker builds. Without it, the entire build context (including `node_modules`, `.git`, test files) is sent to the daemon:
+
+```
+# .dockerignore
+.git
+.gitignore
+node_modules
+npm-debug.log
+.env
+.env.local
+*.md
+.next
+dist
+out
+coverage
+**/__tests__/**
+**/*.test.ts
+**/*.spec.ts
+Dockerfile*
+docker-compose*
+.github
+```
+
+```bash
+# See how big your build context is before optimizing
+docker build . 2>&1 | head -3
+# Sending build context to Docker daemon  250.4MB  ← too big!
+
+# After .dockerignore:
+# Sending build context to Docker daemon  1.2MB    ← much better
+```
+
+---
+
+## Building and Tagging
+
+```bash
+# Basic build
+docker build -t my-api:v1.0.0 .
+
+# Build a specific stage only (useful for testing builder stage)
+docker build --target builder -t my-api:builder .
+
+# With build args
+docker build \
+  --build-arg GIT_COMMIT=$(git rev-parse --short HEAD) \
+  --build-arg BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+  -t my-api:$(git rev-parse --short HEAD) .
+
+# View the layers of the built image
+docker history my-api:v1.0.0
+# IMAGE          CREATED        CREATED BY                                      SIZE
+# abc123         2 hours ago    CMD ["node" "server.js"]                        0B
+# def456         2 hours ago    COPY --from=builder /app/.next/standalone ./    18.4MB
+# ...
+
+# Check final image size
+docker images my-api
+# REPOSITORY   TAG       SIZE
+# my-api       v1.0.0    89.3MB
+```
+
+---
+
+## Summary
+
+A production-grade Dockerfile:
+- **Pins the base image version** — never `:latest`
+- **Uses Alpine or distroless** — smallest possible attack surface
+- **Copies `package.json` before source code** — maximizes layer cache hits
+- **Chains RUN commands** with `&&` — minimises layer count
+- **Uses multi-stage builds** — compile in a heavy image, deploy in a tiny one
+- **Runs as a non-root user** — `adduser` + `USER` instruction before `CMD`
+- **Uses exec form for CMD** — `["node", "server.js"]` ensures PID 1 receives SIGTERM
+- **Has a HEALTHCHECK** — Docker daemon monitors container health automatically
+- **Has a `.dockerignore`** — prevents bloated build contexts
+
+In the next lesson, you will master Docker's layer caching system to make your builds go from minutes to seconds.

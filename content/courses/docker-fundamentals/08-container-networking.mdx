@@ -1,0 +1,293 @@
+---
+title: "Container Networking & Port Forwarding"
+---
+
+# How Containers Communicate
+
+By default, a container is completely isolated from the network — it can't reach other containers, and nothing can reach it. Docker's networking subsystem carefully controls connectivity through virtual networks and explicit port publishing.
+
+```mermaid
+flowchart TD
+    subgraph HOST["Host Machine (192.168.1.10)"]
+        subgraph BRIDGE["docker0 bridge network (172.17.0.0/16)"]
+            C1["Container A\n172.17.0.2:3000\n(API)"]
+            C2["Container B\n172.17.0.3:5432\n(PostgreSQL)"]
+        end
+        
+        PORT_FWD["iptables NAT rule\nhost:8080 → 172.17.0.2:3000"]
+    end
+
+    INTERNET["🌐 Internet / Laptop browser"]
+    INTERNET -->|":8080"| PORT_FWD --> C1
+    C1 -->|"172.17.0.3:5432 (direct)"| C2
+    INTERNET -. "❌ Cannot reach\nDB directly" .-> C2
+```
+
+---
+
+## Docker Network Drivers
+
+Docker supports multiple network drivers, each for a different use case:
+
+| Driver | Description | Use Case |
+|--------|------------|---------|
+| **bridge** | Virtual switch on the host | Default for single-host containers |
+| **host** | Container shares host network stack (no isolation) | High-performance, no port mapping needed |
+| **none** | No network connectivity | Security-isolated containers |
+| **overlay** | Spans multiple Docker hosts | Docker Swarm / multi-host setups |
+| **macvlan** | Container gets its own MAC/IP on the physical network | Legacy systems that expect physical network presence |
+
+---
+
+## The Default Bridge Network (`docker0`)
+
+When you install Docker, it creates a virtual bridge interface called `docker0`. Every container by default attaches to this bridge and gets an IP from the `172.17.0.0/16` subnet.
+
+```bash
+# See the default network
+docker network ls
+# NETWORK ID     NAME      DRIVER    SCOPE
+# abc123         bridge    bridge    local   ← this is docker0
+# def456         host      host      local
+# ghi789         none      null      local
+
+# Inspect the default bridge
+docker network inspect bridge | python3 -m json.tool
+# Shows subnet, gateway, and all connected containers
+
+# Start a container (attaches to bridge by default)
+docker run -d --name api nginx:alpine
+
+# Check its IP
+docker inspect --format '{{.NetworkSettings.IPAddress}}' api
+# 172.17.0.2
+
+# But the default bridge has a MAJOR limitation:
+# Container names are NOT resolvable as DNS hostnames
+docker run --rm alpine ping api  # ← This FAILS on the default bridge!
+```
+
+**The critical limitation of the default bridge**: containers cannot reach each other by **name**. Docker's embedded DNS only works on **custom user-defined networks**.
+
+---
+
+## Custom Bridge Networks (The Right Way)
+
+```bash
+# Create a custom network
+docker network create myapp-network
+
+# Start services on the same network
+docker run -d \
+  --name postgres \
+  --network myapp-network \
+  -e POSTGRES_USER=appuser \
+  -e POSTGRES_PASSWORD=secret \
+  -e POSTGRES_DB=myapp \
+  postgres:16-alpine
+
+docker run -d \
+  --name api \
+  --network myapp-network \
+  -p 8080:3000 \
+  -e DATABASE_URL=postgres://appuser:secret@postgres:5432/myapp \
+  my-api:latest
+
+# The API container can reach Postgres using its container NAME as the hostname:
+# postgres://appuser:secret@postgres:5432/myapp
+#                           ^^^^^^^^
+#                           Container name = DNS hostname
+#                           Docker resolves this to 172.17.0.3 automatically!
+
+# Verify DNS resolution from inside a container
+docker exec api nslookup postgres
+# Server:    127.0.0.11   ← Docker's embedded DNS server
+# Address:   172.17.0.3   ← postgres container's IP
+```
+
+### Why Custom Networks Are Better Than Default Bridge
+
+| | Default Bridge | Custom Bridge |
+|--|---------------|--------------|
+| **Container name DNS** | ❌ Not available | ✅ Automatic |
+| **Isolation** | All containers share one network | Scoped to containers you connect |
+| **`--link` needed?** | Yes (legacy, deprecated) | No |
+| **Security** | Lower (all containers see each other) | Higher |
+
+---
+
+## Port Publishing: Exposing Containers to the Host
+
+Containers are isolated. To allow traffic from the host (or internet) to reach a container, you must explicitly publish a port:
+
+```bash
+# Syntax: -p HOST_PORT:CONTAINER_PORT
+docker run -p 8080:3000 my-api     # Host 8080 → Container 3000
+docker run -p 80:80 nginx           # Standard HTTP
+docker run -p 443:443 nginx         # Standard HTTPS
+
+# Bind to a specific host interface (security!)
+docker run -p 127.0.0.1:5432:5432 postgres  # Only accessible from localhost
+docker run -p 0.0.0.0:8080:3000 my-api      # Accessible from any interface (default)
+
+# Random host port (Docker picks an available port)
+docker run -p 3000 my-api
+docker port my-api 3000   # Find out which host port was assigned
+# 0.0.0.0:32768
+
+# UDP port mapping
+docker run -p 53:53/udp my-dns-server
+
+# Multiple ports
+docker run \
+  -p 80:80 \
+  -p 443:443 \
+  -p 8080:8080 \
+  my-server
+```
+
+**Security rule**: Never publish database ports (`5432`, `3306`, `6379`) to `0.0.0.0` on a public server. Use `127.0.0.1` for local-only access, or don't publish the port at all — let the application reach the DB through the internal Docker network.
+
+---
+
+## Connecting Containers: Full Network Isolation Example
+
+```bash
+# === Production-like network setup with isolation ===
+
+# Create two isolated networks
+docker network create frontend-net   # Public-facing
+docker network create backend-net    # Internal only
+
+# Start PostgreSQL on backend only (no exposure to public network)
+docker run -d \
+  --name postgres \
+  --network backend-net \
+  -e POSTGRES_PASSWORD=secret \
+  -v postgres-data:/var/lib/postgresql/data \
+  postgres:16-alpine
+
+# Start Redis on backend only
+docker run -d \
+  --name redis \
+  --network backend-net \
+  redis:7-alpine
+
+# Start API on backend (can reach db and redis)
+# Also connect to frontend (will be reachable from nginx)
+docker run -d \
+  --name api \
+  --network backend-net \
+  -e DATABASE_URL=postgres://postgres:secret@postgres:5432/postgres \
+  -e REDIS_URL=redis://redis:6379 \
+  my-api:latest
+
+docker network connect frontend-net api  # Add api to frontend-net too
+
+# Start Nginx on frontend-net (reaches API, but NOT db/redis directly)
+docker run -d \
+  --name nginx \
+  --network frontend-net \
+  -p 80:80 \
+  -p 443:443 \
+  nginx:alpine
+
+# Security check:
+# ✅ nginx → api (both on frontend-net)
+# ✅ api → postgres (both on backend-net)
+# ✅ api → redis (both on backend-net)
+# ❌ nginx → postgres (different networks — nginx only on frontend-net)
+# ❌ internet → postgres (not published on any host port)
+```
+
+---
+
+## DNS and Service Discovery
+
+```bash
+# Docker's embedded DNS server (127.0.0.11)
+# resolves container names within the same custom network
+
+# Test DNS from inside a container
+docker exec api cat /etc/resolv.conf
+# nameserver 127.0.0.11   ← Docker DNS
+# options ndots:0
+
+# Resolve a service name
+docker exec api nslookup postgres
+# Server:    127.0.0.11
+# Name:      postgres
+# Address:   172.18.0.3
+
+# Docker also creates DNS aliases for network-specific names
+# Full DNS: container-name.network-name
+docker exec api nslookup postgres.backend-net
+
+# Check what aliases a container has on a network
+docker inspect postgres \
+  --format '{{json .NetworkSettings.Networks}}' | python3 -m json.tool
+```
+
+---
+
+## Network Management Commands
+
+```bash
+# Create networks
+docker network create myapp-net
+docker network create --driver bridge --subnet 10.10.0.0/24 custom-subnet-net
+
+# List networks
+docker network ls
+docker network ls --filter driver=bridge
+
+# Inspect a network (shows all connected containers + their IPs)
+docker network inspect myapp-net
+
+# Connect a running container to a network
+docker network connect myapp-net my-container
+
+# Disconnect a container from a network
+docker network disconnect myapp-net my-container
+
+# Remove a network (fails if containers are still connected)
+docker network rm myapp-net
+
+# Remove unused networks
+docker network prune
+```
+
+---
+
+## The `host` Network Driver
+
+The `host` driver removes network isolation entirely — the container uses the host's network stack directly. No port mapping needed; the container's ports are the host's ports.
+
+```bash
+# Container binds directly to host port 8080 (no mapping needed)
+docker run -d --network host my-api
+# Equivalent to running the process natively on the host
+
+# Use cases:
+# - Maximum network performance (no NAT overhead)
+# - When container needs to enumerate host interfaces
+# - Legacy applications that discover services via broadcast
+```
+
+<Callout type="warning" title="host Network Reduces Isolation">
+With `--network host`, the container's process runs in the host's network namespace. All host ports are visible to and from the container. Only use for trusted workloads where performance is critical.
+</Callout>
+
+---
+
+## Summary
+
+Docker networking is built around network namespaces and virtual bridges:
+- Containers are isolated by default — no inbound traffic and no cross-container communication unless explicitly configured
+- **Default bridge** (`docker0`): all containers share it, but DNS by container name doesn't work
+- **Custom bridge networks**: DNS by container name works automatically — always use for multi-container apps
+- `-p HOST:CONTAINER` publishes a port; bind to `127.0.0.1` for local-only access, never expose DB ports to `0.0.0.0`
+- Use **multiple custom networks** to isolate public-facing services (nginx) from backend services (postgres, redis)
+- Docker's embedded DNS (`127.0.0.11`) resolves container names within the same custom network
+
+In the next lesson, you will learn how to push your images to Docker Hub and GitHub Container Registry to make them available for deployment.

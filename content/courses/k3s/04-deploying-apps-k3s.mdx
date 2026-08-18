@@ -1,0 +1,715 @@
+---
+title: "Deploying Full-Stack Apps on K3s"
+---
+
+# Deploying a Production Full-Stack Application
+
+In this lesson you'll deploy a complete application stack on K3s:
+- **PostgreSQL** — persistent database with a PersistentVolumeClaim on K3s's `local-path` storage
+- **Node.js API** — stateless backend with readiness/liveness probes
+- **Frontend** — served via Nginx Alpine
+- **Ingress** — Traefik routing with TLS
+
+Everything follows production patterns: no hard-coded secrets, proper resource limits, health probes, and rolling update strategy.
+
+---
+
+## Understanding K3s Storage: local-path-provisioner
+
+Standard Kubernetes requires you to manually create PersistentVolumes or use cloud-specific storage classes (AWS EBS, GCP PD). K3s ships the **local-path-provisioner**, which automatically creates `hostPath` volumes on demand.
+
+```mermaid
+flowchart LR
+    PVC["PersistentVolumeClaim\nname: postgres-data\nstorage: 10Gi\nstorageClass: local-path"]
+    PROVISIONER[local-path-provisioner\nin kube-system]
+    PV["PersistentVolume\n(auto-created)\nhostPath: /var/lib/rancher/k3s/storage/..."]
+    DISK[("Node Disk\n/var/lib/rancher/k3s/storage/")]
+
+    PVC -->|"watches for unbound PVCs"| PROVISIONER
+    PROVISIONER -->|"creates"| PV
+    PV -->|"mounts"| DISK
+```
+
+```bash
+# Verify local-path is your default StorageClass
+kubectl get storageclass
+# NAME                   PROVISIONER             RECLAIMPOLICY   VOLUMEBINDINGMODE
+# local-path (default)   rancher.io/local-path   Delete          WaitForFirstConsumer
+```
+
+<Callout type="warning" title="local-path is Node-Specific">
+Data stored by `local-path` lives on the node's disk. If the pod moves to a different node (e.g., after node failure), it **cannot access the old data** — the PV is bound to the original node. For single-node K3s, this is fine. For multi-node setups where database pods need to follow their data, use **Longhorn** (covered in the multi-node lesson) or a hosted database.
+</Callout>
+
+---
+
+## Project Structure
+
+Create a `k8s/` directory in your project repository with this structure:
+
+```
+k8s/
+├── 00-namespace.yaml          ← Namespace + ResourceQuota
+├── 01-postgres-pvc.yaml       ← PersistentVolumeClaim for DB storage
+├── 02-postgres.yaml           ← PostgreSQL StatefulSet + Service
+├── 03-api-configmap.yaml      ← Non-secret app config
+├── 04-api.yaml                ← Node.js API Deployment + Service
+├── 05-frontend.yaml           ← Nginx frontend Deployment + Service
+└── 06-ingress.yaml            ← Traefik Ingress with TLS
+```
+
+---
+
+## Manifest 1: Namespace
+
+```yaml
+# k8s/00-namespace.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: myapp
+  labels:
+    environment: production
+
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: myapp-quota
+  namespace: myapp
+spec:
+  hard:
+    requests.cpu: "4"
+    requests.memory: "4Gi"
+    limits.cpu: "8"
+    limits.memory: "8Gi"
+    pods: "20"
+    persistentvolumeclaims: "5"
+```
+
+---
+
+## Manifest 2: PostgreSQL PVC
+
+```yaml
+# k8s/01-postgres-pvc.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-data
+  namespace: myapp
+  labels:
+    app: postgres
+spec:
+  accessModes:
+    - ReadWriteOnce   # Only one pod can mount this at a time (fine for a DB)
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 10Gi   # 10 GB of disk space
+```
+
+---
+
+## Manifest 3: PostgreSQL StatefulSet
+
+Use a **StatefulSet** for databases — it guarantees stable pod names and ordered startup/shutdown:
+
+```yaml
+# k8s/02-postgres.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: myapp
+  labels:
+    app: postgres
+spec:
+  serviceName: postgres     # Must match the headless Service below
+  replicas: 1               # Single PostgreSQL instance (for HA use pg-operator)
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      terminationGracePeriodSeconds: 60   # Give PostgreSQL time to flush buffers
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+              name: postgres
+
+          # Load credentials from Secret (created separately — never commit secrets)
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_DB
+            # Store data in the mounted PVC
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+
+          # Readiness probe: only route traffic to Postgres when it's accepting connections
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - pg_isready -U $(POSTGRES_USER) -d $(POSTGRES_DB)
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          # Liveness probe: restart if Postgres is hung
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - pg_isready -U $(POSTGRES_USER) -d $(POSTGRES_DB)
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: postgres-data
+
+---
+# Headless service for stable DNS (postgres-0.postgres.myapp.svc.cluster.local)
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: myapp
+  labels:
+    app: postgres
+spec:
+  clusterIP: None   # Headless — no load balancing, returns pod IP directly
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+      name: postgres
+```
+
+---
+
+## Create the Secrets (Never Commit These)
+
+```bash
+# Create secrets imperatively — they are NOT stored in your Git repo
+kubectl create secret generic postgres-secret \
+  --from-literal=POSTGRES_USER=appuser \
+  --from-literal=POSTGRES_PASSWORD=$(openssl rand -base64 32 | tr -d '=/+') \
+  --from-literal=POSTGRES_DB=myapp \
+  --namespace myapp \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+# The --dry-run=client -o yaml | kubectl apply -f - pattern means:
+# 1. Generate the secret YAML without applying it (--dry-run=client)
+# 2. Pipe it to kubectl apply (idempotent — safe to run again on updates)
+
+# Verify the secret was created (values are base64-encoded — never shown in plain text)
+kubectl -n myapp get secret postgres-secret
+# NAME              TYPE     DATA   AGE
+# postgres-secret   Opaque   3      5s
+
+# Create the API secret (DATABASE_URL pointing to the postgres pod)
+kubectl create secret generic api-secret \
+  --from-literal=DATABASE_URL="postgres://appuser:$(kubectl -n myapp get secret postgres-secret -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 -d)@postgres.myapp.svc.cluster.local:5432/myapp" \
+  --namespace myapp \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+---
+
+## Manifest 4: API ConfigMap
+
+```yaml
+# k8s/03-api-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-config
+  namespace: myapp
+data:
+  NODE_ENV: "production"
+  PORT: "3000"
+  LOG_LEVEL: "info"
+  # Internal hostname for postgres (k8s DNS: service.namespace.svc.cluster.local)
+  DB_HOST: "postgres.myapp.svc.cluster.local"
+  DB_PORT: "5432"
+  DB_MAX_CONNECTIONS: "10"
+```
+
+---
+
+## Manifest 5: API Deployment
+
+```yaml
+# k8s/04-api.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: myapp
+  labels:
+    app: api
+  annotations:
+    kubernetes.io/change-cause: "Initial deployment"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0   # Always keep 2 replicas running during updates
+  minReadySeconds: 10
+
+  template:
+    metadata:
+      labels:
+        app: api
+    spec:
+      terminationGracePeriodSeconds: 30   # Allow in-flight requests to complete
+
+      containers:
+        - name: api
+          image: ghcr.io/YOUR_GITHUB_USERNAME/myapp-api:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3000
+              name: http
+
+          # Load non-secret config
+          envFrom:
+            - configMapRef:
+                name: api-config
+
+          # Load secrets
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: api-secret
+                  key: DATABASE_URL
+
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+
+          # Startup probe: don't start other probes until app is initialized
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            failureThreshold: 10   # 10 × 10s = 100s max startup time
+            periodSeconds: 10
+
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+
+      volumes:
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 50Mi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  namespace: myapp
+  labels:
+    app: api
+spec:
+  selector:
+    app: api
+  ports:
+    - port: 80
+      targetPort: 3000
+      name: http
+```
+
+---
+
+## Manifest 6: Frontend Deployment
+
+```yaml
+# k8s/05-frontend.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: myapp
+  labels:
+    app: frontend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: frontend
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+        - name: frontend
+          image: ghcr.io/YOUR_GITHUB_USERNAME/myapp-frontend:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 80
+              name: http
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 30
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: myapp
+  labels:
+    app: frontend
+spec:
+  selector:
+    app: frontend
+  ports:
+    - port: 80
+      targetPort: 80
+```
+
+---
+
+## Manifest 7: Ingress
+
+```yaml
+# k8s/06-ingress.yaml
+---
+# HTTP → HTTPS redirect middleware
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: redirect-https
+  namespace: myapp
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: true
+
+---
+# Security headers middleware
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: security-headers
+  namespace: myapp
+spec:
+  headers:
+    frameDeny: true
+    contentTypeNosniff: true
+    stsSeconds: 31536000
+    stsIncludeSubdomains: true
+    stsPreload: true
+
+---
+# The Ingress
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: myapp-ingress
+  namespace: myapp
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    traefik.ingress.kubernetes.io/router.middlewares: >-
+      myapp-redirect-https@kubernetescrd,
+      myapp-security-headers@kubernetescrd
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - myapp.yourdomain.com
+        - api.yourdomain.com
+      secretName: myapp-tls
+  rules:
+    # API routes
+    - host: api.yourdomain.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  number: 80
+    # Frontend
+    - host: myapp.yourdomain.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 80
+```
+
+---
+
+## Deploy Everything
+
+```bash
+# Apply in dependency order
+kubectl apply -f k8s/00-namespace.yaml
+
+# Create secrets FIRST (before any deployments that reference them)
+kubectl create secret generic postgres-secret \
+  --from-literal=POSTGRES_USER=appuser \
+  --from-literal=POSTGRES_PASSWORD="$(openssl rand -base64 24)" \
+  --from-literal=POSTGRES_DB=myapp \
+  -n myapp
+
+# Apply the rest
+kubectl apply -f k8s/01-postgres-pvc.yaml
+kubectl apply -f k8s/02-postgres.yaml
+
+# Wait for postgres to be ready before deploying the API
+kubectl -n myapp rollout status statefulset/postgres
+kubectl -n myapp wait pod -l app=postgres --for=condition=Ready --timeout=120s
+
+kubectl apply -f k8s/03-api-configmap.yaml
+kubectl apply -f k8s/04-api.yaml
+kubectl apply -f k8s/05-frontend.yaml
+kubectl apply -f k8s/06-ingress.yaml
+```
+
+---
+
+## Verify the Full Stack
+
+```bash
+# Check all pods are Running
+kubectl -n myapp get pods
+# NAME              READY   STATUS    RESTARTS   AGE
+# postgres-0        1/1     Running   0          3m
+# api-xxx-aaa       1/1     Running   0          2m
+# api-xxx-bbb       1/1     Running   0          2m
+# frontend-xxx-aaa  1/1     Running   0          1m
+# frontend-xxx-bbb  1/1     Running   0          1m
+
+# Check Services
+kubectl -n myapp get svc
+# NAME       TYPE        CLUSTER-IP    PORT(S)
+# postgres   ClusterIP   None          5432/TCP    ← Headless
+# api        ClusterIP   10.43.x.y     80/TCP
+# frontend   ClusterIP   10.43.x.z     80/TCP
+
+# Check Ingress
+kubectl -n myapp get ingress
+# NAME            CLASS     HOSTS                    ADDRESS       PORTS
+# myapp-ingress   traefik   myapp.yourdomain.com     YOUR_VPS_IP   80,443
+
+# Check TLS certificate
+kubectl -n myapp get certificate
+# NAME       READY   SECRET      AGE
+# myapp-tls  True    myapp-tls   2m   ← True = cert issued successfully
+
+# Test the API
+curl https://api.yourdomain.com/api/health
+# {"status":"ok","db":{"status":"connected"}}
+
+# Test the frontend
+curl -I https://myapp.yourdomain.com
+# HTTP/2 200
+# content-type: text/html
+```
+
+---
+
+## Performing a Rolling Update
+
+```bash
+# Build and push a new version
+docker build -t ghcr.io/YOUR_USERNAME/myapp-api:v1.1.0 .
+docker push ghcr.io/YOUR_USERNAME/myapp-api:v1.1.0
+
+# Update the deployment image (triggers rolling update)
+kubectl -n myapp set image deployment/api api=ghcr.io/YOUR_USERNAME/myapp-api:v1.1.0
+
+# Annotate the rollout for history tracking
+kubectl -n myapp annotate deployment/api \
+  kubernetes.io/change-cause="Bump to v1.1.0: fix DB timeout" \
+  --overwrite
+
+# Watch the rolling update in real time
+kubectl -n myapp rollout status deployment/api
+# Waiting for deployment "api" rollout to finish: 1 out of 2 new replicas have been updated...
+# deployment "api" successfully rolled out
+
+# If something goes wrong, roll back
+kubectl -n myapp rollout undo deployment/api
+```
+
+---
+
+## Checking Resource Usage
+
+```bash
+# Node resource usage
+kubectl top node
+# NAME        CPU(cores)   CPU%   MEMORY(bytes)   MEMORY%
+# my-server   320m         16%    1820Mi          45%
+
+# Pod resource usage
+kubectl -n myapp top pods
+# NAME              CPU(cores)   MEMORY(bytes)
+# postgres-0        45m          128Mi
+# api-xxx-aaa       12m          87Mi
+# api-xxx-bbb       14m          89Mi
+# frontend-xxx-aaa  3m           22Mi
+```
+
+---
+
+## Troubleshooting Common Issues
+
+### "Pods stuck in Pending"
+```bash
+kubectl -n myapp describe pod api-xxx | tail -20
+# Events: 0/1 nodes are available: 1 Insufficient memory
+# Solution: Reduce resource requests or add more RAM to your VPS
+
+# Check if the PVC is bound
+kubectl -n myapp get pvc
+# NAME            STATUS   VOLUME         CAPACITY   STORAGECLASS
+# postgres-data   Bound    pvc-xxx-yyy    10Gi       local-path   ← Good
+# postgres-data   Pending  -              -          -            ← Bad (provisioner issue)
+```
+
+### "API pod can't connect to postgres"
+```bash
+# Test DNS resolution from inside the cluster
+kubectl -n myapp run debug --image=busybox:latest --restart=Never --rm -it -- \
+  nslookup postgres.myapp.svc.cluster.local
+# Answer: 10.42.0.x (headless service returns pod IP directly)
+
+# Test TCP connectivity
+kubectl -n myapp run debug --image=postgres:16-alpine --restart=Never --rm -it -- \
+  psql "postgres://appuser:PASSWORD@postgres.myapp.svc.cluster.local:5432/myapp" -c "SELECT 1"
+```
+
+### "Ingress returns 404"
+```bash
+# Check Traefik logs for routing decisions
+kubectl -n kube-system logs -l app.kubernetes.io/name=traefik --tail=30
+
+# Verify the Ingress rule matches your request
+kubectl -n myapp describe ingress myapp-ingress
+# Verify host, path, and backend service name/port match exactly
+```
+
+---
+
+## Summary
+
+You've deployed a production-quality full-stack application on K3s:
+- **PostgreSQL** as a `StatefulSet` with a `local-path` PVC for persistent storage
+- **API** as a `Deployment` with 2 replicas, startup/readiness/liveness probes, resource limits, and a read-only filesystem
+- **Frontend** as a `Deployment` with 2 replicas
+- **Secrets** created imperatively (never committed to Git)
+- **Traefik Ingress** with HTTPS (cert-manager), HTTP→HTTPS redirect, and security headers
+- Rolling updates with zero-downtime and rollback support
+
+In the next lesson, you will automate TLS certificate management with cert-manager and Let's Encrypt.

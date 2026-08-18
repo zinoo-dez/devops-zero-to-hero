@@ -1,0 +1,545 @@
+---
+title: "Provisioning the Production K3s Server"
+---
+
+# Preparing Your Production Server
+
+This lesson covers everything you need to do on the VPS before the first deployment. A properly hardened server is the foundation of a secure production system. Skipping this step is a common mistake that leads to compromised servers within hours of going live.
+
+By the end of this lesson you'll have:
+- A hardened Ubuntu 22.04 VPS
+- K3s installed and verified
+- Remote `kubectl` access from your laptop
+- SSH key-based authentication configured for GitHub Actions CD
+- cert-manager installed with a Let's Encrypt ClusterIssuer
+
+---
+
+## Step 1: Provision Your VPS
+
+This guide uses **Hetzner Cloud** (cheapest), but the steps apply to any provider (DigitalOcean, AWS, Linode).
+
+### Create the Server
+
+On Hetzner Cloud Console:
+1. New server → Location: your region
+2. Image: **Ubuntu 22.04 LTS**
+3. Type: **CX22** (2 vCPU, 4 GB RAM, 40 GB disk)
+4. SSH Key: Add your `~/.ssh/id_ed25519.pub`
+5. Firewall: Create a new firewall (configured below)
+6. Create server
+
+Note the public IP address — you'll need it throughout this lesson.
+
+### Configure the Firewall
+
+Only open the ports you actually need:
+
+| Port | Protocol | Source | Purpose |
+|------|----------|--------|---------|
+| 22 | TCP | Your IP only | SSH access |
+| 80 | TCP | Anywhere | HTTP (Traefik) |
+| 443 | TCP | Anywhere | HTTPS (Traefik) |
+| 6443 | TCP | Your IP only | Kubernetes API server |
+
+<Callout type="caution" title="Restrict Port 22 to Your IP">
+Leaving SSH open to the entire internet exposes you to automated brute-force attacks. Use your VPS provider's firewall to restrict port 22 to your home/office IP. If your IP changes, update the firewall rule — or use a bastion host.
+</Callout>
+
+---
+
+## Step 2: Harden the Server
+
+SSH into your new server as root and run these hardening steps:
+
+```bash
+ssh root@YOUR_VPS_IP
+```
+
+### Create a Non-Root Admin User
+
+```bash
+# Create a new user
+adduser deploy
+# (set a strong password, fill in other fields or press Enter to skip)
+
+# Grant sudo privileges
+usermod -aG sudo deploy
+
+# Copy root's authorized SSH keys to the new user
+mkdir -p /home/deploy/.ssh
+cp ~/.ssh/authorized_keys /home/deploy/.ssh/
+chown -R deploy:deploy /home/deploy/.ssh
+chmod 700 /home/deploy/.ssh
+chmod 600 /home/deploy/.ssh/authorized_keys
+```
+
+### Configure SSH Security
+
+```bash
+# Edit the SSH daemon config
+nano /etc/ssh/sshd_config
+```
+
+Set these values:
+```bash
+# /etc/ssh/sshd_config — security hardening
+
+# Disable root login over SSH (use the 'deploy' user instead)
+PermitRootLogin no
+
+# Disable password authentication (SSH keys only)
+PasswordAuthentication no
+ChallengeResponseAuthentication no
+
+# Disable X11 forwarding (not needed for a server)
+X11Forwarding no
+
+# Allow only specific users
+AllowUsers deploy
+
+# Reduce timeout to disconnect idle sessions
+ClientAliveInterval 300
+ClientAliveCountMax 2
+```
+
+```bash
+# Restart SSH to apply changes
+systemctl restart sshd
+
+# Test in a NEW terminal tab before closing current session:
+ssh deploy@YOUR_VPS_IP
+# Should work. If it does, root login is now disabled.
+```
+
+### Configure Automatic Security Updates
+
+```bash
+# Install unattended-upgrades
+apt-get update
+apt-get install -y unattended-upgrades
+
+# Enable automatic security updates
+dpkg-reconfigure -plow unattended-upgrades
+# Select: Yes
+
+# Verify it's configured
+cat /etc/apt/apt.conf.d/20auto-upgrades
+# APT::Periodic::Update-Package-Lists "1";
+# APT::Periodic::Unattended-Upgrade "1";
+```
+
+### Install Required Tools
+
+```bash
+apt-get install -y \
+  curl \
+  wget \
+  git \
+  htop \
+  jq \
+  net-tools \
+  ufw    # Simple firewall wrapper (optional, use if not using VPS-level firewall)
+```
+
+---
+
+## Step 3: Install K3s
+
+K3s is installed with a single command. It sets up the full Kubernetes API server, etcd (or SQLite), kubelet, kube-proxy, CoreDNS, and Traefik — all in one binary.
+
+```bash
+# Switch to the deploy user
+su - deploy
+
+# Install K3s (latest stable)
+curl -sfL https://get.k3s.io | sh -s - \
+  --disable traefik \           # We'll install Traefik separately for more control
+  --write-kubeconfig-mode 644   # Allow non-root users to read the kubeconfig
+
+# Wait for K3s to start (takes 30-60 seconds)
+sudo systemctl status k3s
+
+# Verify the node is Ready
+sudo k3s kubectl get nodes
+# NAME        STATUS   ROLES                  AGE   VERSION
+# your-vps    Ready    control-plane,master   1m    v1.29.x+k3s1
+```
+
+<Callout type="tip" title="Why Disable Traefik in the Installer?">
+K3s ships with Traefik 2.x by default. Disabling it during install lets us install Traefik via Helm with our own values file — giving us full control over IngressClass settings, dashboard access, and middleware configuration.
+</Callout>
+
+### Install Traefik via Helm
+
+```bash
+# Install Helm
+curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+# Add the Traefik Helm repository
+helm repo add traefik https://traefik.github.io/charts
+helm repo update
+
+# Create a values file for Traefik
+cat > /tmp/traefik-values.yaml << 'EOF'
+deployment:
+  replicas: 1
+
+ingressClass:
+  enabled: true
+  isDefaultIngressClass: true  # All Ingress objects use Traefik by default
+
+ports:
+  web:
+    port: 8000
+    exposedPort: 80
+    redirectTo:
+      port: websecure           # Redirect all HTTP → HTTPS
+  websecure:
+    port: 8443
+    exposedPort: 443
+    tls:
+      enabled: true
+
+# Enable Prometheus metrics (used in Lesson 10)
+metrics:
+  prometheus:
+    enabled: true
+
+# Dashboard (access locally via kubectl port-forward)
+dashboard:
+  enabled: true
+
+logs:
+  general:
+    level: WARN               # Reduce log noise in production
+EOF
+
+# Install Traefik in its own namespace
+kubectl create namespace traefik
+helm install traefik traefik/traefik \
+  -n traefik \
+  -f /tmp/traefik-values.yaml
+
+# Verify Traefik is running
+kubectl -n traefik get pods
+# NAME                       READY   STATUS    RESTARTS   AGE
+# traefik-xxxxx              1/1     Running   0          30s
+```
+
+---
+
+## Step 4: Configure Remote kubectl Access
+
+You need to run `kubectl` commands from your laptop (and from GitHub Actions).
+
+```bash
+# On the VPS: get the kubeconfig
+sudo cat /etc/rancher/k3s/k3s.yaml
+```
+
+Copy the output. On your **local machine**:
+
+```bash
+# Create the .kube directory if it doesn't exist
+mkdir -p ~/.kube
+
+# Paste the kubeconfig (replace the content)
+nano ~/.kube/config
+
+# IMPORTANT: Replace the server address from:
+#   server: https://127.0.0.1:6443
+# To:
+#   server: https://YOUR_VPS_IP:6443
+
+# Verify local access
+kubectl get nodes
+# NAME        STATUS   ROLES                  AGE   VERSION
+# your-vps    Ready    control-plane,master   5m    v1.29.x+k3s1
+```
+
+### Store the Kubeconfig as a GitHub Secret
+
+The CD workflow (Lesson 8) needs to run `kubectl` commands against your cluster.
+
+```bash
+# On your local machine: encode the kubeconfig as base64
+cat ~/.kube/config | base64 | tr -d '\n'
+# (copy the output — it's a long base64 string)
+```
+
+Add it as a GitHub Secret:
+1. Repository → Settings → Secrets and variables → Actions
+2. New repository secret: `KUBECONFIG_BASE64` = (paste the base64 string)
+
+---
+
+## Step 5: Create the Production Namespace
+
+```bash
+# Create the namespace where your app will live
+kubectl create namespace production
+
+# Label it for easier querying
+kubectl label namespace production \
+  environment=production \
+  managed-by=github-actions
+
+# Verify
+kubectl get namespace production
+# NAME         STATUS   AGE
+# production   Active   10s
+```
+
+---
+
+## Step 6: Install cert-manager
+
+cert-manager automates TLS certificate issuance from Let's Encrypt. It watches for `Certificate` and `Ingress` resources and issues/renews certificates automatically.
+
+```bash
+# Install cert-manager via Helm
+helm repo add jetstack https://charts.jetstack.io
+helm repo update
+
+kubectl create namespace cert-manager
+
+helm install cert-manager jetstack/cert-manager \
+  -n cert-manager \
+  --version v1.14.4 \
+  --set installCRDs=true \
+  --set prometheus.enabled=true   # Enable metrics for Lesson 10
+
+# Verify cert-manager pods are Running (takes 30-60 seconds)
+kubectl -n cert-manager get pods
+# NAME                                      READY   STATUS    RESTARTS
+# cert-manager-xxx                          1/1     Running   0
+# cert-manager-cainjector-xxx               1/1     Running   0
+# cert-manager-webhook-xxx                  1/1     Running   0
+```
+
+### Create the Let's Encrypt ClusterIssuer
+
+A `ClusterIssuer` is a cert-manager resource that tells cert-manager how to obtain certificates. It's cluster-scoped (not namespace-scoped), so all namespaces can use it.
+
+```yaml
+# clusterissuer-letsencrypt.yaml
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    # Let's Encrypt production endpoint
+    # Rate limited: 50 certificates per domain per week
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: your-email@example.com  # ← Replace with your email (used for expiry warnings)
+    privateKeySecretRef:
+      name: letsencrypt-prod-account-key
+    solvers:
+      - http01:
+          ingress:
+            class: traefik  # Use Traefik as the HTTP challenge solver
+```
+
+```yaml
+# clusterissuer-letsencrypt-staging.yaml
+# Use this first to avoid rate limit issues during testing
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    email: your-email@example.com
+    privateKeySecretRef:
+      name: letsencrypt-staging-account-key
+    solvers:
+      - http01:
+          ingress:
+            class: traefik
+```
+
+```bash
+# Apply both issuers
+kubectl apply -f clusterissuer-letsencrypt.yaml
+kubectl apply -f clusterissuer-letsencrypt-staging.yaml
+
+# Verify they are Ready
+kubectl get clusterissuer
+# NAME                    READY   AGE
+# letsencrypt-prod        True    30s
+# letsencrypt-staging     True    30s
+```
+
+<Callout type="warning" title="Always Test with Staging First">
+Let's Encrypt production has rate limits: 50 certificates per registered domain per week. If you hit the limit while debugging, you're locked out of new certs for 7 days. Use the staging ClusterIssuer during development — staging certificates are not trusted by browsers but work identically for testing the cert issuance flow.
+</Callout>
+
+---
+
+## Step 7: Create the Deploy SSH Key for GitHub Actions
+
+The CD workflow needs to SSH into your server to run `kubectl apply` or trigger image updates. Create a dedicated deploy key:
+
+```bash
+# On your LOCAL machine: generate a dedicated deploy key (no passphrase)
+ssh-keygen -t ed25519 -C "github-actions-deploy" -f ~/.ssh/deploy_key -N ""
+
+# Copy the public key to the server
+ssh-copy-id -i ~/.ssh/deploy_key.pub deploy@YOUR_VPS_IP
+
+# Or manually:
+cat ~/.ssh/deploy_key.pub | ssh deploy@YOUR_VPS_IP \
+  "cat >> ~/.ssh/authorized_keys"
+```
+
+Add the private key as a GitHub Secret:
+```bash
+# Print the private key
+cat ~/.ssh/deploy_key
+# (copy the entire output including BEGIN and END lines)
+```
+
+Repository → Settings → Secrets → New:
+- `SSH_PRIVATE_KEY` = (paste the private key)
+- `SSH_HOST` = `YOUR_VPS_IP`
+- `SSH_USER` = `deploy`
+
+```bash
+# Test the connection works (GitHub Actions will use this)
+ssh -i ~/.ssh/deploy_key deploy@YOUR_VPS_IP "kubectl get nodes"
+# NAME        STATUS   ROLES                  AGE
+# your-vps    Ready    control-plane,master   20m
+```
+
+---
+
+## Step 8: Verify the Complete Setup
+
+Run this checklist before moving to Lesson 7:
+
+```bash
+# ✅ K3s is running
+sudo systemctl is-active k3s
+# active
+
+# ✅ Node is Ready
+kubectl get nodes
+# Ready
+
+# ✅ Traefik is running
+kubectl -n traefik get pods
+# Running
+
+# ✅ cert-manager is running
+kubectl -n cert-manager get pods
+# All Running
+
+# ✅ ClusterIssuers are Ready
+kubectl get clusterissuer
+# letsencrypt-prod: True
+# letsencrypt-staging: True
+
+# ✅ production namespace exists
+kubectl get namespace production
+# Active
+
+# ✅ SSH deploy key works
+ssh -i ~/.ssh/deploy_key deploy@YOUR_VPS_IP "echo 'SSH works'"
+# SSH works
+
+# ✅ Remote kubectl works
+kubectl --kubeconfig ~/.kube/config get pods -A
+# (shows all pods across all namespaces)
+```
+
+---
+
+## Understanding the K3s Architecture
+
+K3s runs as a single binary that combines the control plane and the data plane (on a single-node cluster):
+
+```mermaid
+flowchart TD
+    subgraph vps["VPS — Single Node K3s"]
+        subgraph k3s["k3s binary"]
+            API[API Server\n:6443]
+            ETCD[SQLite\n(embedded etcd replacement)]
+            SCHED[Scheduler]
+            CM[Controller Manager]
+        end
+        subgraph node["Node Agent"]
+            KUBELET[kubelet]
+            KPROXY[kube-proxy]
+        end
+        subgraph network["Networking"]
+            FLANNEL[Flannel CNI\n(pod network)]
+            COREDNS[CoreDNS\n(cluster DNS)]
+            TRAEFIK[Traefik\n(ingress)]
+        end
+        subgraph storage["Storage"]
+            LOCALPATH[local-path-provisioner\n(PVC → hostPath)]
+        end
+    end
+
+    LAPTOP[Your Laptop\nkubectl --server=VPS:6443]
+    GH_ACTIONS[GitHub Actions\nkubectl set image]
+
+    LAPTOP -->|6443 TLS| API
+    GH_ACTIONS -->|SSH tunnel or 6443| API
+    API --> ETCD
+    API --> SCHED
+    API --> CM
+    KUBELET -->|reports status| API
+    KUBELET --> FLANNEL
+    KUBELET --> COREDNS
+    KUBELET --> TRAEFIK
+    KUBELET --> LOCALPATH
+```
+
+K3s uses **SQLite** instead of etcd by default. For a single-node cluster, this is fine. For multi-node HA, you'd use embedded etcd or an external database.
+
+---
+
+## Troubleshooting Common Issues
+
+### K3s won't start
+```bash
+# Check logs
+sudo journalctl -u k3s -f --no-pager
+
+# Common fix: ensure ports 6443 and 10250 are not blocked by firewall
+sudo ss -tlnp | grep 6443
+```
+
+### "Connection refused" to Kubernetes API
+```bash
+# Verify K3s API server is listening
+curl -k https://YOUR_VPS_IP:6443/healthz
+# ok
+
+# Check firewall allows port 6443 from your IP
+ufw status  # or check VPS provider firewall rules
+```
+
+### cert-manager webhook fails
+```bash
+kubectl -n cert-manager describe pod -l app=cert-manager-webhook
+# Usually a timing issue — wait 60 seconds and retry
+```
+
+---
+
+## Summary
+
+Your production server is now ready:
+- **Ubuntu 22.04** hardened with SSH key-only auth, no root login, automatic security updates
+- **K3s** installed with Traefik ingress controller (via Helm, not the K3s default)
+- **Remote `kubectl` access** from your laptop and stored as a GitHub Secret
+- **cert-manager** with both staging and production Let's Encrypt ClusterIssuers
+- **`production` namespace** created and labeled
+- **Deploy SSH key** added to the server and stored in GitHub Secrets
+
+In the next lesson, you will write the Kubernetes manifests (Deployment, Service, Ingress, ConfigMap, Secret) that define your application's desired state in the cluster.

@@ -1,0 +1,754 @@
+---
+title: "Setting Up the Production Next.js + DB App"
+---
+
+# Creating the Application
+
+You will build a realistic Next.js 14 application with a PostgreSQL database. The goal is not a toy "Hello World" — it is a production-quality app with proper connection pooling, a health check endpoint used by Kubernetes probes, a real CRUD API, and a frontend that shows the data.
+
+This app is what you'll deploy automatically for the rest of the course.
+
+---
+
+## Why Next.js 14 with the App Router?
+
+The App Router (introduced in Next.js 13) is now the production standard. Here's what makes it the right choice for this capstone:
+
+| Feature | Benefit |
+|---------|---------|
+| **Server Components** | Data fetching happens on the server — no API calls from the browser for initial page load |
+| **API Routes** | `/api/*` routes run as serverless-style handlers — no separate Express server needed |
+| **Built-in TypeScript** | Type safety across both frontend and API code |
+| **`output: 'standalone'`** | Creates a minimal Node.js server bundle, perfect for multi-stage Docker builds |
+| **Edge-compatible** | Can run on edge runtimes if needed in future |
+
+---
+
+## Step 1: Initialize the Project
+
+```bash
+# Create the project (--app enables the App Router)
+npx create-next-app@latest capstone-app \
+  --typescript \
+  --eslint \
+  --tailwind \
+  --app \
+  --no-src-dir \
+  --import-alias "@/*"
+
+cd capstone-app
+```
+
+What each flag does:
+- `--typescript` — TypeScript from day one, no migration pain later
+- `--eslint` — ESLint config ready, required for the CI pipeline lint step
+- `--tailwind` — Utility-first CSS, great for quick UI work
+- `--app` — Use the App Router (not the legacy `pages/` directory)
+- `--no-src-dir` — Keep files in the root `app/` directory, not nested under `src/`
+
+---
+
+## Step 2: Install Database Dependencies
+
+```bash
+# PostgreSQL client for Node.js
+npm install pg
+npm install -D @types/pg
+
+# Also install dotenv for local development
+npm install -D dotenv-cli
+```
+
+The `pg` package is the official PostgreSQL client for Node.js. It supports connection pooling, parameterized queries (preventing SQL injection), and prepared statements.
+
+---
+
+## Step 3: Configure `next.config.ts` for Standalone Output
+
+This is **critical** for the Docker multi-stage build in Lesson 3. Without it, Next.js outputs a full `node_modules/` directory that would bloat your image.
+
+```typescript
+// next.config.ts
+import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {
+  output: "standalone",  // ← Generates a minimal server.js bundle
+  experimental: {
+    // Improve cold start times in containers
+    instrumentationHook: true,
+  },
+};
+
+export default nextConfig;
+```
+
+What `output: "standalone"` produces:
+```
+.next/
+└── standalone/
+    ├── server.js        ← Single entry point (replaces 'next start')
+    ├── node_modules/    ← Only the modules actually needed at runtime
+    └── .next/           ← Compiled application code
+```
+
+---
+
+## Step 4: Project Directory Structure
+
+Here's the complete file structure you'll end up with by the end of Lesson 7:
+
+```
+capstone-app/
+├── app/                          ← Next.js App Router
+│   ├── layout.tsx                ← Root layout (HTML shell)
+│   ├── page.tsx                  ← Home page (shows item list)
+│   ├── globals.css               ← Tailwind base styles
+│   └── api/
+│       ├── health/
+│       │   └── route.ts          ← GET /api/health (K8s liveness/readiness)
+│       └── items/
+│           ├── route.ts          ← GET /api/items, POST /api/items
+│           └── [id]/
+│               └── route.ts     ← DELETE /api/items/:id
+├── lib/
+│   └── db.ts                    ← PostgreSQL connection pool (singleton)
+├── components/
+│   └── ItemList.tsx             ← Client component for interactive UI
+├── Dockerfile                   ← Multi-stage production Dockerfile
+├── .dockerignore
+├── .env.example                 ← Safe to commit: template without real values
+├── .env.local                   ← NOT committed: real dev credentials
+├── docker-compose.dev.yml       ← Local development stack
+├── k8s/                         ← Kubernetes manifests
+│   ├── namespace.yaml
+│   ├── configmap.yaml
+│   ├── secret.yaml
+│   ├── deployment.yaml
+│   ├── service.yaml
+│   └── ingress.yaml
+└── .github/
+    └── workflows/
+        ├── ci.yml               ← CI: lint, test, scan (on every PR)
+        └── cd.yml               ← CD: build, push, deploy (on merge to main)
+```
+
+---
+
+## Step 5: The Database Connection Pool
+
+A connection pool reuses database connections instead of creating a new TCP connection for every query. This is essential for performance — establishing a PostgreSQL connection takes ~5-50ms. Under load, creating a new connection per request would be catastrophic.
+
+```typescript
+// lib/db.ts
+import { Pool } from "pg";
+
+// Using a singleton pattern to prevent multiple pool instances during
+// Next.js hot-reload in development (which re-imports modules)
+declare global {
+  // eslint-disable-next-line no-var
+  var _pgPool: Pool | undefined;
+}
+
+function createPool(): Pool {
+  return new Pool({
+    connectionString: process.env.DATABASE_URL,
+    max: 10,                   // Maximum connections in the pool
+    min: 2,                    // Keep at least 2 connections open
+    idleTimeoutMillis: 30000,  // Close idle connections after 30s
+    connectionTimeoutMillis: 5000,  // Fail fast if DB is unreachable
+    // SSL configuration for production (many managed DBs require it)
+    ssl: process.env.NODE_ENV === "production"
+      ? { rejectUnauthorized: true }
+      : false,
+  });
+}
+
+// Singleton: reuse pool in development (hot-reload), create fresh in production
+const pool = global._pgPool ?? createPool();
+
+if (process.env.NODE_ENV !== "production") {
+  global._pgPool = pool;
+}
+
+export default pool;
+```
+
+<Callout type="warning" title="Connection Pool Sizing">
+With 3 Kubernetes replicas, each having `max: 10`, you could open up to 30 connections simultaneously. Make sure your PostgreSQL `max_connections` setting (default: 100) is higher than `replicas × pool.max`. In Lesson 7, you'll configure a PgBouncer or use `max: 5` per replica.
+</Callout>
+
+---
+
+## Step 6: Health Check API Route
+
+Kubernetes uses the `/api/health` endpoint for **liveness** and **readiness** probes:
+
+- **Liveness probe**: "Is this pod alive?" — if it fails 3 times, K8s restarts the pod
+- **Readiness probe**: "Is this pod ready to receive traffic?" — if it fails, K8s removes it from the Service endpoints
+
+Your health check should test actual system readiness — not just "is the Node process running":
+
+```typescript
+// app/api/health/route.ts
+import { NextResponse } from "next/server";
+import pool from "@/lib/db";
+
+export const dynamic = "force-dynamic"; // Never cache this endpoint
+
+interface HealthStatus {
+  status: "ok" | "degraded" | "error";
+  timestamp: string;
+  uptime: number;
+  db: {
+    status: "connected" | "disconnected";
+    latencyMs?: number;
+  };
+  version: string;
+}
+
+export async function GET() {
+  const startTime = Date.now();
+
+  try {
+    // Measure database query latency
+    const dbStart = Date.now();
+    await pool.query("SELECT 1");
+    const dbLatency = Date.now() - dbStart;
+
+    const body: HealthStatus = {
+      status: "ok",
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      db: {
+        status: "connected",
+        latencyMs: dbLatency,
+      },
+      version: process.env.APP_VERSION ?? "unknown",
+    };
+
+    return NextResponse.json(body, {
+      status: 200,
+      headers: {
+        "Cache-Control": "no-store",
+      },
+    });
+  } catch (error) {
+    const body: HealthStatus = {
+      status: "error",
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      db: {
+        status: "disconnected",
+      },
+      version: process.env.APP_VERSION ?? "unknown",
+    };
+
+    console.error("[health] Database connectivity check failed:", error);
+
+    return NextResponse.json(body, {
+      status: 503, // Service Unavailable — K8s interprets this as unhealthy
+    });
+  }
+}
+```
+
+**Test it locally:**
+```bash
+curl http://localhost:3000/api/health | jq
+# {
+#   "status": "ok",
+#   "timestamp": "2024-01-15T10:30:00.000Z",
+#   "uptime": 42.5,
+#   "db": { "status": "connected", "latencyMs": 3 },
+#   "version": "unknown"
+# }
+```
+
+---
+
+## Step 7: Items CRUD API
+
+```typescript
+// app/api/items/route.ts
+import { NextRequest, NextResponse } from "next/server";
+import pool from "@/lib/db";
+
+// Run database migrations on first request
+// In production, use a proper migration tool (e.g., Flyway, golang-migrate)
+let initialized = false;
+
+async function ensureTable() {
+  if (initialized) return;
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS items (
+      id        SERIAL PRIMARY KEY,
+      name      TEXT        NOT NULL CHECK (length(name) > 0 AND length(name) <= 200),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  initialized = true;
+}
+
+// GET /api/items — List all items (newest first)
+export async function GET() {
+  try {
+    await ensureTable();
+    const result = await pool.query(
+      "SELECT id, name, created_at FROM items ORDER BY created_at DESC LIMIT 100"
+    );
+    return NextResponse.json({
+      items: result.rows,
+      count: result.rowCount,
+    });
+  } catch (error) {
+    console.error("[items GET]", error);
+    return NextResponse.json({ error: "Failed to fetch items" }, { status: 500 });
+  }
+}
+
+// POST /api/items — Create a new item
+export async function POST(req: NextRequest) {
+  try {
+    await ensureTable();
+
+    const body = await req.json();
+
+    // Input validation — never trust user input
+    if (!body.name || typeof body.name !== "string") {
+      return NextResponse.json(
+        { error: "name is required and must be a string" },
+        { status: 400 }
+      );
+    }
+
+    const name = body.name.trim();
+
+    if (name.length === 0 || name.length > 200) {
+      return NextResponse.json(
+        { error: "name must be between 1 and 200 characters" },
+        { status: 400 }
+      );
+    }
+
+    const result = await pool.query(
+      "INSERT INTO items (name) VALUES ($1) RETURNING id, name, created_at",
+      [name]  // Parameterized query — prevents SQL injection
+    );
+
+    return NextResponse.json(result.rows[0], { status: 201 });
+  } catch (error) {
+    console.error("[items POST]", error);
+    return NextResponse.json({ error: "Failed to create item" }, { status: 500 });
+  }
+}
+```
+
+```typescript
+// app/api/items/[id]/route.ts
+import { NextRequest, NextResponse } from "next/server";
+import pool from "@/lib/db";
+
+// DELETE /api/items/:id — Delete an item by ID
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  const id = parseInt(params.id, 10);
+
+  if (isNaN(id)) {
+    return NextResponse.json({ error: "Invalid ID" }, { status: 400 });
+  }
+
+  try {
+    const result = await pool.query(
+      "DELETE FROM items WHERE id = $1 RETURNING id",
+      [id]
+    );
+
+    if (result.rowCount === 0) {
+      return NextResponse.json({ error: "Item not found" }, { status: 404 });
+    }
+
+    return new NextResponse(null, { status: 204 });
+  } catch (error) {
+    console.error("[items DELETE]", error);
+    return NextResponse.json({ error: "Failed to delete item" }, { status: 500 });
+  }
+}
+```
+
+---
+
+## Step 8: Frontend Page
+
+```typescript
+// app/page.tsx
+import { ItemList } from "@/components/ItemList";
+
+export default function HomePage() {
+  return (
+    <main className="max-w-2xl mx-auto py-16 px-4">
+      <h1 className="text-3xl font-bold mb-2">CI/CD Capstone App</h1>
+      <p className="text-gray-500 mb-8">
+        Items are stored in PostgreSQL and deployed automatically via GitHub Actions.
+      </p>
+      <ItemList />
+    </main>
+  );
+}
+```
+
+```typescript
+// components/ItemList.tsx
+"use client";
+
+import { useState, useEffect } from "react";
+
+interface Item {
+  id: number;
+  name: string;
+  created_at: string;
+}
+
+export function ItemList() {
+  const [items, setItems] = useState<Item[]>([]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function fetchItems() {
+    const res = await fetch("/api/items");
+    const data = await res.json();
+    setItems(data.items ?? []);
+  }
+
+  async function addItem() {
+    if (!input.trim()) return;
+    setLoading(true);
+    await fetch("/api/items", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: input }),
+    });
+    setInput("");
+    await fetchItems();
+    setLoading(false);
+  }
+
+  async function deleteItem(id: number) {
+    await fetch(`/api/items/${id}`, { method: "DELETE" });
+    setItems((prev) => prev.filter((i) => i.id !== id));
+  }
+
+  useEffect(() => {
+    fetchItems();
+  }, []);
+
+  return (
+    <div>
+      <div className="flex gap-2 mb-6">
+        <input
+          className="flex-1 border rounded px-3 py-2 text-sm"
+          placeholder="New item name..."
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && addItem()}
+        />
+        <button
+          onClick={addItem}
+          disabled={loading}
+          className="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700 disabled:opacity-50"
+        >
+          {loading ? "Adding..." : "Add Item"}
+        </button>
+      </div>
+
+      {items.length === 0 ? (
+        <p className="text-gray-400 text-sm">No items yet. Add one above!</p>
+      ) : (
+        <ul className="space-y-2">
+          {items.map((item) => (
+            <li key={item.id} className="flex items-center justify-between border rounded px-3 py-2">
+              <span className="text-sm">{item.name}</span>
+              <button
+                onClick={() => deleteItem(item.id)}
+                className="text-red-500 text-xs hover:underline"
+              >
+                Delete
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+```
+
+---
+
+## Step 9: Environment Configuration
+
+```bash
+# .env.example — COMMIT THIS FILE (no real secrets)
+# Copy to .env.local and fill in real values
+DATABASE_URL=postgres://appuser:changeme@localhost:5432/capstone
+APP_VERSION=dev
+NODE_ENV=development
+```
+
+```bash
+# .env.local — DO NOT COMMIT (add to .gitignore)
+DATABASE_URL=postgres://appuser:apppass@localhost:5432/capstone
+APP_VERSION=dev
+```
+
+```bash
+# Ensure .env.local is gitignored (create-next-app does this automatically)
+cat .gitignore | grep env
+# .env*.local ← should be here
+```
+
+---
+
+## Step 10: Local Development with Docker Compose
+
+Run the full stack locally with one command:
+
+```yaml
+# docker-compose.dev.yml
+services:
+  app:
+    build:
+      context: .
+      target: builder  # Use the builder stage, not the slim runner (easier for dev)
+    command: npm run dev
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/app                  # Mount source for hot-reload
+      - /app/node_modules       # Keep container's node_modules intact
+      - /app/.next              # Keep compiled output in container
+    environment:
+      DATABASE_URL: postgres://appuser:apppass@db:5432/capstone
+      NODE_ENV: development
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: appuser
+      POSTGRES_PASSWORD: apppass
+      POSTGRES_DB: capstone
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U appuser -d capstone"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
+```
+
+```bash
+# Start the dev stack
+docker compose -f docker-compose.dev.yml up -d
+
+# Watch logs
+docker compose -f docker-compose.dev.yml logs -f app
+
+# Test the health endpoint
+curl http://localhost:3000/api/health | jq
+# { "status": "ok", "db": { "status": "connected", "latencyMs": 2 } }
+
+# Add an item
+curl -X POST http://localhost:3000/api/items \
+  -H "Content-Type: application/json" \
+  -d '{"name": "My first item"}'
+
+# List items
+curl http://localhost:3000/api/items | jq
+
+# Stop everything
+docker compose -f docker-compose.dev.yml down
+```
+
+---
+
+## Step 11: Add Unit Tests
+
+The CI pipeline (Lesson 4) will run these tests automatically on every pull request.
+
+```bash
+# Install Vitest (fast, Vite-native test runner)
+npm install -D vitest @vitejs/plugin-react jsdom @testing-library/react @testing-library/jest-dom
+```
+
+```typescript
+// vitest.config.ts
+import { defineConfig } from "vitest/config";
+import react from "@vitejs/plugin-react";
+import path from "path";
+
+export default defineConfig({
+  plugins: [react()],
+  test: {
+    environment: "jsdom",
+    globals: true,
+    setupFiles: ["./vitest.setup.ts"],
+  },
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "."),
+    },
+  },
+});
+```
+
+```typescript
+// vitest.setup.ts
+import "@testing-library/jest-dom";
+```
+
+```typescript
+// __tests__/api-health.test.ts
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// Mock the database pool
+vi.mock("@/lib/db", () => ({
+  default: {
+    query: vi.fn().mockResolvedValue({ rows: [{ "?column?": 1 }] }),
+  },
+}));
+
+describe("/api/health", () => {
+  it("returns 200 when database is reachable", async () => {
+    const { GET } = await import("@/app/api/health/route");
+    const response = await GET();
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.status).toBe("ok");
+    expect(body.db.status).toBe("connected");
+  });
+
+  it("returns 503 when database is unreachable", async () => {
+    const pool = (await import("@/lib/db")).default;
+    vi.mocked(pool.query).mockRejectedValueOnce(new Error("Connection refused"));
+
+    const { GET } = await import("@/app/api/health/route");
+    const response = await GET();
+    const body = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(body.status).toBe("error");
+    expect(body.db.status).toBe("disconnected");
+  });
+});
+```
+
+```json
+// package.json — add the test script
+{
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "type-check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  }
+}
+```
+
+```bash
+# Run tests locally
+npm test
+
+# Run lint
+npm run lint
+
+# Type-check (no compilation output, just type errors)
+npm run type-check
+```
+
+---
+
+## Step 12: Initialize the Git Repository and Push to GitHub
+
+```bash
+# Initialize git (create-next-app may have already done this)
+git init
+git add .
+git commit -m "feat: initial Next.js app with PostgreSQL and health check"
+
+# Create a new repository on GitHub (via CLI or browser)
+# Then add the remote
+git remote add origin git@github.com:YOUR_USERNAME/capstone-app.git
+git push -u origin main
+```
+
+<Callout type="tip" title="Use the GitHub CLI">
+The GitHub CLI makes this faster:
+```bash
+brew install gh
+gh auth login
+gh repo create capstone-app --public --source=. --push
+```
+</Callout>
+
+---
+
+## Troubleshooting Common Issues
+
+### "Can't connect to database" locally
+```bash
+# Check if the postgres container is healthy
+docker compose -f docker-compose.dev.yml ps
+# LOOK FOR: Status = healthy (not starting)
+
+# Check postgres logs
+docker compose -f docker-compose.dev.yml logs db
+
+# Connect manually to verify
+docker compose -f docker-compose.dev.yml exec db \
+  psql -U appuser -d capstone -c "SELECT 1"
+```
+
+### "Module not found: @/lib/db"
+```bash
+# Ensure your tsconfig.json has the path alias
+cat tsconfig.json | grep paths
+# Should see: "@/*": ["./*"]
+
+# Ensure next.config.ts has the same alias
+# create-next-app adds this automatically with --import-alias "@/*"
+```
+
+### Hot-reload not working in Docker
+```bash
+# The volume mount approach in docker-compose.dev.yml should handle this.
+# If not, ensure WATCHPACK_POLLING=true is set:
+environment:
+  WATCHPACK_POLLING: "true"
+```
+
+---
+
+## Summary
+
+You now have a production-quality application with:
+- A database connection pool with proper timeout configuration
+- A `/api/health` endpoint that tests real database connectivity (used by Kubernetes probes in Lesson 7)
+- A full CRUD API with input validation and parameterized queries (no SQL injection)
+- An interactive frontend component
+- Unit tests for the health endpoint
+- A local Docker Compose dev environment
+
+In the next lesson, you will write the production-hardened multi-stage Dockerfile that packages this application into a minimal, secure container image.

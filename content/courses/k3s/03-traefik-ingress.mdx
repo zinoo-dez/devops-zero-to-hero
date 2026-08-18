@@ -1,0 +1,557 @@
+---
+title: "Built-In Traefik Ingress Controller"
+---
+
+# How Traffic Reaches Your Pods
+
+Without an Ingress Controller, services in Kubernetes are only reachable inside the cluster. To expose an application to the internet, you have three options:
+
+| Service Type | How It Works | When to Use |
+|-------------|-------------|-------------|
+| `ClusterIP` | Internal IP only, unreachable from outside | Pod-to-pod communication |
+| `NodePort` | Opens a random high port (30000-32767) on the host | Quick testing, never production |
+| `LoadBalancer` | Requests an external IP from a cloud provider | Cloud environments (AWS, GCP) |
+| **Ingress** | Routes HTTP/HTTPS via hostname or path rules | **Production — all traffic** |
+
+An **Ingress Controller** watches for `Ingress` resources and configures itself to route traffic accordingly. K3s ships **Traefik v2** as its built-in Ingress Controller, pre-configured and ready immediately after installation.
+
+---
+
+## How Traefik Works in K3s
+
+```mermaid
+flowchart TD
+    subgraph internet["🌐 Internet"]
+        USER[User Browser\nhttps://app.example.com]
+    end
+
+    subgraph vps["VPS Node"]
+        subgraph traefik["Traefik (kube-system namespace)"]
+            EP80[":80 Entrypoint\nHTTP"]
+            EP443[":443 Entrypoint\nHTTPS / TLS termination"]
+            ROUTER[Router\nMatches host + path rules]
+            MW[Middleware\nHTTP→HTTPS redirect, auth, headers]
+        end
+
+        subgraph app_ns["production namespace"]
+            SVC[Service\nClusterIP]
+            POD1[Pod]
+            POD2[Pod]
+            POD3[Pod]
+        end
+    end
+
+    USER -->|":443"| EP443
+    EP443 --> ROUTER
+    ROUTER --> MW
+    MW --> SVC
+    SVC --> POD1 & POD2 & POD3
+
+    HTTP_USER[User Browser\nhttp://app.example.com] -->|":80"| EP80
+    EP80 -->|"301 Redirect"| EP443
+```
+
+Traefik acts as a **reverse proxy**: it receives all incoming connections on ports 80 and 443, reads the `Host` header, matches it against your `Ingress` rules, and forwards the request to the appropriate `Service`.
+
+---
+
+## Verify Traefik Is Running
+
+```bash
+# Check Traefik pods
+kubectl get pods -n kube-system -l app.kubernetes.io/name=traefik
+# NAME                       READY   STATUS    RESTARTS   AGE
+# traefik-xxx-yyy            1/1     Running   0          10m
+
+# Check Traefik's service (this is how it gets its external IP/port)
+kubectl get svc -n kube-system traefik
+# NAME      TYPE           CLUSTER-IP    EXTERNAL-IP    PORT(S)
+# traefik   LoadBalancer   10.43.45.67   YOUR_VPS_IP    80:31234/TCP,443:31567/TCP
+
+# The EXTERNAL-IP is your VPS public IP — all HTTP/HTTPS traffic comes through here
+
+# View Traefik's configuration
+kubectl describe deployment traefik -n kube-system
+
+# Check Traefik logs for routing events
+kubectl logs -n kube-system -l app.kubernetes.io/name=traefik --tail=50
+```
+
+---
+
+## Your First Ingress Resource
+
+Deploy a simple app and expose it via Traefik:
+
+```yaml
+# demo-app.yaml
+---
+# The application
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whoami
+  namespace: default
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: whoami
+  template:
+    metadata:
+      labels:
+        app: whoami
+    spec:
+      containers:
+        - name: whoami
+          image: traefik/whoami:latest    # Responds with request info
+          ports:
+            - containerPort: 80
+---
+# The ClusterIP Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: whoami
+  namespace: default
+spec:
+  selector:
+    app: whoami
+  ports:
+    - port: 80
+      targetPort: 80
+---
+# The Ingress
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: whoami-ingress
+  namespace: default
+  annotations:
+    # Optional: specify entry points explicitly
+    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
+spec:
+  ingressClassName: traefik   # Use the Traefik IngressClass
+  rules:
+    - host: whoami.example.com   # ← Replace with your domain
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: whoami
+                port:
+                  number: 80
+```
+
+```bash
+kubectl apply -f demo-app.yaml
+
+# Verify the Ingress was created
+kubectl get ingress whoami-ingress
+# NAME             CLASS     HOSTS                ADDRESS        PORTS
+# whoami-ingress   traefik   whoami.example.com   YOUR_VPS_IP   80
+
+# Test (point your domain A record to the VPS IP first)
+curl http://whoami.example.com
+# Hostname: whoami-xxx-yyy
+# IP: 10.42.0.5
+# Host: whoami.example.com
+```
+
+---
+
+## Traefik Middleware: The Power Feature
+
+Middleware transforms requests and responses. You apply middleware to Ingress routes via annotations.
+
+### Middleware 1: HTTP → HTTPS Redirect
+
+```yaml
+# redirect-middleware.yaml
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: redirect-to-https
+  namespace: default
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: true   # HTTP 301 (cached by browsers forever)
+
+---
+# Apply middleware to Ingress via annotation
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: whoami-ingress
+  namespace: default
+  annotations:
+    # Format: NAMESPACE-MIDDLEWARENAME@kubernetescrd
+    traefik.ingress.kubernetes.io/router.middlewares: default-redirect-to-https@kubernetescrd
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - whoami.example.com
+      secretName: whoami-tls   # Created by cert-manager (Lesson 5)
+  rules:
+    - host: whoami.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: whoami
+                port:
+                  number: 80
+```
+
+### Middleware 2: Basic Authentication
+
+```bash
+# Generate htpasswd credentials (username: admin, password: secret)
+sudo apt-get install -y apache2-utils
+htpasswd -nb admin secret
+# admin:$apr1$abc123$xyz...
+
+# Store as a Kubernetes Secret
+kubectl create secret generic basic-auth \
+  --from-literal=users='admin:$apr1$abc123$xyz...' \
+  --namespace default
+```
+
+```yaml
+# auth-middleware.yaml
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: basic-auth
+  namespace: default
+spec:
+  basicAuth:
+    secret: basic-auth   # References the Secret above
+```
+
+### Middleware 3: Rate Limiting
+
+Protect your app from abuse — limit each IP to 100 requests per second:
+
+```yaml
+# ratelimit-middleware.yaml
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: rate-limit
+  namespace: default
+spec:
+  rateLimit:
+    average: 100    # Average requests per second
+    burst: 50       # Allow short bursts up to 50 req/s above average
+```
+
+### Middleware 4: Security Headers
+
+```yaml
+# security-headers-middleware.yaml
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: security-headers
+  namespace: default
+spec:
+  headers:
+    frameDeny: true                     # X-Frame-Options: DENY
+    contentTypeNosniff: true            # X-Content-Type-Options: nosniff
+    browserXssFilter: true              # X-XSS-Protection: 1; mode=block
+    stsSeconds: 31536000                # Strict-Transport-Security: 1 year
+    stsIncludeSubdomains: true
+    stsPreload: true
+    referrerPolicy: "strict-origin-when-cross-origin"
+    customResponseHeaders:
+      X-Powered-By: ""                  # Remove the X-Powered-By header (privacy)
+      Server: ""                        # Remove the Server header (security)
+```
+
+### Applying Multiple Middlewares at Once
+
+```yaml
+# Apply comma-separated list in annotation
+annotations:
+  traefik.ingress.kubernetes.io/router.middlewares: >-
+    default-redirect-to-https@kubernetescrd,
+    default-rate-limit@kubernetescrd,
+    default-security-headers@kubernetescrd
+```
+
+---
+
+## Path-Based Routing
+
+Route different paths to different services:
+
+```yaml
+# path-routing-ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: api-gateway
+  namespace: production
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: app.example.com
+      http:
+        paths:
+          # Route /api/* to the API service
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: api-service
+                port:
+                  number: 3000
+          # Route /admin/* to the admin service
+          - path: /admin
+            pathType: Prefix
+            backend:
+              service:
+                name: admin-service
+                port:
+                  number: 4000
+          # Everything else → frontend
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend-service
+                port:
+                  number: 80
+```
+
+---
+
+## Host-Based Routing (Virtual Hosting)
+
+Route different domains to different services on the same cluster:
+
+```yaml
+# multi-domain-ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: multi-domain
+  namespace: production
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts: [app.example.com]
+      secretName: app-tls
+    - hosts: [api.example.com]
+      secretName: api-tls
+    - hosts: [admin.example.com]
+      secretName: admin-tls
+  rules:
+    - host: app.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend-service
+                port:
+                  number: 80
+    - host: api.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: api-service
+                port:
+                  number: 3000
+    - host: admin.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: admin-service
+                port:
+                  number: 4000
+```
+
+---
+
+## Accessing the Traefik Dashboard
+
+Traefik includes a real-time dashboard showing all routes, services, middleware, and TLS certificates.
+
+```yaml
+# traefik-dashboard-ingress.yaml
+# WARNING: Secure this with basic auth in production!
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: traefik-dashboard
+  namespace: kube-system
+  annotations:
+    # Apply basic auth to protect the dashboard
+    traefik.ingress.kubernetes.io/router.middlewares: kube-system-basic-auth@kubernetescrd
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: traefik.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: traefik
+                port:
+                  number: 9000   # Traefik dashboard port
+```
+
+Or access it locally without exposing it publicly:
+```bash
+# Port-forward to your laptop
+kubectl -n kube-system port-forward svc/traefik 9000:9000
+
+# Open in browser
+open http://localhost:9000/dashboard/
+```
+
+---
+
+## Traefik CRDs: IngressRoute (Alternative to Ingress)
+
+Traefik also supports its own CRD called `IngressRoute`, which offers more features than the standard `Ingress` resource:
+
+```yaml
+# ingressroute.yaml (Traefik-native alternative to Ingress)
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: my-app-route
+  namespace: production
+spec:
+  entryPoints:
+    - websecure    # HTTPS only
+  routes:
+    - match: Host(`app.example.com`) && PathPrefix(`/api`)
+      kind: Rule
+      middlewares:
+        - name: rate-limit
+        - name: security-headers
+      services:
+        - name: api-service
+          port: 3000
+    - match: Host(`app.example.com`)
+      kind: Rule
+      services:
+        - name: frontend-service
+          port: 80
+  tls:
+    certResolver: letsencrypt   # Traefik's built-in ACME support
+```
+
+<Callout type="tip" title="Standard Ingress vs IngressRoute">
+Use **standard `Ingress`** resources when: you want portability (same YAML works on NGINX, GKE, EKS) or you're using cert-manager for TLS.
+
+Use **`IngressRoute`** when: you need features unavailable in standard Ingress (complex routing expressions, TCP routes, load balancing weights, or Traefik's built-in ACME without cert-manager).
+</Callout>
+
+---
+
+## TCP and UDP Routing (Non-HTTP)
+
+Traefik can also route non-HTTP protocols. Useful for exposing databases, game servers, or custom TCP apps:
+
+```yaml
+# tcp-ingressroute.yaml
+apiVersion: traefik.io/v1alpha1
+kind: IngressRouteTCP
+metadata:
+  name: postgres-route
+  namespace: production
+spec:
+  entryPoints:
+    - postgres-entrypoint   # Define custom entrypoints in Traefik config
+  routes:
+    - match: HostSNI(`postgres.example.com`)
+      services:
+        - name: postgres-service
+          port: 5432
+  tls:
+    passthrough: true   # Don't terminate TLS — pass it to the backend
+```
+
+---
+
+## Upgrading Traefik in K3s
+
+K3s bundles a specific Traefik version. To upgrade to a newer Traefik:
+
+```bash
+# Check current Traefik version
+kubectl -n kube-system get deployment traefik -o jsonpath='{.spec.template.spec.containers[0].image}'
+# traefik:2.10.7
+
+# K3s manages Traefik via HelmChart CRD
+kubectl -n kube-system get helmchart traefik -o yaml
+
+# To upgrade, patch the HelmChart spec with a new version
+kubectl -n kube-system patch helmchart traefik --type='json' \
+  -p='[{"op":"replace","path":"/spec/version","value":"v26.1.0"}]'
+
+# Watch the upgrade
+kubectl -n kube-system rollout status deployment/traefik
+```
+
+Or upgrade via the Traefik Helm chart directly after disabling K3s's built-in Traefik:
+```bash
+# Disable K3s's built-in Traefik (add to /etc/rancher/k3s/config.yaml)
+disable:
+  - traefik
+
+# Then install Traefik from Helm with full control over values
+helm repo add traefik https://traefik.github.io/charts
+helm install traefik traefik/traefik -n kube-system -f traefik-values.yaml
+```
+
+---
+
+## Traefik vs NGINX Ingress: Feature Comparison
+
+| Feature | Traefik (K3s Built-in) | NGINX Ingress |
+|---------|------------------------|---------------|
+| Pre-installed in K3s | ✅ Yes | ❌ Manual install |
+| Dashboard UI | ✅ Yes | ❌ No |
+| CRD support (IngressRoute) | ✅ Traefik CRDs | ❌ Only standard Ingress |
+| Middleware (auth, rate limit) | ✅ Native CRDs | ⚠️ Via annotations only |
+| Automatic ACME/Let's Encrypt | ✅ Native (no cert-manager) | ❌ Requires cert-manager |
+| TCP/UDP routing | ✅ Native | ⚠️ Limited |
+| Configuration reload | ✅ Zero downtime | ✅ Zero downtime |
+| Prometheus metrics | ✅ Built-in | ✅ Built-in |
+| Industry familiarity | ⚠️ Traefik-specific | ✅ Very widely known |
+| Annotation compatibility | ❌ Different from NGINX | ✅ Same on all clouds |
+
+---
+
+## Summary
+
+Traefik is K3s's built-in reverse proxy and Ingress Controller. It:
+- **Pre-installed and running** immediately after K3s installation — no setup needed
+- Routes traffic using **standard `Ingress` resources** (portable to other clusters) or **`IngressRoute` CRDs** (Traefik-specific, more powerful)
+- Supports **middleware** for HTTP→HTTPS redirects, rate limiting, basic auth, and security headers
+- Enables **path-based** and **host-based** routing to different services
+- Has a built-in **dashboard** for visualizing all routes in real time
+- Can route **non-HTTP** traffic (TCP/UDP) via `IngressRouteTCP`/`IngressRouteUDP`
+
+In the next lesson, you will deploy a full-stack application (frontend + API + database) to your K3s cluster using production-quality Kubernetes manifests.

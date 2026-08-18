@@ -1,0 +1,349 @@
+---
+title: "Jobs, Steps, Service Containers & Artifacts"
+---
+
+# Structuring Multi-Job Workflows
+
+A well-structured workflow separates concerns into parallel jobs, sequences dependent jobs, uses service containers for integration tests, and persists outputs with artifacts.
+
+---
+
+## Job Parallelism and Dependencies
+
+```mermaid
+flowchart LR
+    PUSH["git push"]
+    
+    LINT["lint\n~1 min"]
+    TYPECHECK["type-check\n~30s"]
+    UNIT["unit-tests\n~2 min"]
+    
+    SECURITY["security-scan\n~3 min"]
+    
+    BUILD["docker-build\n~5 min"]
+    
+    STAGING["deploy-staging\n~2 min"]
+    
+    PUSH --> LINT & TYPECHECK & UNIT & SECURITY
+    LINT & TYPECHECK & UNIT & SECURITY --> BUILD
+    BUILD --> STAGING
+```
+
+```yaml
+jobs:
+  # ── Parallel group 1: Fast feedback (run simultaneously) ───────────
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+      - run: npm ci && npx eslint src/ --max-warnings=0
+
+  type-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+      - run: npm ci && npx tsc --noEmit
+
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+      - run: npm ci && npm run test:unit -- --coverage
+
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci && npm audit --audit-level=high
+
+  # ── Sequential: only after ALL parallel jobs pass ─────────────────
+  docker-build:
+    needs: [lint, type-check, unit-tests, security-scan]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/build-push-action@v5
+        with: { context: ., push: false, tags: myapp:test, load: true }
+
+  deploy-staging:
+    needs: docker-build
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Deploying to staging"
+```
+
+---
+
+## Service Containers: Real Dependencies for Integration Tests
+
+Service containers spin up real Docker containers (PostgreSQL, Redis, MongoDB) alongside your job — available as `localhost` on defined ports:
+
+```yaml
+jobs:
+  integration-tests:
+    runs-on: ubuntu-latest
+    
+    services:
+      # Service name becomes a hostname accessible to steps
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: testuser
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: testdb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U testuser -d testdb"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-retries 5
+
+      # LocalStack for mocking AWS services (S3, SQS, DynamoDB)
+      localstack:
+        image: localstack/localstack:latest
+        ports:
+          - 4566:4566
+        env:
+          SERVICES: s3,sqs,dynamodb
+          DEFAULT_REGION: us-east-1
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+      - run: npm ci
+      
+      - name: Run database migrations
+        run: npx prisma migrate deploy
+        env:
+          DATABASE_URL: postgres://testuser:testpass@localhost:5432/testdb
+
+      - name: Run integration tests
+        run: npm run test:integration
+        env:
+          DATABASE_URL: postgres://testuser:testpass@localhost:5432/testdb
+          REDIS_URL: redis://localhost:6379
+          AWS_ENDPOINT: http://localhost:4566
+
+      - name: Run E2E tests against full stack
+        run: npm run test:e2e
+        env:
+          DATABASE_URL: postgres://testuser:testpass@localhost:5432/testdb
+```
+
+---
+
+## Artifacts: Passing Data Between Jobs
+
+Artifacts persist files between jobs and runs. Use them to:
+- Pass a build output from a `build` job to a `deploy` job
+- Archive test reports (accessible in the GitHub UI even after the run)
+- Store coverage reports, security scan results, Playwright screenshots
+
+```yaml
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci && npm run build
+
+      # Upload build output as an artifact
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-bundle           # Artifact name (reference in download)
+          path: dist/                 # Path to upload (file or directory)
+          retention-days: 7           # Auto-delete after N days (default: 90)
+          if-no-files-found: error    # Fail if dist/ doesn't exist
+          compression-level: 6        # Compression level (0-9)
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      # Download the artifact from the build job
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-bundle
+          path: dist/   # Where to place downloaded files
+
+      - name: Deploy to server
+        run: rsync -avz dist/ user@server:/var/www/html/
+
+  # Upload test results (even if tests fail — use always())
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci
+      
+      - name: Run tests
+        run: npm test -- --reporters=junit --outputFile=test-results.xml
+        continue-on-error: true   # Don't stop the upload if tests fail
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()              # Upload even if tests failed
+        with:
+          name: test-results-${{ github.run_number }}
+          path: |
+            test-results.xml
+            coverage/
+          retention-days: 30
+```
+
+---
+
+## Caching: Speed Up Repeated Operations
+
+Caching saves downloaded dependencies between runs — the single biggest speed improvement for most pipelines:
+
+```yaml
+# Built-in caching via setup-node
+- uses: actions/setup-node@v4
+  with:
+    node-version: 20
+    cache: npm          # Automatically caches ~/.npm keyed on package-lock.json
+
+# Manual caching (more control)
+- uses: actions/cache@v4
+  id: cache-node-modules
+  with:
+    path: node_modules
+    key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json') }}
+    restore-keys: |
+      ${{ runner.os }}-node-   # Fallback: restore any node cache if exact key misses
+
+# Only install if cache missed
+- name: Install dependencies
+  if: steps.cache-node-modules.outputs.cache-hit != 'true'
+  run: npm ci
+
+# Other common cache targets
+- uses: actions/cache@v4
+  with:
+    path: ~/.gradle/caches      # Java/Kotlin (Gradle)
+    key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*') }}
+
+- uses: actions/cache@v4
+  with:
+    path: ~/.cache/pip          # Python (pip)
+    key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+
+- uses: actions/cache@v4
+  with:
+    path: |
+      ~/.cargo/registry         # Rust (Cargo)
+      ~/.cargo/git
+      target/
+    key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+```
+
+---
+
+## Conditional Step Execution
+
+```yaml
+steps:
+  - name: Deploy to production
+    # Only run if: event is push AND branch is main AND previous steps passed
+    if: |
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      success()
+    run: ./deploy.sh production
+
+  - name: Notify on failure
+    # Always run, but only if something above failed
+    if: failure()
+    uses: slackapi/slack-github-action@v1
+    with:
+      channel-id: "#ci-alerts"
+      slack-message: "❌ Pipeline failed on ${{ github.ref_name }}"
+    env:
+      SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+
+  - name: Always upload logs
+    if: always()   # Runs even if earlier steps failed or were cancelled
+    uses: actions/upload-artifact@v4
+    with:
+      name: pipeline-logs
+      path: /var/log/
+
+  - name: Skip on draft PRs
+    if: |
+      github.event_name != 'pull_request' ||
+      !github.event.pull_request.draft
+    run: npm run expensive-test
+
+  - name: Only on tags
+    if: startsWith(github.ref, 'refs/tags/')
+    run: npm publish
+```
+
+---
+
+## Setting Step Outputs
+
+```yaml
+steps:
+  - name: Get version
+    id: version   # Must set id to reference outputs
+    run: |
+      VERSION=$(cat package.json | python3 -c "import json,sys; print(json.load(sys.stdin)['version'])")
+      SHA_SHORT=$(git rev-parse --short HEAD)
+      
+      # Modern output syntax (GitHub Actions)
+      echo "version=${VERSION}" >> $GITHUB_OUTPUT
+      echo "sha=${SHA_SHORT}" >> $GITHUB_OUTPUT
+      echo "image-tag=${VERSION}-${SHA_SHORT}" >> $GITHUB_OUTPUT
+
+  - name: Use the output
+    run: |
+      echo "Version: ${{ steps.version.outputs.version }}"
+      echo "SHA: ${{ steps.version.outputs.sha }}"
+      docker build -t myapp:${{ steps.version.outputs.image-tag }} .
+
+  - name: Set dynamic job summary
+    run: |
+      echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+      echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+      echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+      echo "| Version | ${{ steps.version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
+      echo "| Commit | ${{ steps.version.outputs.sha }} |" >> $GITHUB_STEP_SUMMARY
+      echo "| Status | ✅ Deployed |" >> $GITHUB_STEP_SUMMARY
+```
+
+---
+
+## Summary
+
+| Concept | Key Points |
+|---------|-----------|
+| **Parallel jobs** | Default behavior; `needs:` creates sequential dependency |
+| **Service containers** | Real DB/cache instances alongside job; accessed via `localhost:port` |
+| **Artifacts** | Upload with `upload-artifact@v4`; download in later jobs with `download-artifact@v4` |
+| **Caching** | Use `setup-node cache: npm` for quick setup; `actions/cache@v4` for custom paths |
+| **Conditional steps** | `if: success()`, `if: failure()`, `if: always()`, `if: expression` |
+| **Step outputs** | Set with `echo "key=value" >> $GITHUB_OUTPUT`; read with `${{ steps.id.outputs.key }}` |
+| **Job summary** | Write to `$GITHUB_STEP_SUMMARY` for a Markdown summary in the GitHub UI |
+
+In the next lesson, you will master environment variables and secrets — how to securely inject credentials and configuration into your workflows.

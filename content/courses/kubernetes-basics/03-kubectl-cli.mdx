@@ -1,0 +1,488 @@
+---
+title: "The kubectl CLI: Commands, Contexts & Namespaces"
+---
+
+# `kubectl` — Your Command Center for Kubernetes
+
+`kubectl` is the command-line tool for interacting with any Kubernetes cluster. Every action you take — deploying apps, inspecting pods, reading logs, debugging failures — goes through `kubectl`. Mastering it is the single most valuable skill for any Kubernetes practitioner.
+
+---
+
+## Installation
+
+```bash
+# macOS (Homebrew)
+brew install kubectl
+
+# macOS (manual — matches a specific K8s version)
+curl -LO "https://dl.k8s.io/release/v1.29.4/bin/darwin/amd64/kubectl"
+chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+
+# Linux (Ubuntu/Debian)
+curl -LO "https://dl.k8s.io/release/$(curl -sL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+chmod +x kubectl && sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+
+# Linux (snap)
+sudo snap install kubectl --classic
+
+# Windows (Chocolatey)
+choco install kubernetes-cli
+
+# Verify installation
+kubectl version --client
+# Client Version: v1.29.4
+# Kustomize Version: v5.0.4
+```
+
+---
+
+## Shell Autocompletion (Essential)
+
+Set this up immediately — it saves hours of typing:
+
+```bash
+# Bash (~/.bashrc)
+echo 'source <(kubectl completion bash)' >> ~/.bashrc
+source ~/.bashrc
+
+# Zsh (~/.zshrc)
+echo 'source <(kubectl completion zsh)' >> ~/.zshrc
+source ~/.zshrc
+
+# Create a 'k' alias with full autocompletion
+echo 'alias k=kubectl' >> ~/.zshrc
+echo 'complete -o default -F __start_kubectl k' >> ~/.zshrc
+source ~/.zshrc
+
+# Now you can type:
+k get po<TAB>             # → k get pods
+k describe dep<TAB>       # → k describe deployment
+k get pods -n kube-<TAB>  # → -n kube-system
+```
+
+---
+
+## The Four Most Important Command Groups
+
+### 1. `get` — List Resources
+
+```bash
+# === PODS ===
+kubectl get pods                         # Pods in current namespace
+kubectl get pods -o wide                 # +Node, +IP columns
+kubectl get pods -A                      # All namespaces
+kubectl get pods -w                      # Watch (auto-refreshes on changes)
+kubectl get pods -l app=api              # Filter by label
+kubectl get pods --field-selector=status.phase=Running  # Filter by field
+kubectl get pod my-pod -o yaml           # Full YAML of a specific pod
+kubectl get pod my-pod -o json           # JSON output
+kubectl get pod my-pod -o jsonpath='{.status.podIP}'  # Extract specific field
+
+# === NODES ===
+kubectl get nodes
+kubectl get nodes -o wide                # +OS, +container runtime, +external IP
+kubectl describe node worker-1           # Full node details (resources, conditions, pods)
+
+# === ALL RESOURCES IN A NAMESPACE ===
+kubectl get all -n production            # Pods, deployments, services, replicasets
+kubectl get all -A                       # Everything in the entire cluster
+
+# === EVENTS (Critical for debugging) ===
+kubectl get events -n production --sort-by='.lastTimestamp'
+kubectl get events -n production --field-selector type=Warning  # Only warnings
+
+# === OUTPUT FORMATS ===
+kubectl get deployment my-api -o yaml    # Full YAML spec
+kubectl get deployment my-api -o json    # JSON
+kubectl get deployment my-api -o jsonpath='{.spec.replicas}'  # Single value
+kubectl get pods -o custom-columns='NAME:.metadata.name,NODE:.spec.nodeName,IP:.status.podIP'
+```
+
+### 2. `describe` — Detailed Inspection
+
+`describe` is your #1 debugging tool. It shows the resource spec, current status, and most importantly the **Events** at the bottom:
+
+```bash
+# Describe a pod (shows container status, resource usage, events, probe results)
+kubectl describe pod my-api-xxx-yyy
+
+# CRITICAL: always read the Events section at the bottom
+# Events tell you WHY a pod is failing:
+# Events:
+#   Warning  Failed     pod/api-xxx  Back-off pulling image "ghcr.io/user/api:bad-tag"
+#   Warning  Failed     pod/api-xxx  Error: ErrImagePull
+#   Warning  BackOff    pod/api-xxx  Back-off restarting failed container
+
+# Describe a deployment (shows conditions, replica counts)
+kubectl describe deployment my-api
+
+# Describe a service (shows endpoints — critical for debugging connectivity)
+kubectl describe service my-api
+# Endpoints:  10.42.0.5:3000,10.42.0.6:3000  ← Pods the service routes to
+# If Endpoints is "<none>": label selector doesn't match any pods
+
+# Describe a node (shows allocatable resources, running pods, conditions)
+kubectl describe node worker-1
+```
+
+### 3. `logs` — Container Output
+
+```bash
+# Basic logs (stdout + stderr from the container)
+kubectl logs my-api-xxx-yyy
+
+# Stream logs in real time (-f = follow)
+kubectl logs my-api-xxx-yyy -f
+
+# Last N lines only
+kubectl logs my-api-xxx-yyy --tail=100
+
+# Logs from the last 1 hour
+kubectl logs my-api-xxx-yyy --since=1h
+
+# Logs from the PREVIOUS container instance (critical when a pod crashes and restarts)
+kubectl logs my-api-xxx-yyy --previous
+
+# Multi-container pod: specify which container
+kubectl logs my-api-xxx-yyy -c sidecar-container
+
+# All pods matching a label (streams from all replicas simultaneously)
+kubectl logs -l app=api --prefix --max-log-requests=10
+
+# Output to file for analysis
+kubectl logs my-api-xxx-yyy > /tmp/api-logs.txt
+```
+
+### 4. `exec` — Run Commands Inside Pods
+
+```bash
+# Open an interactive shell (use /bin/sh if /bin/bash isn't available)
+kubectl exec -it my-api-xxx-yyy -- /bin/sh
+
+# Run a one-off command
+kubectl exec my-api-xxx-yyy -- env | grep DATABASE
+kubectl exec my-api-xxx-yyy -- cat /app/config.json
+kubectl exec my-api-xxx-yyy -- wget -qO- http://localhost:3000/health
+
+# Multi-container pod: specify the container
+kubectl exec -it my-api-xxx-yyy -c nginx-sidecar -- /bin/sh
+
+# Debug network connectivity FROM inside a pod
+kubectl exec my-api-xxx-yyy -- nslookup postgres.production.svc.cluster.local
+kubectl exec my-api-xxx-yyy -- wget -qO- http://postgres:5432
+
+# Run a temporary debug pod (doesn't affect your app)
+kubectl run debug-pod --image=busybox:latest --restart=Never --rm -it -- /bin/sh
+kubectl run curl-test --image=curlimages/curl --restart=Never --rm -it -- \
+  curl http://my-api.production.svc.cluster.local/health
+```
+
+---
+
+## Apply, Delete, and Edit
+
+```bash
+# Apply a manifest (create if not exists, update if exists — idempotent)
+kubectl apply -f deployment.yaml
+
+# Apply an entire directory (processes all .yaml and .yml files)
+kubectl apply -f ./k8s/
+
+# Apply with recursive directory traversal
+kubectl apply -f ./k8s/ --recursive
+
+# Delete resources
+kubectl delete -f deployment.yaml        # Delete what's in the file
+kubectl delete pod my-pod                # Delete a specific resource
+kubectl delete pods -l app=api           # Delete all pods with label
+kubectl delete namespace staging         # Delete namespace + ALL its resources
+
+# Edit a resource directly in your editor
+kubectl edit deployment my-api
+# Opens $EDITOR (usually vim). Save to apply changes immediately.
+
+# Patch a resource (useful for scripts and CI/CD)
+kubectl patch deployment my-api -p '{"spec":{"replicas":5}}'
+kubectl patch deployment my-api --type='json' \
+  -p='[{"op":"replace","path":"/spec/replicas","value":5}]'
+
+# Scale quickly
+kubectl scale deployment my-api --replicas=5
+```
+
+---
+
+## Namespaces — Virtual Clusters
+
+Namespaces partition a cluster into isolated virtual environments. All resources (Pods, Services, Deployments, Secrets) are scoped to a namespace.
+
+```bash
+# List namespaces
+kubectl get namespaces
+# NAME              STATUS   AGE
+# default           Active   30d    ← Your workloads without -n flag
+# kube-system       Active   30d    ← K8s internals (never manually touch)
+# kube-public       Active   30d    ← Publicly readable info
+# kube-node-lease   Active   30d    ← Node heartbeat leases
+# production        Active   5d     ← Your prod namespace
+# staging           Active   5d     ← Your staging namespace
+
+# Create namespaces
+kubectl create namespace production
+kubectl create namespace staging
+
+# Or declaratively (preferred)
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: production
+  labels:
+    environment: production
+    team: backend
+EOF
+
+# Run all commands scoped to a namespace with -n
+kubectl get pods -n production
+kubectl logs my-pod -n production
+kubectl apply -f ./k8s/ -n production
+
+# Set a default namespace for your current context (avoid typing -n every time)
+kubectl config set-context --current --namespace=production
+# Now all commands default to the production namespace
+kubectl get pods  # Same as kubectl get pods -n production
+
+# Cross-namespace resource references (in YAML)
+# Services are reached across namespaces as:
+# http://SERVICE_NAME.NAMESPACE.svc.cluster.local
+# Example: http://postgres.production.svc.cluster.local:5432
+```
+
+---
+
+## Contexts — Switching Between Clusters
+
+A kubeconfig file (`~/.kube/config`) stores credentials and server endpoints for multiple clusters. **Contexts** let you switch between them instantly.
+
+```yaml
+# ~/.kube/config structure
+apiVersion: v1
+clusters:
+  - cluster:
+      server: https://prod-cluster.example.com:6443
+      certificate-authority-data: BASE64_CA_CERT
+    name: production-cluster
+  - cluster:
+      server: https://stage-cluster.example.com:6443
+      certificate-authority-data: BASE64_CA_CERT
+    name: staging-cluster
+
+contexts:
+  - context:
+      cluster: production-cluster
+      user: prod-admin
+      namespace: myapp          # Default namespace for this context
+    name: prod
+  - context:
+      cluster: staging-cluster
+      user: stage-dev
+      namespace: myapp
+    name: stage
+
+current-context: prod           # Which context is active
+
+users:
+  - name: prod-admin
+    user:
+      client-certificate-data: BASE64_CLIENT_CERT
+      client-key-data: BASE64_CLIENT_KEY
+```
+
+```bash
+# List all contexts
+kubectl config get-contexts
+# CURRENT   NAME    CLUSTER              AUTHINFO     NAMESPACE
+# *         prod    production-cluster   prod-admin   myapp
+#           stage   staging-cluster      stage-dev    myapp
+#           local   kind-local           kind-admin
+
+# Switch context
+kubectl config use-context stage
+
+# Run a single command in a specific context (without switching)
+kubectl get pods --context=stage -n myapp
+
+# Rename a context
+kubectl config rename-context old-name new-name
+
+# Delete a context
+kubectl config delete-context old-context
+
+# Merge multiple kubeconfig files
+KUBECONFIG=~/.kube/config:~/.kube/k3s-config kubectl config view --flatten > ~/.kube/merged-config
+```
+
+### kubectx + kubens: Faster Context Switching
+
+```bash
+# Install kubectx and kubens (highly recommended)
+brew install kubectx    # macOS
+# or
+sudo apt-get install kubectx  # Debian/Ubuntu
+
+# Switch context (kubectx is faster than kubectl config use-context)
+kubectx prod
+kubectx stage
+kubectx -    # Switch back to previous context (toggle)
+
+# Switch namespace
+kubens production
+kubens staging
+kubens -    # Toggle back
+```
+
+---
+
+## Resource Shortnames
+
+Every repetitive command gets shorter with shortnames:
+
+| Full Name | Short | Example |
+|-----------|-------|---------|
+| `pods` | `po` | `k get po` |
+| `services` | `svc` | `k get svc` |
+| `deployments` | `deploy` | `k get deploy` |
+| `replicasets` | `rs` | `k get rs` |
+| `statefulsets` | `sts` | `k get sts` |
+| `configmaps` | `cm` | `k get cm` |
+| `persistentvolumeclaims` | `pvc` | `k get pvc` |
+| `persistentvolumes` | `pv` | `k get pv` |
+| `namespaces` | `ns` | `k get ns` |
+| `nodes` | `no` | `k get no` |
+| `ingresses` | `ing` | `k get ing` |
+| `horizontalpodautoscalers` | `hpa` | `k get hpa` |
+| `cronjobs` | `cj` | `k get cj` |
+
+---
+
+## Port Forwarding — Access Services Locally
+
+```bash
+# Forward a service to your laptop (no Ingress or DNS needed)
+kubectl port-forward svc/my-api 8080:80
+# Now: curl http://localhost:8080/health  reaches my-api service
+
+# Forward a specific pod
+kubectl port-forward pod/my-api-xxx-yyy 8080:3000
+
+# Forward a deployment (picks a random pod)
+kubectl port-forward deployment/my-api 8080:3000
+
+# Run in background
+kubectl port-forward svc/grafana 3000:80 -n monitoring &
+
+# Access the K3s Traefik dashboard
+kubectl port-forward svc/traefik 9000:9000 -n kube-system
+```
+
+---
+
+## Useful Debugging Patterns
+
+### Pattern 1: What's Wrong With This Pod?
+
+```bash
+# Step 1: Get pod name and status
+kubectl get pods -n myapp
+
+# Step 2: Check events (the most useful information)
+kubectl describe pod POD_NAME -n myapp | tail -30
+
+# Step 3: Read container logs
+kubectl logs POD_NAME -n myapp --previous  # If pod crashed
+
+# Step 4: If pod is running, exec in
+kubectl exec -it POD_NAME -n myapp -- /bin/sh
+```
+
+### Pattern 2: Why Is My Service Not Working?
+
+```bash
+# Check if the service exists and has the right port
+kubectl get svc my-api -n myapp
+
+# Check if the service has endpoints (pods matching its label selector)
+kubectl describe svc my-api -n myapp | grep Endpoints
+# Endpoints: 10.42.0.5:3000  ← Good (has pods)
+# Endpoints: <none>           ← Bad (no pods match selector)
+
+# If no endpoints, check the selector vs pod labels
+kubectl get svc my-api -o jsonpath='{.spec.selector}'
+kubectl get pods -n myapp --show-labels
+
+# Test connectivity from inside the cluster
+kubectl run test --image=curlimages/curl --restart=Never --rm -it -- \
+  curl http://my-api.myapp.svc.cluster.local/health
+```
+
+### Pattern 3: Why Is a Pod Stuck in Pending?
+
+```bash
+kubectl describe pod PENDING_POD | grep -A10 "Events:"
+# Most common reasons:
+# - "Insufficient memory" → reduce requests or add nodes
+# - "Insufficient cpu" → same
+# - "PVC not found" → PVC doesn't exist or wrong name
+# - "Image pull failed" → wrong image tag or private registry credentials missing
+```
+
+---
+
+## kubectl Cheat Sheet
+
+```bash
+# === INSPECT ===
+k get pods -A -o wide                    # All pods, all namespaces
+k get events --sort-by='.lastTimestamp'  # Recent events
+k top pods / k top nodes                 # Resource usage (needs metrics-server)
+k api-resources                          # All resource types
+
+# === DEBUG ===
+k describe pod NAME           # Full details + events
+k logs NAME -f --previous     # Stream logs, include previous container
+k exec -it NAME -- /bin/sh    # Shell into pod
+
+# === MANAGE ===
+k apply -f FILE/DIR           # Create or update
+k delete -f FILE              # Delete from manifest
+k scale deploy NAME --replicas=5
+k set image deploy/NAME container=IMAGE:TAG
+k rollout status deploy/NAME
+k rollout undo deploy/NAME
+k rollout history deploy/NAME
+
+# === CONTEXT / NAMESPACE ===
+kubectx                       # List contexts
+kubectx CONTEXT               # Switch context
+kubens NAMESPACE              # Switch namespace
+
+# === QUICK TESTING ===
+k run test --image=curlimages/curl --restart=Never --rm -it -- curl URL
+k port-forward svc/NAME LOCAL_PORT:REMOTE_PORT
+```
+
+---
+
+## Summary
+
+`kubectl` is the universal interface to Kubernetes. The commands you'll use daily:
+- **`get`** with `-o wide`, `-w`, `-l label`, `-o yaml` — inspect resources in many formats
+- **`describe`** — deep inspection with Events — your primary debugging tool
+- **`logs`** with `--previous`, `-f`, `--since`, `-l` — read container output
+- **`exec -it`** — open a shell inside any running pod
+- **`apply -f`** — declaratively create or update resources
+- **Namespaces** (`-n`) — scope all commands to a specific environment
+- **Contexts** (`kubectx`) — switch between clusters instantly
+- **Port-forward** — expose any cluster service on your laptop without DNS
+
+In the next lesson, you will create your first Kubernetes resource — the Pod.
