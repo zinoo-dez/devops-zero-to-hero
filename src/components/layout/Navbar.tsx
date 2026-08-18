@@ -18,6 +18,7 @@ import {
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { SearchModal } from "@/components/ui/SearchModal";
+import { GitHubIcon } from "@/components/icons/TechIcons";
 
 export function Navbar() {
   const pathname = usePathname();
@@ -108,6 +109,17 @@ export function Navbar() {
             <Sparkles className="w-3.5 h-3.5" />
             Start Learning
           </Link>
+
+          <a
+            href="https://github.com/zinoo-dez/devops-zero-to-hero"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 border border-slate-200 dark:border-white/10 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+            aria-label="GitHub Repository (zinoo-dez/devops-zero-to-hero)"
+            title="Star & Contribute on GitHub"
+          >
+            <GitHubIcon className="w-4 h-4 text-blue-500" />
+          </a>
 
           <ThemeToggle />
 

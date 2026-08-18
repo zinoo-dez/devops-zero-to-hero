@@ -107,7 +107,7 @@ export function Footer() {
             <ul className="space-y-2 text-xs text-muted-foreground">
               <li>
                 <a
-                  href="https://github.com"
+                  href="https://github.com/zinoo-dez/devops-zero-to-hero"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="hover:text-blue-400 transition-colors flex items-center gap-1.5"
@@ -118,7 +118,7 @@ export function Footer() {
               </li>
               <li>
                 <a
-                  href="https://github.com"
+                  href="https://github.com/zinoo-dez/devops-zero-to-hero/pulls"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="hover:text-blue-400 transition-colors flex items-center gap-1.5"
@@ -129,7 +129,7 @@ export function Footer() {
               </li>
               <li>
                 <a
-                  href="https://github.com"
+                  href="https://github.com/zinoo-dez/devops-zero-to-hero/releases"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="hover:text-blue-400 transition-colors flex items-center gap-1.5"
@@ -141,7 +141,7 @@ export function Footer() {
             </ul>
             <div className="flex items-center gap-3 pt-1">
               <a
-                href="https://github.com"
+                href="https://github.com/zinoo-dez/devops-zero-to-hero"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="w-9 h-9 rounded-xl bg-slate-200/50 hover:bg-slate-200 border border-slate-300 dark:bg-white/5 dark:hover:bg-white/10 dark:border-white/10 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"

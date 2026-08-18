@@ -75,7 +75,7 @@ export function LessonNav({
         </div>
         <div className="flex items-center gap-4">
           <a
-            href="https://github.com"
+            href={`https://github.com/zinoo-dez/devops-zero-to-hero/tree/main/content/courses/${courseSlug}`}
             target="_blank"
             rel="noopener noreferrer"
             className="hover:text-foreground font-semibold flex items-center gap-1 transition-colors"
@@ -85,7 +85,7 @@ export function LessonNav({
           </a>
           <span>•</span>
           <a
-            href="https://github.com"
+            href="https://github.com/zinoo-dez/devops-zero-to-hero/discussions"
             target="_blank"
             rel="noopener noreferrer"
             className="hover:text-foreground font-semibold flex items-center gap-1 transition-colors"

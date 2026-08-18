@@ -48,14 +48,14 @@ export function CommunitySection() {
       title: "Open Source & Community Driven",
       desc: "Every lesson is open source. Submit PRs, propose architectural diagrams, or fix typos directly on GitHub.",
       action: "Contribute on GitHub",
-      href: "https://github.com",
+      href: "https://github.com/zinoo-dez/devops-zero-to-hero",
     },
     {
       icon: MessageSquare,
       title: "Discussion & Troubleshooting",
       desc: "Stuck on a tricky permission error or K8s ingress issue? Join discussions and get help from fellow engineers.",
       action: "Join Discussions",
-      href: "https://github.com",
+      href: "https://github.com/zinoo-dez/devops-zero-to-hero/discussions",
     },
     {
       icon: ShieldCheck,

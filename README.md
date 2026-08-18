@@ -1,36 +1,98 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 🚀 DevOps Zero to Hero
 
-## Getting Started
+<div align="center">
 
-First, run the development server:
+![DevOps Zero to Hero Banner](/public/og-image.png)
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+**A 100% Free, Beginner-First, Production-Grade Cloud & DevOps Curriculum.**  
+From your very first Linux terminal command to multi-cluster Kubernetes, Terraform IaC, Observability, DevSecOps, and GitOps delivery.
+
+[![Website](https://img.shields.io/badge/Live_Site-devops01.vercel.app-blue?style=for-the-badge&logo=vercel)](https://devops01.vercel.app)
+[![GitHub license](https://img.shields.io/badge/license-MIT-green.svg?style=for-the-badge)](LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/zinoo-dez/devops-zero-to-hero?style=for-the-badge)](https://github.com/zinoo-dez/devops-zero-to-hero/stargazers)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=for-the-badge)](https://github.com/zinoo-dez/devops-zero-to-hero/pulls)
+
+</div>
+
+---
+
+## 🌟 Features & Highlights
+
+- **13 Mastery Courses**: Linux CLI, Git & GitHub, GitHub Actions, CI/CD Concepts, Docker Fundamentals, Docker Compose, Kubernetes Architecture, K3s Lightweight Cluster, Terraform IaC, Prometheus & Grafana, DevSecOps Hardening, ArgoCD GitOps, and a Real-world Production Capstone.
+- **110+ Interactive Lessons**: Fully structured with zero fluff, plain-English analogies, copyable terminal commands, and common mistake callouts.
+- **Interactive Terminal Sandbox**: Practice Linux, Git, Docker, and Kubernetes CLI commands directly in the browser.
+- **Visual Architecture Roadmaps**: Interactive 2D graph roadmap built with React Flow and Mermaid.js diagrams.
+- **Zero Local Setup Required**: Direct 1-click integrations with free cloud playgrounds (Killercoda, Play with Docker, GitHub Codespaces).
+- **Dark & Light Mode**: Tailored White-Dark-Blue architecture with smooth theme transitions and responsive layouts.
+
+---
+
+## 🗺️ Curriculum Progression
+
+```mermaid
+flowchart LR
+    L1["01. Linux CLI"] --> L2["02. Git & GitHub"]
+    L2 --> L3["03. GitHub Actions"]
+    L3 --> L4["04. CI/CD Concepts"]
+    L4 --> L5["05. Docker Fundamentals"]
+    L5 --> L6["06. Docker Compose"]
+    L6 --> L7["07. Kubernetes Basics"]
+    L7 --> L8["08. K3s Production"]
+    L8 --> L9["09. Terraform IaC"]
+    L9 --> L10["10. Observability (Prometheus/Grafana)"]
+    L10 --> L11["11. DevSecOps & Scanning"]
+    L11 --> L12["12. ArgoCD GitOps"]
+    L12 --> L13["13. End-to-End Capstone"]
+
+    style L1 fill:#064e3b,stroke:#10b981,stroke-width:2px,color:#fff
+    style L7 fill:#1e3a8a,stroke:#3b82f6,stroke-width:2px,color:#fff
+    style L13 fill:#581c87,stroke:#a855f7,stroke-width:2px,color:#fff
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+---
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 🛠️ Tech Stack
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- **Framework**: [Next.js 16 (App Router & Turbopack)](https://nextjs.org/)
+- **Styling**: [Tailwind CSS 4](https://tailwindcss.com/)
+- **Interactive Diagrams**: [React Flow](https://reactflow.dev/) & [Mermaid.js](https://mermaid.js.org/)
+- **Animation**: [Framer Motion](https://www.framer.com/motion/)
+- **Icons**: [Lucide React](https://lucide.dev/)
+- **Deployment**: [Vercel](https://devops01.vercel.app)
 
-## Learn More
+---
 
-To learn more about Next.js, take a look at the following resources:
+## 💻 Local Development
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+# 1. Clone repository
+git clone https://github.com/zinoo-dez/devops-zero-to-hero.git
+cd devops-zero-to-hero
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+# 2. Install dependencies
+npm install
 
-## Deploy on Vercel
+# 3. Start local development server
+npm run dev
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+# 4. Open http://localhost:3000 in your browser
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+---
+
+## 🤝 Contributing
+
+Contributions, feedback, and suggestions are warmly welcomed!
+
+1. Fork the repo (`https://github.com/zinoo-dez/devops-zero-to-hero/fork`)
+2. Create your feature branch (`git checkout -b feature/new-lesson`)
+3. Commit your changes (`git commit -m 'feat: add lesson on eBPF security'`)
+4. Push to branch (`git push origin feature/new-lesson`)
+5. Open a Pull Request!
+
+---
+
+## 📄 License & Community
+
+Created with ❤️ by **Zin Oo** for developers, sysadmins, and students everywhere.  
+Distributed under the MIT License.
