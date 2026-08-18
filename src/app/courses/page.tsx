@@ -9,6 +9,26 @@ export const metadata: Metadata = {
   title: "All DevOps Courses | DevOps Zero to Hero",
   description:
     "Explore all 9 free DevOps courses: Linux CLI, Git & GitHub, GitHub Actions, CI/CD Pipeline Concepts, Docker, Compose, Kubernetes, K3s, and Real-world Capstone.",
+  openGraph: {
+    title: "All DevOps Courses | DevOps Zero to Hero",
+    description:
+      "Explore all 9 free DevOps courses: Linux CLI, Git & GitHub, GitHub Actions, CI/CD Pipeline Concepts, Docker, Compose, Kubernetes, K3s, and Real-world Capstone.",
+    images: [
+      {
+        url: "/og-image.png",
+        width: 1200,
+        height: 675,
+        alt: "All DevOps Courses - DevOps Zero to Hero",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "All DevOps Courses | DevOps Zero to Hero",
+    description:
+      "Explore all 9 free DevOps courses: Linux CLI, Git & GitHub, GitHub Actions, CI/CD Pipeline Concepts, Docker, Compose, Kubernetes, K3s, and Real-world Capstone.",
+    images: ["/og-image.png"],
+  },
 };
 
 export default function CoursesPage() {

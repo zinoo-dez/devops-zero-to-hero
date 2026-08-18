@@ -35,6 +35,20 @@ export async function generateMetadata({
     openGraph: {
       title: `${course.title} | DevOps Zero to Hero`,
       description: course.description,
+      images: [
+        {
+          url: "/og-image.png",
+          width: 1200,
+          height: 675,
+          alt: course.title,
+        },
+      ],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: `${course.title} | DevOps Zero to Hero`,
+      description: course.description,
+      images: ["/og-image.png"],
     },
   };
 }

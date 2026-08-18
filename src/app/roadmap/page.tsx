@@ -9,6 +9,26 @@ export const metadata: Metadata = {
   title: "Interactive DevOps Roadmap | DevOps Zero to Hero",
   description:
     "Explore the visual 9-step interactive roadmap from Linux Command Line to production Kubernetes CI/CD pipelines.",
+  openGraph: {
+    title: "Interactive DevOps Roadmap | DevOps Zero to Hero",
+    description:
+      "Explore the visual 9-step interactive roadmap from Linux Command Line to production Kubernetes CI/CD pipelines.",
+    images: [
+      {
+        url: "/og-image.png",
+        width: 1200,
+        height: 675,
+        alt: "Interactive DevOps Roadmap",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Interactive DevOps Roadmap | DevOps Zero to Hero",
+    description:
+      "Explore the visual 9-step interactive roadmap from Linux Command Line to production Kubernetes CI/CD pipelines.",
+    images: ["/og-image.png"],
+  },
 };
 
 export default function RoadmapPage() {

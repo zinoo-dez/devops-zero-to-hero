@@ -1,7 +1,7 @@
 import React from "react";
 import Link from "next/link";
 import { Terminal, Heart, Sparkles, BookOpen, Map, Zap } from "lucide-react";
-import { GitHubIcon } from "@/components/icons/TechIcons";
+import { GitHubIcon, FacebookIcon } from "@/components/icons/TechIcons";
 
 export function Footer() {
   return (
@@ -99,10 +99,10 @@ export function Footer() {
             </ul>
           </div>
 
-          {/* Community & Open Source */}
+          {/* Community & Creator */}
           <div className="space-y-4">
             <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">
-              Open Source
+              Community & Creator
             </h4>
             <p className="text-xs text-muted-foreground leading-relaxed">
               DevOps Zero to Hero is an open educational project built to empower new engineers everywhere.
@@ -117,17 +117,40 @@ export function Footer() {
               >
                 <GitHubIcon className="w-4 h-4 text-blue-400" />
               </a>
+              <a
+                href="https://www.facebook.com/lu.gyi.416515"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-9 h-9 rounded-xl bg-slate-200/50 hover:bg-slate-200 border border-slate-300 dark:bg-white/5 dark:hover:bg-white/10 dark:border-white/10 flex items-center justify-center text-muted-foreground hover:text-blue-500 transition-colors"
+                aria-label="Zin Oo on Facebook"
+              >
+                <FacebookIcon className="w-4 h-4 text-blue-500" />
+              </a>
             </div>
           </div>
         </div>
 
         {/* Bottom bar */}
-        <div className="pt-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-muted-foreground">
+        <div className="pt-8 flex flex-col md:flex-row items-center justify-between gap-4 text-xs text-muted-foreground">
           <div>
             © {new Date().getFullYear()} DevOps Zero to Hero. Built for aspiring cloud & DevOps engineers.
           </div>
-          <div className="flex items-center gap-1">
-            Made with <Heart className="w-3.5 h-3.5 text-blue-500 fill-blue-500 mx-0.5" /> for the community
+          <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
+            <div className="flex items-center gap-1">
+              <span>Designed & Created by</span>
+              <a
+                href="https://www.facebook.com/lu.gyi.416515"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-semibold text-blue-600 dark:text-blue-400 hover:underline hover:text-blue-500 dark:hover:text-blue-300 transition-colors"
+              >
+                Zin Oo
+              </a>
+            </div>
+            <span className="hidden sm:inline text-muted-foreground/40">•</span>
+            <div className="flex items-center gap-1">
+              Made with <Heart className="w-3.5 h-3.5 text-blue-500 fill-blue-500 mx-0.5" /> for the community
+            </div>
           </div>
         </div>
       </div>

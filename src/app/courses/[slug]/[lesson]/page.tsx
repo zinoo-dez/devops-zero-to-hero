@@ -32,6 +32,24 @@ export async function generateMetadata({
   return {
     title: `${result.lesson.title} - ${result.course.title} | DevOps Zero to Hero`,
     description: `Lesson ${result.index + 1}: ${result.lesson.title}. Master modern DevOps fundamentals with hands-on examples and diagrams.`,
+    openGraph: {
+      title: `${result.lesson.title} - ${result.course.title} | DevOps Zero to Hero`,
+      description: `Lesson ${result.index + 1}: ${result.lesson.title}. Master modern DevOps fundamentals with hands-on examples and diagrams.`,
+      images: [
+        {
+          url: "/og-image.png",
+          width: 1200,
+          height: 675,
+          alt: `${result.lesson.title} - ${result.course.title}`,
+        },
+      ],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: `${result.lesson.title} - ${result.course.title} | DevOps Zero to Hero`,
+      description: `Lesson ${result.index + 1}: ${result.lesson.title}. Master modern DevOps fundamentals with hands-on examples and diagrams.`,
+      images: ["/og-image.png"],
+    },
   };
 }
 
