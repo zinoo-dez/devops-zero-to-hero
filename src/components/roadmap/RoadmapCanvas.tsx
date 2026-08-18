@@ -29,6 +29,7 @@ import {
 import { getAllCourses } from "@/lib/courses";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
+import { ShieldLockIcon } from "@/components/icons/TechIcons";
 import {
   ReactFlow,
   Background,
@@ -74,7 +75,22 @@ const PHASES: Phase[] = [
   {
     id: "phase-2",
     phaseNumber: "PHASE 02",
-    title: "Automation & Continuous Integration",
+    title: "Containerization & Multi-Container Stacks",
+    subtitle: "Package applications into immutable containers and orchestrate local microservices.",
+    accentColor: {
+      badge: "bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20",
+      border: "border-sky-500/30",
+      glow: "from-sky-500/20 via-cyan-500/10 to-transparent",
+      bgGradient: "group-hover:border-sky-500/40",
+      iconBg: "bg-sky-500/15 text-sky-600 dark:text-sky-400 border border-sky-500/30",
+      iconColor: "text-sky-500",
+    },
+    courseSlugs: ["docker-fundamentals", "docker-compose"],
+  },
+  {
+    id: "phase-3",
+    phaseNumber: "PHASE 03",
+    title: "Automation & Continuous Delivery",
     subtitle: "Automate code testing, linting, building, and artifact delivery on every commit.",
     accentColor: {
       badge: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20",
@@ -87,46 +103,80 @@ const PHASES: Phase[] = [
     courseSlugs: ["github-actions", "cicd-concepts"],
   },
   {
-    id: "phase-3",
-    phaseNumber: "PHASE 03",
-    title: "Containerization & Multi-Service Architecture",
-    subtitle: "Package applications into immutable containers and orchestrate local multi-service stacks.",
-    accentColor: {
-      badge: "bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20",
-      border: "border-sky-500/30",
-      glow: "from-sky-500/20 via-cyan-500/10 to-transparent",
-      bgGradient: "group-hover:border-sky-500/40",
-      iconBg: "bg-sky-500/15 text-sky-600 dark:text-sky-400 border border-sky-500/30",
-      iconColor: "text-sky-500",
-    },
-    courseSlugs: ["docker-fundamentals", "docker-compose"],
-  },
-  {
     id: "phase-4",
     phaseNumber: "PHASE 04",
-    title: "Cloud Orchestration & Production Capstone",
-    subtitle: "Deploy self-healing Kubernetes clusters and automate production GitOps pipelines.",
+    title: "Infrastructure as Code (IaC) & Cloud Provisioning",
+    subtitle: "Declare reproducible cloud environments and automate Terraform pipelines.",
     accentColor: {
       badge: "bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20",
       border: "border-purple-500/30",
-      glow: "from-purple-500/20 via-rose-500/10 to-transparent",
+      glow: "from-purple-500/20 via-violet-500/10 to-transparent",
       bgGradient: "group-hover:border-purple-500/40",
       iconBg: "bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/30",
       iconColor: "text-purple-500",
     },
-    courseSlugs: ["kubernetes-basics", "k3s", "cicd-project"],
+    courseSlugs: ["terraform-iac"],
+  },
+  {
+    id: "phase-5",
+    phaseNumber: "PHASE 05",
+    title: "Kubernetes Cluster Architecture & Orchestration",
+    subtitle: "Deploy self-healing containers, pods, services, ingress, and lightweight K3s clusters.",
+    accentColor: {
+      badge: "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20",
+      border: "border-blue-500/30",
+      glow: "from-blue-500/20 via-indigo-500/10 to-transparent",
+      bgGradient: "group-hover:border-blue-500/40",
+      iconBg: "bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/30",
+      iconColor: "text-blue-500",
+    },
+    courseSlugs: ["kubernetes-basics", "k3s"],
+  },
+  {
+    id: "phase-6",
+    phaseNumber: "PHASE 06",
+    title: "Observability, DevSecOps & Advanced GitOps",
+    subtitle: "Full-stack monitoring with Prometheus/Grafana, container security with Trivy, and GitOps with ArgoCD.",
+    accentColor: {
+      badge: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20",
+      border: "border-amber-500/30",
+      glow: "from-amber-500/20 via-rose-500/10 to-transparent",
+      bgGradient: "group-hover:border-amber-500/40",
+      iconBg: "bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30",
+      iconColor: "text-amber-500",
+    },
+    courseSlugs: ["monitoring-observability", "devsecops-hardening", "gitops-argocd"],
+  },
+  {
+    id: "phase-7",
+    phaseNumber: "PHASE 07",
+    title: "Real-World Production Capstone",
+    subtitle: "Connect every tool into a complete automated zero-downtime production deployment.",
+    accentColor: {
+      badge: "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20",
+      border: "border-rose-500/30",
+      glow: "from-rose-500/20 via-pink-500/10 to-transparent",
+      bgGradient: "group-hover:border-rose-500/40",
+      iconBg: "bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30",
+      iconColor: "text-rose-500",
+    },
+    courseSlugs: ["cicd-project"],
   },
 ];
 
 const ICONS_MAP: Record<string, React.ReactNode> = {
   "linux-command-line": <Terminal className="w-5 h-5" />,
   "git-github": <GitBranch className="w-5 h-5" />,
-  "github-actions": <Zap className="w-5 h-5" />,
-  "cicd-concepts": <Workflow className="w-5 h-5" />,
   "docker-fundamentals": <Box className="w-5 h-5" />,
   "docker-compose": <Layers className="w-5 h-5" />,
+  "github-actions": <Zap className="w-5 h-5" />,
+  "cicd-concepts": <Workflow className="w-5 h-5" />,
+  "terraform-iac": <Layers3 className="w-5 h-5" />,
   "kubernetes-basics": <Compass className="w-5 h-5" />,
   "k3s": <Cpu className="w-5 h-5" />,
+  "monitoring-observability": <Sparkles className="w-5 h-5" />,
+  "devsecops-hardening": <ShieldLockIcon className="w-5 h-5" />,
+  "gitops-argocd": <Network className="w-5 h-5" />,
   "cicd-project": <Trophy className="w-5 h-5" />,
 };
 
@@ -136,15 +186,19 @@ export function RoadmapCanvas() {
 
   // Graph Canvas node configurations (safe, no scroll trapping)
   const nodeConfigs = [
-    { id: "linux-command-line", position: { x: 40, y: 40 }, number: "01", numberColor: "bg-emerald-500/20 text-emerald-400", levelColor: "text-emerald-400", borderColor: "rgba(16, 185, 129, 0.4)" },
-    { id: "git-github", position: { x: 320, y: 40 }, number: "02", numberColor: "bg-orange-500/20 text-orange-400", levelColor: "text-orange-400", borderColor: "rgba(249, 115, 22, 0.4)" },
-    { id: "github-actions", position: { x: 600, y: 40 }, number: "03", numberColor: "bg-indigo-500/20 text-indigo-400", levelColor: "text-indigo-400", borderColor: "rgba(99, 102, 241, 0.4)" },
-    { id: "cicd-concepts", position: { x: 600, y: 210 }, number: "04", numberColor: "bg-blue-500/20 text-blue-400", levelColor: "text-blue-400", borderColor: "rgba(59, 130, 246, 0.4)" },
-    { id: "docker-fundamentals", position: { x: 320, y: 210 }, number: "05", numberColor: "bg-sky-500/20 text-sky-400", levelColor: "text-sky-400", borderColor: "rgba(14, 165, 233, 0.4)" },
-    { id: "docker-compose", position: { x: 40, y: 210 }, number: "06", numberColor: "bg-teal-500/20 text-teal-400", levelColor: "text-teal-400", borderColor: "rgba(20, 184, 166, 0.4)" },
-    { id: "kubernetes-basics", position: { x: 40, y: 380 }, number: "07", numberColor: "bg-purple-500/20 text-purple-400", levelColor: "text-purple-400", borderColor: "rgba(168, 85, 247, 0.4)" },
-    { id: "k3s", position: { x: 320, y: 380 }, number: "08", numberColor: "bg-amber-500/20 text-amber-400", levelColor: "text-amber-400", borderColor: "rgba(245, 158, 11, 0.4)" },
-    { id: "cicd-project", position: { x: 600, y: 380 }, number: "09", numberColor: "bg-rose-500/20 text-rose-300", levelColor: "text-rose-300", borderColor: "rgba(244, 63, 94, 0.4)" },
+    { id: "linux-command-line", position: { x: 40, y: 30 }, number: "01", numberColor: "bg-emerald-500/20 text-emerald-400", levelColor: "text-emerald-400", borderColor: "rgba(16, 185, 129, 0.4)" },
+    { id: "git-github", position: { x: 310, y: 30 }, number: "02", numberColor: "bg-orange-500/20 text-orange-400", levelColor: "text-orange-400", borderColor: "rgba(249, 115, 22, 0.4)" },
+    { id: "docker-fundamentals", position: { x: 580, y: 30 }, number: "03", numberColor: "bg-sky-500/20 text-sky-400", levelColor: "text-sky-400", borderColor: "rgba(14, 165, 233, 0.4)" },
+    { id: "docker-compose", position: { x: 850, y: 30 }, number: "04", numberColor: "bg-teal-500/20 text-teal-400", levelColor: "text-teal-400", borderColor: "rgba(20, 184, 166, 0.4)" },
+    { id: "github-actions", position: { x: 850, y: 190 }, number: "05", numberColor: "bg-indigo-500/20 text-indigo-400", levelColor: "text-indigo-400", borderColor: "rgba(99, 102, 241, 0.4)" },
+    { id: "cicd-concepts", position: { x: 580, y: 190 }, number: "06", numberColor: "bg-blue-500/20 text-blue-400", levelColor: "text-blue-400", borderColor: "rgba(59, 130, 246, 0.4)" },
+    { id: "terraform-iac", position: { x: 310, y: 190 }, number: "07", numberColor: "bg-purple-500/20 text-purple-400", levelColor: "text-purple-400", borderColor: "rgba(168, 85, 247, 0.4)" },
+    { id: "kubernetes-basics", position: { x: 40, y: 190 }, number: "08", numberColor: "bg-blue-500/20 text-blue-400", levelColor: "text-blue-400", borderColor: "rgba(59, 130, 246, 0.4)" },
+    { id: "k3s", position: { x: 40, y: 350 }, number: "09", numberColor: "bg-amber-500/20 text-amber-400", levelColor: "text-amber-400", borderColor: "rgba(245, 158, 11, 0.4)" },
+    { id: "monitoring-observability", position: { x: 310, y: 350 }, number: "10", numberColor: "bg-orange-500/20 text-orange-400", levelColor: "text-orange-400", borderColor: "rgba(249, 115, 22, 0.4)" },
+    { id: "devsecops-hardening", position: { x: 580, y: 350 }, number: "11", numberColor: "bg-rose-500/20 text-rose-400", levelColor: "text-rose-400", borderColor: "rgba(244, 63, 94, 0.4)" },
+    { id: "gitops-argocd", position: { x: 850, y: 350 }, number: "12", numberColor: "bg-cyan-500/20 text-cyan-400", levelColor: "text-cyan-400", borderColor: "rgba(6, 182, 212, 0.4)" },
+    { id: "cicd-project", position: { x: 850, y: 510 }, number: "13", numberColor: "bg-rose-500/20 text-rose-300", levelColor: "text-rose-300", borderColor: "rgba(244, 63, 94, 0.5)" },
   ];
 
   const nodes: Node[] = nodeConfigs.map((config) => {
@@ -193,13 +247,17 @@ export function RoadmapCanvas() {
 
   const edges: Edge[] = [
     { id: "e1-2", source: "linux-command-line", target: "git-github", animated: true, style: { stroke: "#10b981", strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed } },
-    { id: "e2-3", source: "git-github", target: "github-actions", animated: true, style: { stroke: "#6366f1", strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed } },
-    { id: "e3-4", source: "github-actions", target: "cicd-concepts", animated: true, style: { stroke: "#3b82f6", strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed } },
-    { id: "e4-5", source: "cicd-concepts", target: "docker-fundamentals", animated: true, style: { stroke: "#0ea5e9", strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed } },
-    { id: "e5-6", source: "docker-fundamentals", target: "docker-compose", animated: true, style: { stroke: "#14b8a6", strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed } },
-    { id: "e6-7", source: "docker-compose", target: "kubernetes-basics", animated: true, style: { stroke: "#a855f7", strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed } },
-    { id: "e7-8", source: "kubernetes-basics", target: "k3s", animated: true, style: { stroke: "#f59e0b", strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed } },
-    { id: "e8-9", source: "k3s", target: "cicd-project", animated: true, style: { stroke: "#f43f5e", strokeWidth: 2.5 }, markerEnd: { type: MarkerType.ArrowClosed } },
+    { id: "e2-3", source: "git-github", target: "docker-fundamentals", animated: true, style: { stroke: "#f97316", strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed } },
+    { id: "e3-4", source: "docker-fundamentals", target: "docker-compose", animated: true, style: { stroke: "#0ea5e9", strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed } },
+    { id: "e4-5", source: "docker-compose", target: "github-actions", animated: true, style: { stroke: "#14b8a6", strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed } },
+    { id: "e5-6", source: "github-actions", target: "cicd-concepts", animated: true, style: { stroke: "#6366f1", strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed } },
+    { id: "e6-7", source: "cicd-concepts", target: "terraform-iac", animated: true, style: { stroke: "#3b82f6", strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed } },
+    { id: "e7-8", source: "terraform-iac", target: "kubernetes-basics", animated: true, style: { stroke: "#a855f7", strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed } },
+    { id: "e8-9", source: "kubernetes-basics", target: "k3s", animated: true, style: { stroke: "#3b82f6", strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed } },
+    { id: "e9-10", source: "k3s", target: "monitoring-observability", animated: true, style: { stroke: "#f59e0b", strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed } },
+    { id: "e10-11", source: "monitoring-observability", target: "devsecops-hardening", animated: true, style: { stroke: "#f97316", strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed } },
+    { id: "e11-12", source: "devsecops-hardening", target: "gitops-argocd", animated: true, style: { stroke: "#f43f5e", strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed } },
+    { id: "e12-13", source: "gitops-argocd", target: "cicd-project", animated: true, style: { stroke: "#06b6d4", strokeWidth: 2.5 }, markerEnd: { type: MarkerType.ArrowClosed } },
   ];
 
   return (
@@ -208,7 +266,7 @@ export function RoadmapCanvas() {
       <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-2 sm:p-3 rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-100/80 dark:bg-white/[0.03] backdrop-blur-xl">
         <div className="flex items-center gap-2 text-xs text-muted-foreground px-2">
           <Sparkles className="w-4 h-4 text-blue-500" />
-          <span className="font-semibold text-foreground">9 Progressive Milestones</span>
+          <span className="font-semibold text-foreground">13 Progressive Engineering Milestones</span>
           <span className="hidden sm:inline">• 100% Hands-on Curriculum</span>
         </div>
 

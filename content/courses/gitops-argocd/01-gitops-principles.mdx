@@ -1,0 +1,75 @@
+---
+title: "GitOps Core Principles & Declarative Continuous Delivery"
+duration: "25 min"
+order: 1
+---
+
+# GitOps Core Principles & Declarative Continuous Delivery
+
+For over a decade, Continuous Delivery (CD) was **Push-Based**: a CI server (like Jenkins or GitHub Actions) would run `kubectl apply` or SSH into production servers using a privileged administrative credential stored in CI secrets.
+
+**GitOps** inverts this paradigm into a **Pull-Based**, declarative model where **Git is the Single Source of Truth** for your entire infrastructure and application state.
+
+```mermaid
+flowchart TD
+    subgraph PushBased["❌ Traditional Push-Based CD (Insecure & Fragile)"]
+        CI["CI/CD Runner (GitHub Actions)"] -->|Has Admin Kubeconfig Secret ⚠️| K8s_1["Kubernetes Cluster"]
+        CI -->|Runs 'kubectl apply'| K8s_1
+        Note1["High Security Risk: Compromised CI compromises entire cluster!"]
+    end
+
+    subgraph PullBased["✅ Modern Pull-Based GitOps (ArgoCD)"]
+        GitRepo[("Git Manifest Repo (Single Source of Truth)")]
+        Argo["ArgoCD Controller (Lives INSIDE the Cluster)"]
+        K8s_2["Kubernetes Cluster"]
+        
+        Argo -->|1. Pulls desired state from Git| GitRepo
+        Argo -->|2. Compares against live cluster| K8s_2
+        Argo -->|3. Auto-reconciles drift & self-heals| K8s_2
+        Note2["Zero external cluster secrets stored in CI runners!"]
+    end
+```
+
+---
+
+## The 4 OpenGitOps Principles
+
+The CNCF OpenGitOps standard defines 4 mandatory principles:
+
+1. **Declarative**: The entire desired state of the system is described declaratively (e.g. Kubernetes manifests, Helm charts, Kustomize overlays).
+2. **Versioned and Immutable**: The desired state is stored in version control (Git) with full commit history, audit trails, and cryptographic commit signatures.
+3. **Pulled Automatically**: Software agents (like ArgoCD) running inside the cluster continuously pull the desired state from Git.
+4. **Continuously Reconciled**: The agent detects any deviation (drift) between desired Git state and live cluster state, and automatically reconciles the cluster back to match Git.
+
+---
+
+## Push vs. Pull CD: Detailed Architectural Comparison
+
+| Dimension | Push-Based CD (GitHub Actions `kubectl`) | Pull-Based GitOps (ArgoCD) |
+| :--- | :--- | :--- |
+| **Cluster Credentials** | Stored externally in CI runner secrets | Kept strictly inside the cluster (zero external exposure) |
+| **Drift Detection** | None (manual `kubectl` edits go unnoticed) | Continuous real-time detection (alerts or auto-reverts) |
+| **Rollback Strategy** | Run previous CI pipeline build | `git revert <commit-hash>` (takes 5 seconds) |
+| **Audit Log** | Scattered across CI pipeline run logs | Clean, immutable Git commit log |
+| **Disaster Recovery** | Manual, slow reconstruction | Point ArgoCD to the Git repo on a new cluster |
+
+---
+
+## The Two-Repository Architecture
+
+In production, application source code and deployment manifests are separated into **two distinct Git repositories**:
+
+```mermaid
+flowchart LR
+    AppRepo["1. Application Code Repo
+(src/, Dockerfile, package.json)"] -->|CI: Test & Build| GHCR["Container Registry
+(ghcr.io/my-org/api:v1.2.0)"]
+    GHCR -->|CI updates image tag| GitOpsRepo["2. GitOps Manifests Repo
+(k8s/, overlays/prod/, values.yaml)"]
+    GitOpsRepo -->|ArgoCD pulls changes| Cluster["Production Kubernetes Cluster"]
+```
+
+### Why Separate Repositories?
+1. **Prevents CI Infinite Loops**: Changing a deployment manifest doesn't trigger a full 20-minute application code build/test cycle.
+2. **Strict RBAC Access**: Developers have write access to the App Repo, but only Senior DevOps engineers / automated CI bots have write access to the GitOps Manifests Repo.
+3. **Clean Audit History**: The Manifest repo commit log shows exact release history (e.g. `Deploy v1.2.0 to production`).

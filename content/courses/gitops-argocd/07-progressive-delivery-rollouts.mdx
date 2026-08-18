@@ -1,0 +1,117 @@
+---
+title: "Progressive Delivery with Argo Rollouts (Canary & Blue-Green)"
+duration: "40 min"
+order: 7
+---
+
+# Progressive Delivery with Argo Rollouts
+
+Standard Kubernetes `Deployment` rolling updates have a critical flaw: they only verify that a container starts and passes readiness probes. They **cannot verify if the new version is throwing 500 errors to real users**.
+
+If version `v2.0.0` has a severe bug that crashes after 30 seconds of user traffic, standard Kubernetes will happily roll it out to 100% of your users.
+
+**Argo Rollouts** brings advanced **Canary** and **Blue-Green** deployment strategies with automated metric-driven rollbacks to Kubernetes.
+
+```mermaid
+flowchart TD
+    subgraph CanaryStrategy["Canary Rollout Workflow"]
+        Step1["1. Deploy v2 to 20% of traffic"] --> Analysis["2. Query Prometheus: Error Rate < 1%?"]
+        Analysis -->|Metric Passed ✅| Step2["3. Increase traffic to 50%"]
+        Analysis -->|Metric Failed ❌ (500 spike)| Abort["⛔ Automatic Rollback to v1 (0s downtime)"]
+        Step2 --> Step3["4. Promote to 100%"]
+    end
+```
+
+---
+
+## 1. The `Rollout` CRD vs Standard `Deployment`
+
+To use Argo Rollouts, simply change `apiVersion: apps/v1` & `kind: Deployment` to `argoproj.io/v1alpha1` & `kind: Rollout`:
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: production-web-api
+  namespace: production
+spec:
+  replicas: 5
+  strategy:
+    canary:
+      # Step-by-step traffic shifting
+      steps:
+        # Step 1: Send 20% of traffic to the new version
+        - setWeight: 20
+        # Step 2: Pause for 10 minutes to collect real telemetry
+        - pause: { duration: 10m }
+        # Step 3: Run automated Prometheus health analysis
+        - analysis:
+            templates:
+              - templateName: success-rate-check
+        # Step 4: Increase to 50%
+        - setWeight: 50
+        - pause: { duration: 10m }
+        # Step 5: Complete rollout to 100%
+```
+
+---
+
+## 2. Automated Metric Analysis with `AnalysisTemplate`
+
+An **`AnalysisTemplate`** queries your live Prometheus server during the canary phase. If the error rate exceeds your threshold, Argo Rollouts **instantly aborts the deployment and shifts 100% of traffic back to the stable version**:
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: success-rate-check
+  namespace: production
+spec:
+  metrics:
+    - name: http-success-rate
+      interval: 1m
+      # Maximum allowed failed evaluation count before aborting
+      failureLimit: 2
+      successCondition: result[0] >= 0.99 # Requires 99% success rate!
+      provider:
+        prometheus:
+          address: http://prometheus.monitoring:9090
+          query: |
+            sum(rate(http_requests_total{status!~"5..", app="web-api"}[2m]))
+            /
+            sum(rate(http_requests_total{app="web-api"}[2m]))
+```
+
+---
+
+## 3. Managing Rollouts with the Argo Rollouts CLI
+
+Install the `kubectl-argo-rollouts` plugin:
+```bash
+brew install argoproj/tap/kubectl-argo-rollouts
+```
+
+Watch a live canary rollout in real time:
+```bash
+kubectl argo rollouts get rollout production-web-api --watch
+```
+
+```text
+NAME                                  KIND         STATUS     AGE  INFO
+⟳ production-web-api                  Rollout      ✔ Healthy  2d
+├──# revision:2
+│  ├──  production-web-api-7b8f6c498  ReplicaSet   ✔ Healthy  2m   canary (weight: 20%)
+│  │  └── 1 Pod running v2.0.0
+├──# revision:1
+│  └──  production-web-api-5c98d6f84  ReplicaSet   ✔ Healthy  2d   stable (weight: 80%)
+│     └── 4 Pods running v1.4.2
+```
+
+Manually promote or abort from the CLI:
+```bash
+# Force promote canary to next step
+kubectl argo rollouts promote production-web-api
+
+# Emergency manual abort & instant rollback
+kubectl argo rollouts abort production-web-api
+```

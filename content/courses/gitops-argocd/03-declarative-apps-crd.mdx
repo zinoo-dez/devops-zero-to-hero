@@ -1,0 +1,135 @@
+---
+title: "Declarative Applications: Application CRDs & Git Repos"
+duration: "35 min"
+order: 3
+---
+
+# Declarative Applications: Application CRDs
+
+While you can create applications using the ArgoCD Web UI, doing so violates GitOps! In a true GitOps workflow, **ArgoCD itself is configured declaratively using Kubernetes Custom Resource Definitions (CRDs)**.
+
+```mermaid
+flowchart TD
+    AppCRD["Application CRD (application.yaml)
+Stored in Git"] -->|kubectl apply| K8s["Kubernetes Control Plane"]
+    K8s --> Argo["ArgoCD Controller"]
+    Argo -->|1. Clones repoURL @ targetRevision| GitRepo[("Manifests Git Repo")]
+    Argo -->|2. Deploys manifests into destination| TargetNS["Target Namespace (e.g. production)"]
+```
+
+---
+
+## Anatomy of the `Application` CRD
+
+Here is a complete, production-grade `Application` manifest:
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: production-web-api
+  namespace: argocd
+  finalizers:
+    # Ensures that deleting the Application CR cascades and deletes all managed K8s resources
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  # The project this application belongs to (for RBAC)
+  project: default
+
+  # Source: Where the desired manifests live
+  source:
+    repoURL: 'https://github.com/my-org/k8s-manifests.git'
+    targetRevision: main # Git branch, commit SHA, or release tag (e.g. 'v1.4.0')
+    path: 'environments/production' # Subdirectory inside repo
+
+  # Destination: Where to deploy the resources
+  destination:
+    server: 'https://kubernetes.default.svc' # Local in-cluster API
+    namespace: production
+
+  # Sync Policy: How ArgoCD handles drift and automated updates
+  syncPolicy:
+    automated:
+      prune: true     # Automatically delete K8s objects removed from Git
+      selfHeal: true  # Automatically overwrite manual 'kubectl' edits
+    syncOptions:
+      - CreateNamespace=true      # Auto-create target namespace if missing
+      - ApplyOutOfSyncOnly=true   # Optimize performance for large repos
+      - ServerSideApply=true      # Use modern K8s server-side apply
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+```
+
+---
+
+## Multi-Tenancy with `AppProject` CRDs
+
+In enterprise environments, you don't want a junior developer's application modifying cluster-wide RBAC roles or deploying into the `kube-system` namespace.
+
+An **`AppProject`** enforces security boundaries around applications:
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: frontend-team
+  namespace: argocd
+spec:
+  description: "Permissions for the Frontend Engineering Team"
+
+  # 1. Restrict which Git repositories can be used
+  sourceRepos:
+    - 'https://github.com/my-org/frontend-manifests.git'
+
+  # 2. Restrict target clusters and namespaces
+  destinations:
+    - namespace: 'frontend-dev'
+      server: 'https://kubernetes.default.svc'
+    - namespace: 'frontend-prod'
+      server: 'https://kubernetes.default.svc'
+
+  # 3. Block access to cluster-scoped resources (Nodes, CRDs, ClusterRoles)
+  clusterResourceWhitelist: []
+
+  # 4. Whitelist permitted namespace-scoped resources
+  namespaceResourceWhitelist:
+    - group: 'apps'
+      kind: 'Deployment'
+    - group: ''
+      kind: 'Service'
+    - group: 'networking.k8s.io'
+      kind: 'Ingress'
+```
+
+---
+
+## Deploying Your Application
+
+Apply the application definition to your cluster:
+
+```bash
+kubectl apply -f application.yaml
+```
+
+ArgoCD immediately picks up the manifest, clones the Git repository, validates the resources, and syncs them into the `production` namespace!
+
+```bash
+# Check application status from CLI
+$ argocd app get production-web-api
+
+Name:               argocd/production-web-api
+Project:            default
+Server:             https://kubernetes.default.svc
+Namespace:          production
+URL:                https://localhost:8080/applications/production-web-api
+Repo:               https://github.com/my-org/k8s-manifests.git
+Target:             main
+Path:               environments/production
+Sync Window:        Sync Allowed
+Sync Status:        Synced to main (8a1b2c3)
+Health Status:      Healthy
+```

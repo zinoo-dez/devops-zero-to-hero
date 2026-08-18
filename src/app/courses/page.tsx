@@ -8,11 +8,11 @@ import { Sparkles } from "lucide-react";
 export const metadata: Metadata = {
   title: "All DevOps Courses | DevOps Zero to Hero",
   description:
-    "Explore all 9 free DevOps courses: Linux CLI, Git & GitHub, GitHub Actions, CI/CD Pipeline Concepts, Docker, Compose, Kubernetes, K3s, and Real-world Capstone.",
+    "Explore all 13 free DevOps courses: Linux CLI, Git & GitHub, Docker, CI/CD, Terraform IaC, Kubernetes, Observability, DevSecOps, ArgoCD GitOps, and Real-world Capstone.",
   openGraph: {
     title: "All DevOps Courses | DevOps Zero to Hero",
     description:
-      "Explore all 9 free DevOps courses: Linux CLI, Git & GitHub, GitHub Actions, CI/CD Pipeline Concepts, Docker, Compose, Kubernetes, K3s, and Real-world Capstone.",
+      "Explore all 13 free DevOps courses: Linux CLI, Git & GitHub, Docker, CI/CD, Terraform IaC, Kubernetes, Observability, DevSecOps, ArgoCD GitOps, and Real-world Capstone.",
     images: [
       {
         url: "/og-image.png",
@@ -26,7 +26,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "All DevOps Courses | DevOps Zero to Hero",
     description:
-      "Explore all 9 free DevOps courses: Linux CLI, Git & GitHub, GitHub Actions, CI/CD Pipeline Concepts, Docker, Compose, Kubernetes, K3s, and Real-world Capstone.",
+      "Explore all 13 free DevOps courses: Linux CLI, Git & GitHub, Docker, CI/CD, Terraform IaC, Kubernetes, Observability, DevSecOps, ArgoCD GitOps, and Real-world Capstone.",
     images: ["/og-image.png"],
   },
 };
@@ -39,9 +39,9 @@ export default function CoursesPage() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <SectionHeader
           badge="Curriculum Directory"
-          title="All 9 DevOps"
+          title="All 13 DevOps"
           highlight="Zero-to-Hero Courses"
-          subtitle="Explore the complete learning track. Each course is packed with practical commands, architectural diagrams, and real-world best practices."
+          subtitle="Explore the complete learning track from Linux fundamentals to advanced GitOps and Terraform. Packed with practical terminal sessions and real-world architectures."
         />
 
         <CourseGrid courses={courses} />

@@ -16,7 +16,7 @@ export function RoadmapPreview() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <SectionHeader
           badge="Learning Path"
-          title="Your 9-Step Roadmap to"
+          title="Your 13-Step Roadmap to"
           highlight="DevOps Mastery"
           subtitle="A structured, zero-confusion journey designed so every concept naturally unlocks the next one."
         />
@@ -42,7 +42,7 @@ export function RoadmapPreview() {
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-2.5">
                       <span className="w-7 h-7 rounded-lg bg-blue-500/15 border border-blue-500/30 text-blue-400 text-xs font-bold flex items-center justify-center">
-                        0{idx + 1}
+                        {idx < 9 ? `0${idx + 1}` : `${idx + 1}`}
                       </span>
                       <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                         Step {idx + 1}

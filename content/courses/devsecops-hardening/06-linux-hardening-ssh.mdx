@@ -1,0 +1,162 @@
+---
+title: "Linux Server Hardening, Firewalls & Non-Root Containers"
+duration: "35 min"
+order: 6
+---
+
+# Linux Server Hardening & Non-Root Containers
+
+A single misconfigured server can compromise an entire cloud environment. In this lesson, you will master the essential hardening steps for Linux production hosts and container execution security.
+
+```mermaid
+flowchart TD
+    subgraph HostHardening["Host Server Hardening"]
+        SSH["1. SSH Key-Only Auth
+(Disable Root & Passwords)"]
+        UFW["2. UFW Firewall
+(Default Deny All Inbound)"]
+        Patches["3. Unattended Upgrades
+(Auto-patch OS Security CVEs)"]
+    end
+
+    subgraph ContainerHardening["Container Isolation"]
+        NonRoot["4. Non-Root User (UID 10001)"]
+        ReadOnly["5. Read-Only Root Filesystem"]
+        CapDrop["6. Drop All Linux Capabilities (cap_drop: ALL)"]
+    end
+```
+
+---
+
+## 1. Hardening the Linux Host & SSH
+
+Edit the SSH daemon configuration at `/etc/ssh/sshd_config`:
+
+```text
+# Disable password authentication completely (SSH Keys only!)
+PasswordAuthentication no
+ChallengeResponseAuthentication no
+
+# Disable direct root login
+PermitRootLogin no
+
+# Enforce protocol 2 and limit failed attempts
+Protocol 2
+MaxAuthTries 3
+ClientAliveInterval 300
+ClientAliveCountMax 2
+
+# Whitelist allowed users
+AllowUsers devopsadmin
+```
+
+Restart SSH:
+```bash
+sudo systemctl restart sshd
+```
+
+---
+
+## 2. Firewall Protection with UFW (Uncomplicated Firewall)
+
+Enforce a **Default Deny** ingress policy:
+
+```bash
+# 1. Set default policies
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+
+# 2. Allow only required ports
+sudo ufw allow 22/tcp   # SSH
+sudo ufw allow 80/tcp   # HTTP
+sudo ufw allow 443/tcp  # HTTPS
+
+# 3. Enable firewall
+sudo ufw enable
+
+# 4. Check status
+$ sudo ufw status verbose
+Status: active
+Logging: on (low)
+Default: deny (incoming), allow (outgoing), disabled (routed)
+To                         Action      From
+--                         ------      ----
+22/tcp                     ALLOW IN    Anywhere
+80/tcp                     ALLOW IN    Anywhere
+443/tcp                    ALLOW IN    Anywhere
+```
+
+---
+
+## 3. The Golden Rule of Container Security: Never Run as Root!
+
+By default, containers run as `root` (UID 0). If an attacker finds a vulnerability in your Node.js or Python application, they have root privileges inside the container — making **container escape attacks** significantly easier.
+
+### Bad Dockerfile (Runs as Root):
+```dockerfile
+# ❌ VULNERABLE
+FROM node:20-alpine
+WORKDIR /app
+COPY . .
+CMD ["node", "server.js"] # Running as root!
+```
+
+### Hardened Production Dockerfile:
+```dockerfile
+# ✅ SECURE & HARDENED
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --only=production
+COPY . .
+
+FROM node:20-alpine
+WORKDIR /app
+
+# Create a dedicated, unprivileged system group and user
+RUN addgroup -g 10001 -S appgroup &&     adduser -u 10001 -S appuser -G appgroup
+
+COPY --from=builder --chown=appuser:appgroup /app /app
+
+# Switch to unprivileged user!
+USER 10001:10001
+
+EXPOSE 3000
+CMD ["node", "server.js"]
+```
+
+---
+
+## 4. Kubernetes SecurityContext Hardening
+
+Enforce read-only root filesystems and drop kernel capabilities in your Kubernetes pod manifests:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: secure-web-api
+spec:
+  template:
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+      containers:
+        - name: web
+          image: my-app:v1.0.0
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - mountPath: /tmp # Only /tmp is writable
+              name: temp-volume
+      volumes:
+        - name: temp-volume
+          emptyDir: {}
+```

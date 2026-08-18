@@ -1,0 +1,128 @@
+---
+title: "Automated SAST & Secret Leak Scanning in CI/CD"
+duration: "30 min"
+order: 2
+---
+
+# Automated SAST & Secret Leak Scanning in CI/CD
+
+Secret leakage (accidental commits of AWS keys, database passwords, and private SSH certificates) is the **#1 leading cause of cloud data breaches**.
+
+In this lesson, you will learn how to block credentials and code vulnerabilities automatically using **Gitleaks** and **Semgrep**.
+
+```mermaid
+flowchart LR
+    Dev["Developer writes code"] --> Pre["1. Pre-commit Hook (Local Gitleaks)"]
+    Pre -->|Blocked if secret found ❌| Fix["Developer removes secret"]
+    Pre -->|Passes ✅| Git["git push to GitHub"]
+    Git --> CI["2. GitHub Actions CI (Semgrep SAST)"]
+    CI -->|Code Vulnerability Detected ⛔| PR["PR Blocked from Merge"]
+```
+
+---
+
+## 1. Secret Leak Prevention with Gitleaks
+
+Gitleaks is a lightning-fast Go tool that uses regex patterns and Shannon entropy to detect over 150+ types of secrets (AWS Access Keys, Stripe API keys, Slack Webhooks, GitHub PATs).
+
+### Scanning Locally:
+```bash
+# Install Gitleaks (macOS / Linux)
+brew install gitleaks
+
+# Scan the entire Git repository history for leaked secrets
+$ gitleaks detect --source . --verbose
+
+Finding:     AKIAIOSFODNN7EXAMPLE
+Secret:      AKIAIOSFODNN7EXAMPLE
+RuleID:      aws-access-key-id
+Entropy:     3.42
+File:        config/database.json
+Line:        14
+Commit:      b38a19f (Initial commit)
+Author:      developer@company.com
+
+ERR 1 leak found! Scan failed.
+```
+
+### Enforcing Pre-Commit Hooks:
+Prevent secrets from ever leaving the developer's laptop:
+
+Create `.pre-commit-config.yaml`:
+```yaml
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.2
+    hooks:
+      - id: gitleaks
+```
+
+---
+
+## 2. Static Application Security Testing (SAST) with Semgrep
+
+Unlike simple regex linters, **Semgrep** parses your code into an **Abstract Syntax Tree (AST)** to find semantic security flaws (SQL injection, CSRF vulnerabilities, insecure cryptography, hardcoded CORS headers).
+
+```bash
+# Run Semgrep with standard security rulesets
+semgrep scan --config "p/security-audit" --config "p/owasp-top-ten"
+```
+
+### Writing a Custom Semgrep Rule (`custom-security-rules.yml`):
+Prevent developers from running raw, unescaped SQL queries:
+
+```yaml
+rules:
+  - id: raw-sql-query-injection
+    patterns:
+      - pattern: $DB.query("SELECT * FROM users WHERE id = " + $INPUT)
+    message: "Potential SQL Injection detected! Use parameterized prepared statements instead."
+    languages: [javascript, typescript]
+    severity: ERROR
+```
+
+---
+
+## Complete GitHub Actions Security Pipeline
+
+Add automated SAST and Secret scanning to `.github/workflows/security.yml`:
+
+```yaml
+name: "DevSecOps: SAST & Secret Scanning"
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  secret-scan:
+    name: "Gitleaks Secret Scan"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Full history scan
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  sast-scan:
+    name: "Semgrep SAST Scan"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Semgrep
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: >-
+            p/security-audit
+            p/owasp-top-ten
+            p/javascript
+        env:
+          SEMGREP_RULES: p/security-audit
+```

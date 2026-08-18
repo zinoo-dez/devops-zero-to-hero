@@ -1,0 +1,234 @@
+---
+title: "HCL Syntax, Providers & Core Resource Blocks"
+duration: "30 min"
+order: 2
+---
+
+# HCL Syntax, Providers & Core Resource Blocks
+
+**HashiCorp Configuration Language (HCL)** is a human-readable, declarative language designed to strike the perfect balance between human ergonomics and machine parsability.
+
+---
+
+## Anatomy of an HCL Configuration File
+
+A standard Terraform file is composed of **Blocks**, **Arguments**, and **Expressions**:
+
+```hcl
+# <BLOCK TYPE> "<BLOCK LABEL 1>" "<BLOCK LABEL 2>" {
+#   <IDENTIFIER> = <EXPRESSION>
+# }
+
+resource "aws_s3_bucket" "app_storage" {
+  bucket        = "devops-zero-to-hero-storage-2026"
+  force_destroy = true
+
+  tags = {
+    Environment = "Production"
+    Team        = "Platform Engineering"
+  }
+}
+```
+
+- **Block Type**: `resource`, `provider`, `variable`, `output`, `data`, or `terraform`.
+- **Block Labels**: `aws_s3_bucket` (the resource type) and `app_storage` (the local internal name).
+- **Arguments**: Key-value pairs defining the desired configuration.
+
+---
+
+## The `terraform {}` Settings Block & Lock File
+
+Every production Terraform project begins with a `terraform {}` configuration block in `versions.tf` or `main.tf`:
+
+```hcl
+# versions.tf
+terraform {
+  required_version = ">= 1.5.0, < 2.0.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.50.0"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6.0"
+    }
+    local = {
+      source  = "hashicorp/local"
+      version = "~> 2.5.0"
+    }
+  }
+}
+```
+
+### Understanding Version Constraints:
+- `~> 5.50.0`: Allows non-breaking patch updates (e.g. `5.50.1`, `5.50.2`), but blocks `5.51.0` or `6.0.0`.
+- `>= 1.5.0`: Requires at least Terraform CLI version 1.5.0.
+
+### The Dependency Lock File (`.terraform.lock.hcl`):
+When you run `terraform init`, Terraform generates a `.terraform.lock.hcl` file containing cryptographic checksums of every provider binary.
+
+> [!IMPORTANT]
+> **Always commit `.terraform.lock.hcl` to Git!** This guarantees that every engineer and CI/CD runner downloads the exact same provider binary checksum across different operating systems.
+
+---
+
+## Hands-On: Building Your First Working Project
+
+Let's build a local working project that does not require an active AWS billing account so you can understand the mechanics of resource creation and dependencies.
+
+Create a new directory:
+```bash
+mkdir terraform-starter && cd terraform-starter
+```
+
+Create `main.tf`:
+```hcl
+terraform {
+  required_version = ">= 1.5.0"
+  required_providers {
+    local = {
+      source  = "hashicorp/local"
+      version = "~> 2.5.0"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6.0"
+    }
+  }
+}
+
+provider "local" {}
+provider "random" {}
+
+# Generate a random hex string for unique naming
+resource "random_id" "server_id" {
+  byte_length = 4
+}
+
+# Create a local configuration file referencing the random ID
+resource "local_file" "server_manifest" {
+  filename = "${path.module}/build/server-${random_id.server_id.hex}.json"
+  content = jsonencode({
+    cluster_id   = "cluster-${random_id.server_id.hex}"
+    environment  = "production"
+    node_count   = 3
+    provisioned  = timestamp()
+  })
+  file_permission = "0644"
+}
+```
+
+---
+
+## Executing the Lifecycle Commands
+
+### 1. Initialize
+```bash
+$ terraform init
+
+Initializing the backend...
+Initializing provider plugins...
+- Finding hashicorp/local versions matching "~> 2.5.0"...
+- Installing hashicorp/local v2.5.1...
+- Finding hashicorp/random versions matching "~> 3.6.0"...
+- Installing hashicorp/random v3.6.1...
+
+Terraform has been successfully initialized!
+```
+
+### 2. Format & Validate
+```bash
+# Auto-formats all .tf files to canonical indentation
+terraform fmt
+
+# Validates syntax and internal references
+terraform validate
+```
+
+### 3. Plan (The Speculative Execution Preview)
+```bash
+$ terraform plan
+
+Terraform will perform the following actions:
+
+  # local_file.server_manifest will be created
+  + resource "local_file" "server_manifest" {
+      + content         = (known after apply)
+      + file_permission = "0644"
+      + filename        = (known after apply)
+      + id              = (known after apply)
+    }
+
+  # random_id.server_id will be created
+  + resource "random_id" "server_id" {
+      + b64_std     = (known after apply)
+      + b64_url     = (known after apply)
+      + byte_length = 4
+      + hex         = (known after apply)
+      + id          = (known after apply)
+    }
+
+Plan: 2 to add, 0 to change, 0 to destroy.
+```
+
+### 4. Apply
+```bash
+$ terraform apply -auto-approve
+
+random_id.server_id: Creating...
+random_id.server_id: Creation complete after 0s [id=9a2b8c4d]
+local_file.server_manifest: Creating...
+local_file.server_manifest: Creation complete after 0s [id=14cfd298...]
+
+Apply complete! Resources: 2 added, 0 changed, 0 destroyed.
+```
+
+Check the generated file in your terminal:
+```bash
+$ cat build/server-*.json
+{"cluster_id":"cluster-9a2b8c4d","environment":"production","node_count":3,"provisioned":"2026-08-19T01:30:00Z"}
+```
+
+---
+
+## Data Sources: Querying Existing Infrastructure
+
+**Data Sources** allow Terraform to read information from existing infrastructure that was created outside Terraform or in another stack.
+
+```hcl
+# Example: Look up the latest official Ubuntu 24.04 AMI in AWS
+data "aws_ami" "ubuntu_latest" {
+  most_recent = true
+  owners      = ["099720109477"] # Canonical AWS Account ID
+
+  filter {
+    name   = "name"
+    values = ["ubuntu/images/hvm-ssd/ubuntu-noble-24.04-amd64-server-*"]
+  }
+
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
+  }
+}
+
+# Reference the AMI ID in your resource
+resource "aws_instance" "web" {
+  ami           = data.aws_ami.ubuntu_latest.id
+  instance_type = "t3.micro"
+}
+```
+
+---
+
+## Visualizing the Dependency Graph
+
+Terraform automatically figures out which resources must be created first by analyzing references. In our example:
+`local_file.server_manifest` references `random_id.server_id.hex`, so Terraform knows it **must create the random ID before the file**.
+
+```bash
+# Output ASCII dependency graph
+terraform graph
+```

@@ -8,9 +8,9 @@ export default function CoursesLoading() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <SectionHeader
           badge="Curriculum Directory"
-          title="All 9 DevOps"
+          title="All 13 DevOps"
           highlight="Zero-to-Hero Courses"
-          subtitle="Explore the complete learning track. Each course is packed with practical commands, architectural diagrams, and real-world best practices."
+          subtitle="Explore the complete learning track from Linux fundamentals to advanced GitOps and Terraform. Packed with practical terminal sessions and real-world architectures."
         />
 
         <div className="mt-12 md:mt-16">

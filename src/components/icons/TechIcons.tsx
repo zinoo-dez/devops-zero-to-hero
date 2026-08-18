@@ -124,3 +124,38 @@ export function FacebookIcon({ className = "w-6 h-6" }: { className?: string }) 
   );
 }
 
+export function TerraformIcon({ className = "w-6 h-6" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+      <path d="M1.44 0v7.575l6.561 3.79V3.79L1.44 0zm7.559 3.79v7.575l6.562 3.79V7.58L9 3.79zm7.56 3.79v7.574L23.12 19V11.42l-6.56-3.84zM1.44 9.076v7.575L8 20.441V12.87L1.44 9.076zm7.559 3.794v7.575L15.56 24.24V16.66l-6.56-3.79z" />
+    </svg>
+  );
+}
+
+export function PrometheusIcon({ className = "w-6 h-6" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+      <path d="M12 0a12 12 0 1012 12A12.014 12.014 0 0012 0zm5.82 17.653a7.355 7.355 0 01-11.64 0c.264-.52.544-1.03.856-1.503a5.71 5.71 0 009.928 0c.312.473.592.983.856 1.503zm-2.023-3.237a4.137 4.137 0 01-7.594 0 9.877 9.877 0 012.357-3.923c.365-.36.758-.7 1.187-.992.518.35.986.76 1.393 1.215a10.026 10.026 0 012.657 3.7zm-3.797-9.403a2.41 2.41 0 012.33 1.63 7.82 7.82 0 00-2.33-1.63z" />
+    </svg>
+  );
+}
+
+export function ArgoCDIcon({ className = "w-6 h-6" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+      <path d="M12 2L2 7.5v9L12 22l10-5.5v-9L12 2zm0 3.1l6.9 3.8L12 12.7 5.1 8.9 12 5.1zM4.3 10.2l6.7 3.7v7.4l-6.7-3.7v-7.4zm15.4 7.4l-6.7 3.7v-7.4l6.7-3.7v7.4z" />
+    </svg>
+  );
+}
+
+export function ShieldLockIcon({ className = "w-6 h-6" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" xmlns="http://www.w3.org/2000/svg">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+      <rect x="9" y="11" width="6" height="5" rx="1" />
+      <path d="M10 11V9a2 2 0 114 0v2" />
+    </svg>
+  );
+}
+
+

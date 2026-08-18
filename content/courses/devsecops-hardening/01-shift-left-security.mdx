@@ -1,0 +1,101 @@
+---
+title: "Shift-Left Security & The DevSecOps Mindset"
+duration: "25 min"
+order: 1
+---
+
+# Shift-Left Security & The DevSecOps Mindset
+
+In traditional software delivery, security was an isolated gate at the very end of the release cycle. Weeks before a major release, a separate security team would run penetration tests and file 200 blocking tickets — forcing engineers to delay releases and rewrite architecture.
+
+**DevSecOps (Development + Security + Operations)** integrates automated security testing into every single phase of the CI/CD software delivery pipeline.
+
+```mermaid
+flowchart LR
+    subgraph Traditional["❌ Traditional Waterfall Security"]
+        direction TB
+        Code1["Develop Code (6 Months)"] --> Build1["Build & Test"]
+        Build1 --> Deploy1["Pre-Production Security Audit (Week 24)"]
+        Deploy1 -.->|200 Blocking CVEs ⛔| Delay["Release Delayed 2 Months"]
+    end
+
+    subgraph DevSecOps["✅ Shift-Left DevSecOps"]
+        direction TB
+        S1["1. Code: Secret & SAST Scan"] --> S2["2. Build: Dependency & CVE Scan"]
+        S2 --> S3["3. Test: Container Signing & DAST"]
+        S3 --> S4["4. Deploy: K8s RBAC & SecurityContext"]
+        S4 --> S5["5. Runtime: Falco eBPF Threat Detection"]
+    end
+```
+
+---
+
+## Why "Shift-Left"? The Cost of Remediation
+
+Fixing vulnerabilities becomes exponentially more expensive and difficult the later they are detected in the lifecycle:
+
+```mermaid
+gantt
+    title Relative Cost to Fix a Security Vulnerability
+    dateFormat X
+    axisFormat $ %s
+
+    section Coding (IDE / Pre-commit)
+    $80 :active, 0, 80
+    section CI/CD Pipeline
+    $450 : 0, 450
+    section Staging QA Testing
+    $1800 : 0, 1800
+    section Production Breach Post-Mortem
+    $7600+ :crit, 0, 7600
+```
+
+1. **Coding Phase (~$80)**: Caught instantly by an IDE linter or pre-commit hook before pushing to Git.
+2. **CI Pipeline (~$450)**: Caught during a Pull Request automated scan; developer fixes it in 15 minutes.
+3. **Production Breach (~$7,600 - $4.4M+)**: Involves data leaks, emergency hotfixes, regulatory GDPR/HIPAA fines, and reputational damage.
+
+---
+
+## The 5 Layers of Defense-in-Depth
+
+Never rely on a single firewall or perimeter defense. Modern cloud security enforces **Defense-in-Depth** across 5 distinct layers:
+
+```mermaid
+flowchart TD
+    subgraph L1["Layer 1: Code & Secrets"]
+        L1_Desc["Gitleaks (Secret Detection) + Semgrep (SAST)"]
+    end
+
+    subgraph L2["Layer 2: Software Supply Chain"]
+        L2_Desc["Trivy (Dependency CVEs) + Cosign (Image Signing) + SBOM"]
+    end
+
+    subgraph L3["Layer 3: Container & Host Hardening"]
+        L3_Desc["Non-Root Users + Read-Only Filesystems + UFW Firewalls + SSH Keys"]
+    end
+
+    subgraph L4["Layer 4: Kubernetes Cluster Isolation"]
+        L4_Desc["RBAC (Least Privilege) + NetworkPolicies (Micro-Firewalls) + PSS"]
+    end
+
+    subgraph L5["Layer 5: Runtime Auditing"]
+        L5_Desc["Falco eBPF Kernel Auditing + Automated Incident Alerting"]
+    end
+
+    L1 --> L2 --> L3 --> L4 --> L5
+```
+
+---
+
+## Threat Modeling with the STRIDE Framework
+
+Before writing code or infrastructure, engineers use Microsoft's **STRIDE** framework to identify potential attack vectors:
+
+| Threat | Description | Real-World Example | DevSecOps Countermeasure |
+| :--- | :--- | :--- | :--- |
+| **S**poofing | Impersonating someone else | Attacker pushes malicious container image | Sigstore Cosign digital image signing |
+| **T**ampering | Modifying data in transit/rest | Editing database records directly | TLS encryption + immutable audit logs |
+| **R**epudiation | Denying an action took place | User claims they didn't delete the DB | Centralized append-only audit logging |
+| **I**nformation Disclosure | Exposing private data | Plain-text database password in Git | HashiCorp Vault / Sealed Secrets |
+| **D**enial of Service | Exhausting system resources | Flooding API with 100k requests/sec | Rate limiting + K8s resource requests/limits |
+| **E**levation of Privilege | Gaining unauthorized admin access | Exploiting container breakout to root | Running containers as unprivileged non-root |

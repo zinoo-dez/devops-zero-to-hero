@@ -1,0 +1,111 @@
+---
+title: "Alertmanager: Alert Rules, Deduplication & Slack Routing"
+duration: "35 min"
+order: 7
+---
+
+# Alertmanager: Alert Rules & Notification Routing
+
+Alerts should only fire when **actionable human intervention is required**. If an alert fires and you do not know what to do or no action is needed, the alert is noise.
+
+```mermaid
+flowchart LR
+    Prom["Prometheus
+(Evaluates alert_rules.yml)"] -->|Firing Alert payload| AM["Alertmanager Engine"]
+
+    subgraph AM_Features["Alertmanager Intelligence"]
+        Dedup["1. Deduplication"]
+        Group["2. Grouping (Batch 50 alerts into 1 message)"]
+        Inhibit["3. Inhibition (Silence warning if critical is active)"]
+        Silence["4. Silences (Mute during maintenance)"]
+    end
+
+    AM --> AM_Features
+    AM_Features --> Slack["Slack #devops-alerts"]
+    AM_Features --> Pager["PagerDuty (Critical Only)"]
+```
+
+---
+
+## 1. Writing Actionable Alert Rules in Prometheus
+
+Create `/etc/prometheus/alert_rules.yml`:
+
+```yaml
+groups:
+  - name: infrastructure_alerts
+    rules:
+      # 1. Instance Down Alert
+      - alert: HostInstanceDown
+        expr: up == 0
+        for: 2m # Must fail continuously for 2 minutes before firing
+        labels:
+          severity: critical
+          tier: infrastructure
+        annotations:
+          summary: "Host {{ $labels.instance }} is unreachable!"
+          description: "Instance {{ $labels.instance }} of job {{ $labels.job }} has been down for more than 2 minutes."
+          runbook_url: "https://wiki.mycompany.com/runbooks/host-down"
+
+      # 2. High Memory Saturation Alert
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Host {{ $labels.instance }} memory usage > 90%"
+          description: "Memory usage is currently {{ $value | printf '%.2f' }}%."
+
+      # 3. High HTTP Error Rate Alert
+      - alert: HighHttpErrorRate
+        expr: sum(rate(http_requests_total{status=~"5.."}[5m])) / sum(rate(http_requests_total[5m])) * 100 > 5
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High 5xx error rate on {{ $labels.service }}"
+          description: "5xx error rate is currently at {{ $value | printf '%.2f' }}% for service {{ $labels.service }}."
+```
+
+---
+
+## 2. Configuring Alertmanager Routing & Slack Webhooks
+
+Create `alertmanager.yml`:
+
+```yaml
+global:
+  resolve_timeout: 5m
+  slack_api_url: "https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX"
+
+route:
+  group_by: ["alertname", "cluster", "service"]
+  group_wait: 30s       # Wait 30s to buffer incoming alerts before first notification
+  group_interval: 5m    # Send batches of new alerts every 5 minutes
+  repeat_interval: 4h   # Re-notify every 4 hours if still firing
+  receiver: "slack_notifications"
+
+  # Route critical alerts to on-call PagerDuty
+  routes:
+    - match:
+        severity: critical
+      receiver: "pagerduty_and_slack"
+
+receivers:
+  - name: "slack_notifications"
+    slack_configs:
+      - channel: "#devops-alerts"
+        send_resolved: true # Send green recovery message when incident ends!
+        title: "[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}"
+        text: >-
+          *Summary:* {{ .CommonAnnotations.summary }}
+          *Description:* {{ .CommonAnnotations.description }}
+          *Severity:* `{{ .CommonLabels.severity }}`
+          *Runbook:* {{ .CommonAnnotations.runbook_url }}
+
+  - name: "pagerduty_and_slack"
+    slack_configs:
+      - channel: "#devops-critical-incidents"
+        send_resolved: true
+```

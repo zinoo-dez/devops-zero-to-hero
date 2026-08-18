@@ -31,7 +31,7 @@ export function FeaturedCourses() {
             href="/courses"
             className="mt-6 md:mt-0 inline-flex items-center gap-2 text-sm font-bold text-blue-400 hover:text-blue-300 transition-colors group"
           >
-            <span>Explore all 9 courses</span>
+            <span>Explore all 13 courses</span>
             <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
           </Link>
         </div>

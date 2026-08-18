@@ -41,26 +41,26 @@ export function Footer() {
               </li>
               <li>
                 <Link
-                  href="/courses/git-github"
+                  href="/courses/terraform-iac"
                   className="text-muted-foreground hover:text-blue-400 transition-colors flex items-center gap-1.5"
                 >
-                  <BookOpen className="w-3.5 h-3.5 text-blue-400" /> Git & GitHub Basics
+                  <BookOpen className="w-3.5 h-3.5 text-blue-400" /> Terraform IaC
                 </Link>
               </li>
               <li>
                 <Link
-                  href="/courses/github-actions"
+                  href="/courses/monitoring-observability"
                   className="text-muted-foreground hover:text-blue-400 transition-colors flex items-center gap-1.5"
                 >
-                  <Zap className="w-3.5 h-3.5 text-blue-400" /> GitHub Actions CI/CD
+                  <Sparkles className="w-3.5 h-3.5 text-blue-400" /> Observability & Prometheus
                 </Link>
               </li>
               <li>
                 <Link
-                  href="/courses/docker-fundamentals"
-                  className="text-muted-foreground hover:text-blue-400 transition-colors"
+                  href="/courses/gitops-argocd"
+                  className="text-muted-foreground hover:text-blue-400 transition-colors flex items-center gap-1.5"
                 >
-                  Docker & Containers
+                  <Zap className="w-3.5 h-3.5 text-blue-400" /> ArgoCD & GitOps
                 </Link>
               </li>
             </ul>
@@ -77,7 +77,7 @@ export function Footer() {
                   href="/courses"
                   className="text-muted-foreground hover:text-blue-400 transition-colors"
                 >
-                  All 9 Courses
+                  All 13 Courses
                 </Link>
               </li>
               <li>
@@ -85,7 +85,7 @@ export function Footer() {
                   href="/roadmap"
                   className="text-muted-foreground hover:text-blue-400 transition-colors flex items-center gap-1.5"
                 >
-                  <Map className="w-3.5 h-3.5 text-blue-400" /> Visual Roadmap
+                  <Map className="w-3.5 h-3.5 text-blue-400" /> Visual 13-Step Roadmap
                 </Link>
               </li>
               <li>

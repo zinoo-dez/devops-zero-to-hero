@@ -52,7 +52,7 @@ export function FinalCTA() {
                 href="/courses"
                 className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-8 py-4 rounded-2xl text-sm font-bold tracking-wide bg-slate-200 dark:bg-white/10 hover:bg-slate-300 dark:hover:bg-white/15 text-foreground dark:text-white border border-slate-300 dark:border-white/15 hover:border-blue-500/30 dark:hover:border-white/25 transition-all"
               >
-                Browse All 9 Courses
+                Browse All 13 Courses
               </Link>
             </div>
           </div>

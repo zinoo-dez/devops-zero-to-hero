@@ -3,8 +3,8 @@ import { StatCard } from "@/components/ui/StatCard";
 
 export function StatsBar() {
   const stats = [
-    { number: "9", label: "Mastery Courses", sublabel: "Linux to K8s" },
-    { number: "78+", label: "Hands-on Lessons", sublabel: "Zero fluff, high impact" },
+    { number: "13", label: "Mastery Courses", sublabel: "Linux to GitOps & IaC" },
+    { number: "110+", label: "Hands-on Lessons", sublabel: "Zero fluff, high impact" },
     { number: "100%", label: "Free & Open Source", sublabel: "No paywalls or subscriptions" },
     { number: "1", label: "Production Capstone", sublabel: "Real-world end-to-end pipeline" },
   ];
