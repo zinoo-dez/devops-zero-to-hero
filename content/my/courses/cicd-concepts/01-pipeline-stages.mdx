@@ -1,10 +1,10 @@
 ---
-title: "CI/CD Pipeline အဆင့်များ- Build, Test, Release, Deploy"
+title: "CI/CD Pipeline Stages: Build, Test, Release, Deploy"
 ---
 
-# CI/CD Pipeline ဆိုတာဘာလဲ။
+# CI/CD Pipeline ဆိုတာ ဘာလဲ။
 
-CI/CD pipeline ဆိုတာ သင့်ရဲ့ source code ကို Git commit လုပ်လိုက်တာနဲ့ လူကိုယ်တိုင် လုပ်ဆောင်စရာမလိုဘဲ production ဆီသို့ ဘေးကင်းလုံခြုံစွာ ပေးပို့ပေးတဲ့ အလိုအလျောက် တပ်ဆင်ထုတ်လုပ်ရေးလိုင်း (automated assembly line) တစ်ခု ဖြစ်ပါတယ်။ pipeline တိုင်းမှာ အဆင့်များစွာ (stages) ပါဝင်ပြီး အဆင့်တစ်ခုချင်းစီဟာ နောက်အဆင့်မစမီ မဖြစ်မနေ အောင်မြင်ကျော်လွှားရမယ့် အရည်အသွေးစစ်ဆေးရေးဂိတ် (quality gate) ဖြစ်ပါတယ်။
+CI/CD pipeline ဆိုတာကတော့ Git commit လုပ်လိုက်တဲ့ source code ကို လူကိုယ်တိုင် လိုက်လုပ်စရာမလိုဘဲ (manual intervention မပါဘဲ) production environment ထဲကို အန္တရာယ်ကင်းကင်းနဲ့ အလိုအလျောက် ပို့ဆောင်ပေးတဲ့ automated assembly line တစ်ခု ဖြစ်ပါတယ်။ pipeline တိုင်းမှာ အဆင့်တွေ အစဉ်လိုက် ပါဝင်ပါတယ်။ အဆင့်တိုင်းဟာ နောက်တစ်ဆင့်ကို မကူးခင် မဖြစ်မနေ အောင်မြင်ရမယ့် quality gate တစ်ခုစီ ဖြစ်ပါတယ်။
 
 ```mermaid
 flowchart LR
@@ -31,11 +31,11 @@ flowchart LR
 
 ---
 
-## အဆင့် ၁- Build
+## Stage 1: Build
 
-Build အဆင့်ဟာ သင့်ရဲ့ source code ကို compile လုပ်ပြီး artifact တစ်ခု (ခေတ်မီ application တွေအတွက် အများအားဖြင့် Docker image) ကို ထုတ်လုပ်ပေးပါတယ်။
+Build stage ကတော့ source code တွေကို compile လုပ်ပေးပြီး artifact တစ်ခုကို ထုတ်လုပ်ပေးပါတယ်။ ခေတ်မီ application တွေမှာတော့ ဒါဟာ ပုံမှန်အားဖြင့် Docker image တစ်ခု ဖြစ်ပါတယ်။
 
-**ရည်ရွယ်ချက်များ**- Code များကို သန့်ရှင်းစွာ compile ဖြစ်မဖြစ် စစ်ဆေးရန်နှင့် အပြောင်းအလဲမရှိ ခိုင်မာသည့် (deterministic, immutable) artifact တစ်ခုကို ထုတ်လုပ်ရန်။
+**ရည်ရွယ်ချက်များ**: Code တွေ အမှားအယွင်းမရှိ ကောင်းမွန်စွာ compile ဖြစ်ကြောင်း စစ်ဆေးဖို့နဲ့ တူညီတဲ့ ရလဒ်ထွက်စေမယ့်၊ ပြောင်းလဲလို့မရတဲ့ (immutable) artifact တစ်ခုကို ထုတ်လုပ်ဖို့ ဖြစ်ပါတယ်။
 
 ```yaml
 # GitHub Actions example
@@ -65,13 +65,13 @@ build:
         cache-to: type=gha,mode=max
 ```
 
-**အဓိကမူဝါဒ**- တစ်ကြိမ်သာ Build လုပ်ပြီး နေရာတိုင်းမှာ ထို artifact အတိအကျကိုပဲ deploy လုပ်ပါ။ Staging မှာ စမ်းသပ်မှုများ အောင်မြင်ခဲ့ပြီး Git SHA နဲ့ tag တပ်ထားတဲ့ Docker image ဟာ Production မှာ deploy လုပ်မယ့် image နဲ့ **ထပ်တူညီ** ဖြစ်ရပါမယ် — ထပ်မံ rebuild လုပ်စရာမလိုပါ။
+**အဓိကမူဝါဒ**: တစ်ခါပဲ Build လုပ်ပါ။ ပြီးရင် အဲ့ဒီတူညီတဲ့ artifact ကိုပဲ နေရာအနှံ့ deploy လုပ်ပါ။ Staging မှာ test တွေ အောင်မြင်ထားတဲ့ Git SHA tag ပါတဲ့ Docker image ဟာ production ကို deploy လုပ်မယ့် image နဲ့ **လုံးဝတူညီ** ရပါမယ် — ထပ်ပြီး build စရာမလိုပါဘူး။
 
 ---
 
-## အဆင့် ၂- Test
+## Stage 2: Test
 
-Test အဆင့်ဟာ CI ရဲ့ အဓိကပင်မ ဖြစ်ပါတယ်။ ဒါဟာ Testing Pyramid ရဲ့ အဆင့်များစွာမှာ code မှန်ကန်မှုကို စစ်ဆေးပေးပါတယ်-
+Test stage ဟာ CI ရဲ့ အဓိက ကျောရိုး ဖြစ်ပါတယ်။ Testing Pyramid ရဲ့ အဆင့်အမျိုးမျိုးမှာ code ရဲ့ မှန်ကန်မှုကို စစ်ဆေးပေးပါတယ် -
 
 ```mermaid
 flowchart TD
@@ -122,13 +122,13 @@ test:
         threshold: 80   # Fail if coverage drops below 80%
 ```
 
-**မမှန်မကန်ဖြစ်နေသော test များ (Flaky tests) သည် ပျက်စီးနေသော test များဖြစ်သည်**- ကျပန်းပုံစံဖြင့် ကျရှုံးနေသည့် test တစ်ခုဟာ developer တွေရဲ့ ယုံကြည်မှုကို ပျက်စီးစေပါတယ်။ ယင်းကို တွေ့ရှိပါက ချက်ချင်း သီးခြားခွဲထုတ်ပါ (ခေတ္တ ကျော်ထားပါ)၊ ပြင်ဆင်ပြီးမှ ပြန်လည်ဖွင့်ပါ။ CI pipeline တစ်ခုဟာ ရလဒ် အမြဲတန်းသေချာမှု ရှိရပါမယ် (deterministic ဖြစ်ရမည်) — ကျရှုံးမှုတစ်ခုဟာ "နောက်တစ်ကြိမ် ပြန်ကြိုးစားရန် (try again)" ကို မဆိုလိုဘဲ code ပျက်စီးနေခြင်းကိုသာ အမြဲတမ်း အဓိပ္ပါယ်ရရပါမယ်။
+**Flaky test တွေဆိုတာ ပျက်စီးနေတဲ့ test တွေပါပဲ**: တိုက်ဆိုင်သလို ရံဖန်ရံခါ fail တတ်တဲ့ test တစ်ခုက developer တွေရဲ့ ယုံကြည်မှုကို ပျက်ပြားစေပါတယ်။ အဲ့လိုမျိုး တွေ့ပြီဆိုတာနဲ့ ချက်ချင်း ဖယ်ရှားထားပါ (ခေတ္တ ဖြုတ်ထားပါ)၊ ပြန်ပြင်ပါ ပြီးမှ အလုပ်လုပ်ခိုင်းပါ။ CI pipeline တစ်ခုဟာ လုံးဝ တိကျသေချာရပါမယ် — test တစ်ခု fail တယ်ဆိုတာ code မှာ အမှားရှိနေလို့ပါပဲ၊ ဘယ်တော့မှ "ထပ်စမ်းကြည့်ပါဦး" ဆိုတဲ့ သဘောမျိုး မဖြစ်ရပါဘူး။
 
 ---
 
-## အဆင့် ၃- Security Scanning (Shift Left)
+## Stage 3: Security Scanning (Shift Left)
 
-Security စစ်ဆေးမှုများကို သုံးလတစ်ကြိမ် စစ်ဆေးခြင်းမျိုး မဟုတ်ဘဲ CI အတွင်းမှာတင် စတင်ပြုလုပ်ဆောင်ရွက်ပါတယ်။ ဒါကို "Shift Left" လို့ ခေါ်ပါတယ် — ပြင်ဆင်စရိတ် သက်သာသည့် စောစီးစွာ အချိန်မှာတင် လုံခြုံရေး ဟာကွက်များ (vulnerabilities) ကို စောစီးစွာ စကင်ဖတ်စစ်ဆေးခြင်း ဖြစ်ပါတယ်။
+Security scan တွေကို သုံးလတစ်ကြိမ် audit လုပ်တဲ့အချိန်မှ လုပ်တာမျိုးမဟုတ်ဘဲ CI ထဲမှာ အမြဲ run နေရပါမယ်။ ဒါကို "shifting left" လို့ ခေါ်ပါတယ် — လွယ်လွယ်ကူကူ ပြင်လို့ရမယ့် အစောပိုင်း အဆင့်တွေမှာတင် vulnerability တွေကို ရှာဖွေဖော်ထုတ်တာ ဖြစ်ပါတယ်။
 
 ```yaml
 security:
@@ -174,9 +174,9 @@ security:
 
 ---
 
-## အဆင့် ၄- Package နှင့် Publish Artifact
+## Stage 4: Package and Publish Artifact
 
-Image ဟာ စမ်းသပ်မှုများနှင့် စကင်ဖတ်မှုများ အားလုံးကို အောင်မြင်ပြီးပါက ယင်းကို Tag များတပ်ပြီး container registry သို့ Tag အမျိုးမျိုးဖြင့် ထုတ်ဝေ (publish) ပါတယ်-
+Image က test နဲ့ scan တွေ အားလုံး အောင်မြင်သွားပြီဆိုရင် tag အမျိုးမျိုးတပ်ပြီး container registry ထဲကို publish လုပ်ပါတယ်:
 
 ```bash
 # Tagging strategy:
@@ -196,9 +196,9 @@ docker push ghcr.io/yourorg/myapp:latest
 
 ---
 
-## အဆင့် ၅- Staging သို့ Deploy ပြုလုပ်ခြင်း
+## Stage 5: Deploy to Staging
 
-Staging ဆိုတာ အသုံးပြုသူ အစစ်အမှန်တွေရဲ့ traffic မရောက်ရှိနိုင်တဲ့ Production နဲ့ တူညီတဲ့ ပတ်ဝန်းကျင် (environment) တစ်ခု ဖြစ်ပါတယ်။ အဆိုပါနေရာမှာ သက်ဆိုင်ရာ stack တစ်ခုလုံးအပေါ် Integration နှင့် E2E test များကို စမ်းသပ်မောင်းနှင်ပါတယ်-
+Staging ဆိုတာကတော့ production နဲ့ ပုံစံတူ ပတ်ဝန်းကျင်တစ်ခု ဖြစ်ပြီး တကယ့် user traffic တွေ လုံးဝ မရောက်ပါဘူး။ ဒီနေရာမှာ integration နဲ့ E2E test တွေကို stack အပြည့်အစုံနဲ့ run ကြည့်ပါတယ်:
 
 ```yaml
 deploy-staging:
@@ -235,9 +235,9 @@ deploy-staging:
 
 ---
 
-## အဆင့် ၆- Manual Approval Gate
+## Stage 6: Manual Approval Gate
 
-စည်းမျဉ်းများ စိစစ်မှုများပြားသည့် ပတ်ဝန်းကျင်များ သို့မဟုတ် စွန့်စားရမှုများသော deployment များအတွက် Staging နှင့် Production ကြားတွင် လူကိုယ်တိုင် အတည်ပြုရသည့် အဆင့် (human approval step) တစ်ခုကို ထည့်သွင်းပါ-
+ဥပဒေစည်းမျဉ်းတင်းကျပ်တဲ့ ပတ်ဝန်းကျင်တွေ (regulated environments) သို့မဟုတ် အန္တရာယ်များတဲ့ deployment တွေအတွက် staging နဲ့ production အကြားမှာ လူကိုယ်တိုင် အတည်ပြုပေးရမယ့် step တစ်ခုကို ထည့်သွင်းနိုင်ပါတယ်:
 
 ```yaml
 # GitHub Actions: environments with required reviewers
@@ -253,13 +253,13 @@ deploy-production:
       # ... only runs after a human approves in the GitHub UI
 ```
 
-ဒါဟာ Production deployment မစတင်မီ သတ်မှတ်ထားသော စစ်ဆေးသူများ (reviewers) က "Approve" ကို နှိပ်နိုင်ရန် GitHub UI အသိပေးချက်တစ်ခု ပေးပို့ပါလိမ့်မည် — အလိုအလျောက်လုပ်ဆောင်မှုကို မနှောင့်နှေးစေဘဲ စစ်ဆေးမှုမှတ်တမ်း (audit trail) နှင့် လူကိုယ်တိုင် စိစစ်အတည်ပြုမှုကို ရရှိစေပါတယ်။
+ဒါက GitHub UI မှာ သတ်မှတ်ထားတဲ့ reviewer တွေက production deploy မလုပ်ခင် "Approve" ကို နှိပ်ပေးရမယ့် notification တစ်ခုကို ပေါ်လာစေပါတယ်။ အဲ့ဒါကြောင့် automation ရဲ့ အမြန်နှုန်းကို မထိခိုက်စေဘဲ audit trail နဲ့ လူကိုယ်တိုင် စစ်ဆေးအတည်ပြုမှုကို ရရှိစေပါတယ်။
 
 ---
 
-## အဆင့် ၇- Production Deployment
+## Stage 7: Production Deployment
 
-နောက်ဆုံးအဆင့်မှာ အလိုအလျောက်ကျန်းမာရေး စစ်ဆေးမှု (health verification) နှင့် နောက်ပြန်ဆုတ်နိုင်သည့် စွမ်းရည် (rollback capability) တို့ဖြင့် Production သို့ deploy လုပ်ဆောင်ပါတယ်-
+နောက်ဆုံးအဆင့်ကတော့ production ကို deploy လုပ်တာ ဖြစ်ပြီး အလိုအလျောက် health verification နဲ့ rollback လုပ်နိုင်တဲ့ စွမ်းဆောင်ရပါရှိပါတယ်:
 
 ```yaml
 deploy-production:
@@ -312,42 +312,42 @@ deploy-production:
 
 ---
 
-## Continuous Integration, Continuous Delivery နှင့် Continuous Deployment တို့၏ ကွာခြားချက်
+## Continuous Integration vs Continuous Delivery vs Continuous Deployment
 
-| သဘောတရား | အဓိပ္ပါယ် | လူကိုယ်တိုင် ဆောင်ရွက်ရမှု |
+| Term | Meaning | Human intervention |
 |------|---------|------------------|
-| **CI** (Continuous Integration) | Commit တိုင်းသည် အလိုအလျောက် build + test များကို စတင်စေသည် | Push လုပ်ပြီးပါက လူကိုယ်တိုင် ဆောင်ရွက်ရန် မလိုပါ |
-| **CD** (Continuous Delivery) | အောင်မြင်သော build တိုင်းသည် deploy လုပ်ရန် အသင့်ဖြစ်သည်၊ deploy ကို လူကိုယ်တိုင် စတင်ရသည် | 1-click deploy |
-| **CD** (Continuous Deployment) | အောင်မြင်သော build တိုင်းသည် Production သို့ အလိုအလျောက် deploy ဖြစ်သည် | လုံးဝမလို - ရာနှုန်းပြည့် အလိုအလျောက်ဖြစ်သည် |
+| **CI** (Continuous Integration) | Every commit triggers automated build + tests | None after push |
+| **CD** (Continuous Delivery) | Every passing build is ready to deploy; deploy is triggered manually | 1-click deploy |
+| **CD** (Continuous Deployment) | Every passing build automatically deploys to production | Zero — fully automatic |
 
-ရင့်ကျက်မှုရှိသော ကုမ္ပဏီအများစုသည် Continuous Delivery ကို ကျင့်သုံးကြသည် — Staging အထိ ရာနှုန်းပြည့် အလိုအလျောက် အလုပ်လုပ်သော pipeline များဖြစ်ပြီး၊ Production သို့ တစ်ချက်နှိပ်ရုံဖြင့် သို့မဟုတ် အလိုအလျောက် deploy ပြုလုပ်ကြသည်။ Continuous Deployment (Production အထိ ရာနှုန်းပြည့် အလိုအလျောက်ဖြစ်ခြင်း) သည် အထူးကောင်းမွန်သော test coverage နှင့် monitoring တို့ လိုအပ်ပါသည်။
+ကျွမ်းကျင်တဲ့ ကုမ္ပဏီအများစုဟာ Continuous Delivery ကို ကျင့်သုံးကြပါတယ် — staging အထိ pipeline တွေအားလုံး အလိုအလျောက်လုပ်ဆောင်ပေးပြီး production ကိုတော့ တစ်ချက်ကလစ်နှိပ်ရုံနဲ့ (သို့) အလိုအလျောက် deploy ဖြစ်အောင် လုပ်ကြပါတယ်။ Continuous Deployment (production အထိ လုံးဝအလိုအလျောက်လုပ်ဆောင်ခြင်း) ကတော့ ထူးချွန်ကောင်းမွန်တဲ့ test coverage နဲ့ monitoring တွေ လိုအပ်ပါတယ်။
 
 ---
 
-## DORA Metrics- Pipeline ၏ ထိရောက်မှုကို တိုင်းတာခြင်း
+## DORA Metrics: Pipeline ရဲ့ ထိရောက်မှုကို တိုင်းတာခြင်း
 
-Google မှ DevOps Research and Assessment (DORA) အဖွဲ့သည် စွမ်းဆောင်ရည်မြင့်မားသော အင်ဂျင်နီယာအဖွဲ့များကို ခွဲခြားပေးနိုင်သည့် တိုင်းတာမှု ၄ ခုကို ဖော်ထုတ်ခဲ့သည်-
+Google က DevOps Research and Assessment (DORA) အဖွဲ့ဟာ ထူးချွန်တဲ့ engineering အဖွဲ့တွေကို ခွဲခြားသတ်မှတ်ပေးနိုင်တဲ့ metric ၄ ခုကို ဖော်ထုတ်ခဲ့ပါတယ်:
 
-| တိုင်းတာမှု | ထိပ်တန်းစွမ်းဆောင်ရည်ရှိသူ | နိမ့်ပါးသောစွမ်းဆောင်ရည်ရှိသူ |
+| Metric | Elite Performer | Low Performer |
 |--------|----------------|---------------|
-| **Deployment Frequency (Deployment အကြိမ်ရေ)** | တစ်ရက်လျှင် အကြိမ်ပေါင်းများစွာ | တစ်လလျှင် တစ်ကြိမ် သို့မဟုတ် ထို့ထက်နည်း |
-| **Lead Time for Changes (ပြောင်းလဲမှုအတွက် ကြာမြင့်ချိန်)** | ၁ နာရီအောက် | ၁ လမှ ၆ လ |
-| **Mean Time to Recovery (မူလအခြေအနေပြန်ရောက်ရန် ပျမ်းမျှကြာချိန်)** | ၁ နာရီအောက် | ၁ ပတ်မှ ၁ လ |
-| **Change Failure Rate (ပြောင်းလဲမှု ကျရှုံးမှုနှုန်း)** | ၀–၁၅% | ၄၆–၆၀% |
+| **Deployment Frequency** | Multiple times/day | Monthly or less |
+| **Lead Time for Changes** | < 1 hour | 1–6 months |
+| **Mean Time to Recovery** | < 1 hour | 1 week–1 month |
+| **Change Failure Rate** | 0–15% | 46–60% |
 
-ကောင်းမွန်စွာ အကောင်အထည်ဖော်ထားသော CI/CD pipeline တစ်ခုသည် အဆိုပါ တိုင်းတာမှု ၄ ခုစလုံးကို တိုက်ရိုက် တိုးတက်စေပါသည်။
+ကောင်းမွန်စွာ တည်ဆောက်ထားတဲ့ CI/CD pipeline တစ်ခုဟာ အဆိုပါ metric ၄ ခုစလုံးကို တိုက်ရိုက် တိုးတက်ကောင်းမွန်စေပါတယ်။
 
 ---
 
-## အနှစ်ချုပ်
+## အကျဉ်းချုပ်
 
-Production အဆင့်မီ CI/CD pipeline တစ်ခုတွင် အဆင့် ၇ ဆင့် ရှိပါသည်-
-1. **Build**: compile လုပ်ခြင်း + Docker image တည်ဆောက်ခြင်း၊ git SHA tag ဖြင့် registry သို့ push လုပ်ခြင်း
+Production အဆင့်ရှိတဲ့ CI/CD pipeline တစ်ခုမှာ အဆင့် ၇ ဆင့် ပါဝင်ပါတယ်:
+1. **Build**: compile လုပ်ခြင်း + Docker image တည်ဆောက်ခြင်း၊ git SHA tag နဲ့ registry ထဲ ပို့ခြင်း
 2. **Test**: unit → integration → coverage သတ်မှတ်ချက် (80%+)
 3. **Scan**: SAST (CodeQL), SCA (npm audit), secrets (TruffleHog), container (Trivy), IaC (Trivy config)
-4. **Package**: SHA + SemVer + latest တို့ဖြင့် multi-tag တပ်ခြင်း
-5. **Deploy to Staging**: full stack deploy + smoke test + E2E test ပြုလုပ်ခြင်း
-6. **Manual Gate** (စိတ်ကြိုက်): GitHub တွင် သတ်မှတ်ထားသော စစ်ဆေးသူ၏ အတည်ပြုချက် ရယူခြင်း
-7. **Production Deploy**: new image ကို ကြိုတင် pull လုပ်ခြင်း၊ service ကို ပြန်လည်စတင်ခြင်း၊ health စစ်ဆေးခြင်း၊ မအောင်မြင်ပါက အလိုအလျောက် rollback လုပ်ခြင်း
+4. **Package**: SHA + SemVer + latest တို့ဖြင့် multi-tag လုပ်ခြင်း
+5. **Deploy to Staging**: stack အပြည့်အစုံ deploy လုပ်ခြင်း + smoke test + E2E test
+6. **Manual Gate** (ရွေးချယ်နိုင်သည်): GitHub မှာ reviewer ရဲ့ အတည်ပြုချက် လိုအပ်ခြင်း
+7. **Production Deploy**: image အသစ်ကို ကြိုတင် pull လုပ်ခြင်း၊ service ကို restart လုပ်ခြင်း၊ health ကို စစ်ဆေးခြင်း၊ error ဖြစ်ပါက အလိုအလျောက် rollback လုပ်ခြင်း
 
-နောက်သင်ခန်းစာတွင် အဆင့် ၄ မှ မပြောင်းလဲနိုင်သော ထွက်ရှိချက်များ (immutable outputs) ဖြစ်သည့် artifact များကို pipeline တစ်လျှောက်လုံးတွင် မည်သို့ စီမံခန့်ခွဲပုံ၊ version တပ်ပုံနှင့် လုံခြုံရေးယူပုံတို့ကို လေ့လာသွားမည် ဖြစ်သည်။
+နောက်သင်ခန်းစာမှာတော့ pipeline တစ်ခုလုံးမှာ artifact တွေ (stage 4 ရဲ့ ပြောင်းလဲလို့မရတဲ့ ရလဒ်တွေ) ကို ဘယ်လို စီမံခန့်ခွဲမလဲ၊ version တွေ ဘယ်လိုခွဲမလဲ၊ လုံခြုံရေး ဘယ်လိုယူမလဲဆိုတာတွေကို လေ့လာရမှာ ဖြစ်ပါတယ်။

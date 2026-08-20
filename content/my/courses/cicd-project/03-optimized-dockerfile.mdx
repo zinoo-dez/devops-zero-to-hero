@@ -1,24 +1,24 @@
 ---
-title: "ခိုင်မာအားကောင်းသော Multi-Stage Dockerfile ရေးသားခြင်း"
+title: "Writing the Hardened Multi-Stage Dockerfile"
 ---
 
-# Production တွင် သင်၏ Dockerfile က ဘာကြောင့် အရေးကြီးသလဲ
+# Why Your Dockerfile Matters in Production
 
-ကျူတိုရီလစ် အများစုက သင့်လက်ပ်တော့ပ်ပေါ်မှာ အလုပ်လုပ်တဲ့ 5 လိုင်းပါတဲ့ Dockerfile ကိုပဲ ပြသကြပါတယ်။ Production မှာတော့ လုံးဝကွဲပြားတာတစ်ခု လိုအပ်ပါတယ်။ Production Dockerfile တစ်ခုမှာ အောက်ပါအတိုင်း ဖြစ်ရပါမယ် -
+Tutorial တွေအများစုက သင့် laptop မှာ အလုပ်လုပ်မယ့် 5-line Dockerfile လောက်ပဲ ပြကြပါတယ်။ ဒါပေမယ့် Production မှာတော့ ပုံစံတစ်မျိုး လိုအပ်ပါတယ်။ Production Dockerfile တစ်ခုမှာ အောက်ပါအချက်တွေ ရှိရပါမယ် -
 
-1. **သေးငယ်ခြင်း (Small)** — မီဂါဘိုက် တိုင်းဟာ rolling updates လုပ်နေစဉ်အတွင်း pull time ကို ပိုကြာစေပါတယ်။ ပိုသေးလေ = deployment ပိုမြန်လေပါပဲ။
-2. **လုံခြုံခြင်း (Secure)** — တည်ဆောက်ရေး တူးလ်တွေ၊ ပက်ကေ့ဂျ် မန်နေဂျာတွေနဲ့ final image ထဲမှာ shell လုံးဝ မပါရပါဘူး။ ဘိုင်နရီ (binaries) နည်းလေ၊ attack surface ပိုငယ်လေပါပဲ။
-3. **မှန်းဆနိုင်ခြင်း (Deterministic)** — အတူတူပဲဖြစ်တဲ့ source code ဟာ အမြဲတမ်း image အတူတူကိုပဲ ထုတ်ပေးရပါမယ်။ `apt-get update` ကြောင့် အံ့သြစရာတွေ မဖြစ်စေရပါ။
-4. **Non-root ဖြစ်ခြင်း** — သင့်ရဲ့ ကွန်တိန်နာ (container) ဟာ ထိုးဖောက်ခံရရင်တောင်မှ တိုက်ခိုက်သူဟာ root မဟုတ်ဘဲ ကန့်သတ်ထားတဲ့ ယူဆာ (restricted user) တစ်ဦးကိုသာ ရရှိမှာ ဖြစ်ပါတယ်။
-5. **ကျန်းမာရေး စစ်ဆေးနိုင်ခြင်း (Health-checkable)** — အက်ပ်အသက်ရှင်နေကြောင်း Docker နဲ့ Kubernetes တို့က အတည်ပြုနိုင်ရပါမယ်။
+1. **Small (သေးငယ်ခြင်း)** — Megabyte တိုင်းက rolling updates လုပ်တဲ့အချိန်မှာ pull time ကို ပိုကြာစေပါတယ်။ ပိုသေးလေ deployment ပိုမြန်လေပါပဲ။
+2. **Secure (လုံခြုံခြင်း)** — Final image ထဲမှာ build tools တွေ၊ package managers တွေနဲ့ shell လုံးဝ မပါရပါဘူး။ Binary နည်းလေ attack surface ပိုနည်းလေပါပဲ။
+3. **Deterministic (ခန့်မှန်းခြေ တူညီခြင်း)** — တူညီတဲ့ Source code က အမြဲတမ်း တူညီတဲ့ image ကိုပဲ ထုတ်ပေးရပါမယ်။ `apt-get update` လို မမျှော်လင့်ထားတဲ့ အပြောင်းအလဲမျိုး မရှိစေရပါဘူး။
+4. **Non-root (Root မဟုတ်သော User ဖြင့် Run ခြင်း)** — တကယ်လို့ သင့် container ကို ထိုးဖောက်ခံရရင်တောင် attacker ဟა root ယူဆာကို မရဘဲ ကန့်သတ်ထားတဲ့ user ကိုပဲ ရပါမယ်။
+5. **Health-checkable (Health စစ်ဆေးနိုင်ခြင်း)** — Docker နဲ့ Kubernetes တို့အနေနဲ့ App က အသက်ရှင်နေသေးလားဆိုတာကို အမြဲ စစ်ဆေးနိုင်ရပါမယ်။
 
-ဒီသင်ခန်းစာမှာ အချက်ငါးချက်လုံးကို ခြုံငုံဖော်ပြပေးသွားမှာ ဖြစ်ပါတယ်။
+ဒီ lesson မှာ အဲဒီအချက် ၅ ချက်လုံးကို ဆွေးနွေးသွားပါမယ်။
 
 ---
 
-## Multi-Stage Builds ကို နားလည်ခြင်း
+## Understanding Multi-Stage Builds
 
-Multi-Stage Dockerfile တစ်ခုဟာ `FROM` စာကြောင်းပေါင်းများစွာကို အသုံးပြုပါတယ်။ အဆင့်တိုင်းဟာ သီးခြား တည်ဆောက်ရေး ပတ်ဝန်းကျင် (build environment) တစ်ခုစီ ဖြစ်ပါတယ်။ အဆင့်တစ်ခုကနေ နောက်အဆင့်တစ်ခုဆီကို သင် အတိအကျ ကူးယူထားတဲ့ ဖိုင်တွေသာ final image ထဲကို ရောက်ရှိလာမှာ ဖြစ်ပါတယ်။
+Multi-stage Dockerfile တစ်ခုက `FROM` statement အများကြီးကို အသုံးပြုပါတယ်။ Stage တစ်ခုချင်းစီက သီးသန့် build environment တွေ ဖြစ်ကြပါတယ်။ Stage တစ်ခုကနေ နောက်တစ်ခုဆီကို သင်အတိအကျ copy ကူးတဲ့ files တွေပဲ Final image ထဲမှာ ပါလာမှာ ဖြစ်ပါတယ်။
 
 ```mermaid
 flowchart LR
@@ -53,101 +53,101 @@ flowchart LR
     NEXT -->|COPY --from=builder| PUB
 ```
 
-**အဆင့်များအကြား ဖယ်ရှားခံရမည့်အရာများ:**
-- Stage 1 မှ Stage 2 သို့: Alpine OS၊ တည်ဆောက်ချိန်သုံး `libc6-compat`၊ `npm` ကိုယ်တိုင်
-- Stage 2 မှ Stage 3 သို့: TypeScript compiler၊ ESLint၊ Next.js build cache၊ standalone လိုအပ်တာတွေကလွဲပြီး ကျန်တဲ့ `node_modules/` အားလုံး
+**Stage တွေကြားမှာ ဖယ်ရှားပစ်တာတွေကတော့:**
+- Stage 1 → Stage 2: Alpine OS, build-time `libc6-compat`, နဲ့ `npm` ကိုယ်တိုင်
+- Stage 2 → Stage 3: TypeScript compiler, ESLint, Next.js build cache, နဲ့ standalone လိုအပ်တာတွေကလွဲပြီး ကျန်တဲ့ `node_modules/` အားလုံး
 
-**အရွယ်အစား နှိုင်းယှဉ်ချက်:**
-| ချဉ်းကပ်ပုံ | Image အရွယ်အစား |
+**Size နှိုင်းယှဉ်ချက်:**
+| Approach | Image Size |
 |----------|-----------|
-| Single-stage (အကောင်းဆုံးမလုပ်ထားသော) | ~1.4 GB |
-| standalone မပါသော Multi-stage | ~600 MB |
-| `output: standalone` ပါသော Multi-stage | **~180 MB** |
+| Single-stage (optimization မလုပ်ထားတာ) | ~1.4 GB |
+| Multi-stage (standalone မပါတာ) | ~600 MB |
+| Multi-stage with `output: standalone` | **~180 MB** |
 
 ---
 
-## ပြီးပြည့်စုံသော Production Dockerfile
+## The Complete Production Dockerfile
 
 ```dockerfile
 # =============================================================
 # Stage 1: deps
-# Alpine လွှာသန့်သန့်တွင် Production dependencies များကိုသာ ထည့်သွင်းပါ။
-# ရလဒ်: devDependencies မပါဝင်သော node_modules/ တစ်ခု
+# Clean ဖြစ်တဲ့ Alpine layer ထဲမှာ production dependencies တွေကိုပဲ Install လုပ်ပါ။
+# Result: devDependencies မပါတဲ့ node_modules/ တစ်ခု ထွက်လာမယ်။
 # =============================================================
 FROM node:20-alpine AS deps
 
-# Alpine ပေါ်ရှိ native Node.js addons များအတွက် libc6-compat လိုအပ်သည်
-# (N-API bindings ကို အသုံးပြုသော npm packages အချို့အတွက် လိုအပ်သည်)
+# libc6-compat is needed for native Node.js addons on Alpine
+# (required by some npm packages that use N-API bindings)
 RUN apk add --no-cache libc6-compat
 
 WORKDIR /app
 
-# ပထမဦးစွာ dependency manifests များကိုသာ ကူးယူပါ။
-# ၎င်းသည် Docker layer caching ကို အလုပ်လုပ်စေသည်: package.json မပြောင်းလဲပါက၊
-# နောက်တစ်ကြိမ် တည်ဆောက်ရာတွင် npm ci ကို ကျော်သွားမည် (စက္ကန့် ၃၀-၁၂၀ သက်သာစေသည်)။
+# Copy ONLY the dependency manifests first.
+# This enables Docker layer caching: if package.json doesn't change,
+# npm ci is skipped on the next build (saves 30-120 seconds).
 COPY package.json package-lock.json ./
 
-# npm ci: clean install (package-lock ပဋိပက္ခများကို လျစ်လျူရှုသည်၊ တသမတ်တည်းဖြစ်စေသည်)
-# --omit=dev: devDependencies များကို ကျော်သွားပါ (TypeScript၊ ESLint၊ Vitest စသည်ဖြင့်)
+# npm ci: clean install (ignores package-lock conflicts, reproducible)
+# --omit=dev: skip devDependencies (TypeScript, ESLint, Vitest, etc.)
 RUN npm ci --omit=dev && npm cache clean --force
 
 
 # =============================================================
 # Stage 2: builder
-# TypeScript / Next.js အပလီကေးရှင်းကို Compile လုပ်ပါ။
+# Compile the TypeScript / Next.js application.
 # =============================================================
 FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# TypeScript compile လုပ်ရန် Dependencies အားလုံး (devDeps အပါအဝင်) လိုအပ်သည်
+# We need ALL dependencies (including devDeps) to compile TypeScript
 COPY package.json package-lock.json ./
 RUN npm ci && npm cache clean --force
 
-# အပလီကေးရှင်း source code ကို ကူးယူပါ
+# Copy the application source code
 COPY . .
 
-# တည်ဆောက်ချိန် ပတ်ဝန်းကျင် တန်ဖိုးများ (Build-time environment variables)
-# ဤအရာများသည် compiled output ထဲသို့ ထည့်သွင်းပြီးသားဖြစ်သည် — secret များမဟုတ်ပါ
+# Build-time environment variables
+# These are embedded into the compiled output — NOT secrets
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
 
-# Next.js production build ကို လုပ်ဆောင်ပါ
-# .next/standalone/ (အနည်းဆုံးလိုအပ်သော server bundle) ကို ထုတ်ပေးသည်
+# Run the Next.js production build
+# Produces .next/standalone/ (the minimal server bundle)
 RUN npm run build
 
 
 # =============================================================
 # Stage 3: runner
-# Production တွင် အလုပ်လုပ်မည့် FINAL နှင့် အသေးငယ်ဆုံး image ဖြစ်သည်။
-# ဤအရာသည် container registry သို့ ပို့ဆောင်မည့် တစ်ခုတည်းသော layer ဖြစ်သည်။
+# The FINAL, minimal image that will run in production.
+# This is the only layer shipped to the container registry.
 # =============================================================
 FROM node:20-alpine AS runner
 
 WORKDIR /app
 
-# လုံခြုံရေး: စနစ်အုပ်စုနှင့် ယူဆာတစ်ခုကို ဖန်တီးပါ။
-# ဂဏန်းပါသော UID/GID ကို သုံးခြင်းဖြင့် /etc/passwd အဝင်အထွက်များ ပျောက်ဆုံးခြင်း ပြဿနာများကို ရှောင်ရှားနိုင်ပါသည်။
+# Security: Create a system group and user.
+# Using a numeric UID/GID avoids issues with missing /etc/passwd entries.
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 --ingroup nodejs nextjs
 
-# Runtime ပတ်ဝန်းကျင် တန်ဖိုးများ
+# Runtime environment variables
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
-# builder အဆင့်မှ standalone bundle ကို ကူးယူပါ။
-# --chown သည် nextjs ယူဆာတွင် ဤဖိုင်များကို ပိုင်ဆိုင်စေရန် သေချာစေသည် (.next/cache ရေးသားရန် လိုအပ်သည်)
+# Copy the standalone bundle from the builder stage.
+# --chown ensures the nextjs user owns these files (needed to write .next/cache)
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
-# နောက်ထပ် လုပ်ဆောင်ချက်များ မလုပ်မီ non-root ယူဆာသို့ ပြောင်းပါ
+# Switch to non-root user BEFORE any further operations
 USER nextjs
 
-# ကျန်းမာရေး စစ်ဆေးမှု: Kubernetes သည် manifest တွင် သတ်မှတ်ထားသော probes များကို ပိုနှစ်သက်သည်၊
-# သို့သော် ဤအရာသည် docker run နှင့် docker compose အတွက် fallback တစ်ခုကို ပံ့ပိုးပေးသည်။
+# Health check: Kubernetes prefers probes defined in the manifest,
+# but this provides a fallback for docker run and docker compose.
 HEALTHCHECK \
   --interval=30s \
   --timeout=10s \
@@ -157,158 +157,158 @@ HEALTHCHECK \
 
 EXPOSE 3000
 
-# server.js သည် Next.js standalone output မှ ထုတ်ပေးသော အနည်းဆုံး entry point ဖြစ်သည်။
-# ၎င်းသည် `next start` ကို အစားထိုးပြီး ပြင်ပ dependencies မရှိပါ။
+# server.js is the minimal entry point generated by Next.js standalone output.
+# It replaces `next start` and has no external dependencies.
 CMD ["node", "server.js"]
 ```
 
 ---
 
-## `.dockerignore` ဖိုင်
+## The `.dockerignore` File
 
-`.dockerignore` မပါရှိပါက Docker သည် သင့်ပရောဂျက် ဖိုင်တွဲတစ်ခုလုံးကို build daemon သို့ ပို့ဆောင်ပေးမည်ဖြစ်သည် — `node_modules/` (ဖြစ်နိုင်ချေ 500+ MB)၊ `.git/` နှင့် ဒေသတွင်း `.env` ဖိုင်များ အပါအဝင် ဖြစ်သည်။ ဤအရာသည် တည်ဆောက်မှုကို သိသိသာသာ နှေးကွေးစေပြီး secret များကို ပေါက်ကြားစေနိုင်ပါသည်။
+`.dockerignore` မပါဘူးဆိုရင် Docker က သင့်ရဲ့ project directory တစ်ခုလုံး (`node_modules/` က 500+ MB တောင် ရှိနိုင်ပါတယ်၊ `.git/` နဲ့ local `.env` files တွေအပါအဝင်) ကို build daemon ဆီ ပို့လိုက်ပါလိမ့်မယ်။ ဒါက build ကို အများကြီး နှေးကွေးစေပြီး secrets တွေ ပေါက်ကြားသွားစေနိုင်ပါတယ်။
 
 ```plaintext
 # .dockerignore
 
-# ဗားရှင်း ထိန်းချုပ်မှု
+# Version control
 .git
 .gitignore
 
-# Build လုပ်ထားသော ပစ္စည်းများ
+# Build artifacts
 .next
 out
 
-# Dependencies များ (container အတွင်းတွင် ပြန်လည် ထည့်သွင်းလိမ့်မည်)
+# Dependencies (will be reinstalled inside the container)
 node_modules
 
-# Development ပတ်ဝန်းကျင် ဖိုင်များ
+# Development environment files
 .env
 .env.local
 .env.development
 .env.development.local
 
-# Secrets များ (အရေးကြီးသည် — Docker daemon သို့ လုံးဝ မပို့ပါနှင့်)
+# Secrets (CRITICAL — never send to Docker daemon)
 *.pem
 *.key
 *.cert
 
-# မှတ်တမ်းဖိုင်များ
+# Documentation
 README.md
 docs/
 
-# Kubernetes manifests များ (image ထဲတွင် မလိုအပ်ပါ)
+# Kubernetes manifests (not needed in the image)
 k8s/
 
-# အယ်ဒီတာနှင့် OS ဖိုင်များ
+# Editor and OS files
 .idea
 .vscode
 *.swp
 .DS_Store
 
-# Docker ဖိုင်များ ကိုယ်တိုင် (အထပ်ထပ်ပါဝင်မှုကို ရှောင်ရှားပါ)
+# Docker files themselves (avoid recursive inclusion)
 Dockerfile
 .dockerignore
 docker-compose*.yml
 ```
 
-<Callout type="caution" title=".env ဖိုင်များကို Docker Images ထဲသို့ လုံးဝ မကူးယူပါနှင့်">
-သင့်ရဲ့ `.env.local` တွင် ဒေတာဘေ့စ် အထောက်အထားများ ပါဝင်ပါသည်။ ၎င်းကို နောက်ပိုင်း layer တစ်ခုတွင် ဖျက်လိုက်လျှင်တောင်မှ Docker သည် layer တိုင်းကို ထိန်းသိမ်းထားသည် — ဖိုင်ကို image pull ဝင်ရောက်ခွင့်ရှိသူတိုင်း ဆက်လက် ရယူနိုင်ဆဲ ဖြစ်သည်။ `.dockerignore` သည် ၎င်းကို build context ထဲသို့ ဘယ်တော့မှ မရောက်ရှိအောင် တားဆီးပေးပါသည်။ Runtime secrets များကို Kubernetes Secrets မှတစ်ဆင့် ထည့်သွင်းပေးသည် (သင်ခန်းစာ 7 တွင် ကြည့်ပါ)။
+<Callout type="caution" title="Never Copy .env Files into Docker Images">
+သင့်ရဲ့ `.env.local` မှာ database credentials တွေ ပါဝင်ပါတယ်။ နောက် layer တစ်ခုမှာ အဲဒါကို ဖျက်လိုက်ရင်တောင် Docker က layer တိုင်းကို သိမ်းဆည်းထားတာဖြစ်လို့ image pull access ရှိတဲ့ ဘယ်သူမဆို အဲဒီ file ကို ဆက်ပြီး ကြည့်လို့ရနေဦးမှာ ဖြစ်ပါတယ်။ `.dockerignore` က အဲဒါတွေ build context ထဲ လုံးဝ မရောက်လာအောင် တားဆီးပေးပါတယ်။ Runtime secrets တွေကိုတော့ Kubernetes Secrets ကနေ တစ်ဆင့် ထည့်သွင်းရပါတယ် (Lesson 7 မှာ ဆွေးနွေးပါမယ်)။
 </Callout>
 
 ---
 
-## Layer Caching မဟာဗျူဟာ
+## Layer Caching Strategy
 
-Docker သည် layer တစ်ခုချင်းစီကို cache လုပ်ပါသည်။ layer တစ်ခုခုတွင် cache လွတ်သွားပါက (cache miss) နောက်လာမည့် layer အားလုံး ပျက်ပြယ်သွားပါမည်။ သင့်ရဲ့ `COPY` နှင့် `RUN` ညွှန်ကြားချက်များကို **အနည်းဆုံး ပြောင်းလဲလေ့ရှိသည်** မှ **အများဆုံး ပြောင်းလဲလေ့ရှိသည်** သို့ အစဉ်လိုက် စီစဉ်ပါ -
+Docker က layer တစ်ခုချင်းစီကို cache လုပ်ပါတယ်။ Layer တစ်ခုခုမှာ cache miss ဖြစ်သွားပြီဆိုရင် အနောက်က layer တွေ အားလုံး invalid ဖြစ်သွားပါပြီ။ သင့်ရဲ့ `COPY` နဲ့ `RUN` instructions တွေကို **အပြောင်းအလဲ အနည်းဆုံးကနေ အများဆုံး** အစဉ်လိုက် စီပါ -
 
 ```dockerfile
-# ✅ မှန်ကန်သော အစဉ်လိုက် (cache-friendly ဖြစ်သည်)
-COPY package.json package-lock.json ./   # ရှားရှားပါးပါး ပြောင်းလဲသည်
-RUN npm ci                                # ကုန်ကျစရိတ်များသော်လည်း package.json မပြောင်းလဲပါက cached ဖြစ်နေသည်
-COPY . .                                  # commit တိုင်းတွင် ပြောင်းလဲသည် — သို့သော် npm ci က cached ပြီးသားဖြစ်သည်
+# ✅ CORRECT ORDER (cache-friendly)
+COPY package.json package-lock.json ./   # ရှားရှားပါးပါးပဲ ပြောင်းလဲတယ်
+RUN npm ci                                # ကုန်ကျစရိတ်များပေမယ့် package.json မပြောင်းရင် cache လုပ်ထားတယ်
+COPY . .                                  # commit တိုင်းမှာ ပြောင်းလဲတယ် — ဒါပေမယ့် npm ci က cache ပြီးသားဖြစ်နေပြီ
 RUN npm run build
 
-# ❌ မှားယွင်းသော အစဉ်လိုက် (cache-busting ဖြစ်စေသည်)
-COPY . .                                  # commit တိုင်းတွင် ပြောင်းလဲသည်
-RUN npm ci                                # package.json မပြောင်းလဲလျှင်တောင် npm ci ကို ယခု ပြန်လည် run သည်
+# ❌ WRONG ORDER (cache-busting)
+COPY . .                                  # commit တိုင်းမှာ ပြောင်းလဲတယ်
+RUN npm ci                                # package.json မပြောင်းလဲရင်တောင် npm ci ကို ထပ် run နေမယ်
 RUN npm run build
 ```
 
-**အကျိုးသက်ရောက်မှု:** မှန်ကန်သော အစဉ်လိုက်ဖြင့်၊ `package.json` ကို မထိတွေ့သော ကုဒ်အပြောင်းအလဲတစ်ခုသည် `npm run build` ကိုသာ ပြန်လည် run မည်ဖြစ်သည် (စက္ကန့် ~30)။ မှားယွင်းသော အစဉ်လိုက်ဖြင့်ဆိုပါက၊ တည်ဆောက်မှုတိုင်းသည် `npm ci` ကို ပြန်လည် run လိမ့်မည် (စက္ကန့် ~120)။
+**သက်ရောက်မှု:** မှန်ကန်တဲ့ အစဉ်လိုက် သုံးမယ်ဆိုရင် `package.json` ကို မထိတဲ့ code အပြောင်းအလဲအတွက် `npm run build` တစ်ခုတည်းကိုပဲ ပြန် run ပါမယ် (~၃၀ စက္ကန့်)။ အစဉ်လိုက် မှားနေမယ်ဆိုရင် build တိုင်းမှာ `npm ci` ပါ ထပ် run နေမှာ ဖြစ်ပါတယ် (~၁၂၀ စက္ကန့်)။
 
 ---
 
-## Image ကို ဒေသတွင်းတွင် တည်ဆောက်ပြီး စမ်းသပ်ခြင်း
+## Build and Test the Image Locally
 
-CI သို့ မတင်မီ၊ သင့်စက်ပေါ်တွင် image တည်ဆောက်မှုနှင့် အလုပ်လုပ်ပုံ မှန်ကန်ကြောင်း အမြဲစစ်ဆေးပါ -
+CI ဆီ မပို့ခင် image build တာနဲ့ သင့်စက်ပေါ်မှာ မှန်ကန်စွာ run နိုင်တာကို အမြဲ အရင် စစ်ဆေးပါ -
 
 ```bash
-# Production image ကို တည်ဆောက်ပါ (ပထမအကြိမ် တည်ဆောက်ရာတွင် မိနစ် ၂-၅ မိနစ် ကြာနိုင်သည်)
+# Build the production image (may take 2-5 minutes on first build)
 docker build -t capstone-app:local .
 
-# Final image အရွယ်အစားကို စစ်ဆေးပါ
+# Inspect the final image size
 docker images capstone-app:local
 # REPOSITORY     TAG     IMAGE ID       SIZE
 # capstone-app   local   abc123def456   182MB
 
-# Image ထဲတွင် ဘာတွေပါလဲ စစ်ဆေးပါ (အံ့သြစရာ မရှိပါ)
+# Inspect what's in the image (no surprises)
 docker run --rm capstone-app:local ls -la
 docker run --rm capstone-app:local id
-# uid=1001(nextjs) gid=1001(nodejs) groups=1001(nodejs)  ← non-root ဖြစ်ပါသည် ✅
+# uid=1001(nextjs) gid=1001(nodejs) groups=1001(nodejs)  ← non-root ✅
 
-# Image ကို run ပါ (သင့် ဒေသတွင်း dev PostgreSQL နှင့် ချိတ်ဆက်ပါ)
+# Run the image (connect to your local dev PostgreSQL)
 docker run --rm \
   -p 3000:3000 \
   -e DATABASE_URL="postgres://appuser:apppass@host.docker.internal:5432/capstone" \
   capstone-app:local
 
-# Endpoint များကို စမ်းသပ်ပါ
+# Test the endpoints
 curl http://localhost:3000/api/health
 curl http://localhost:3000/api/items
 ```
 
 <Callout type="tip" title="host.docker.internal">
-Mac နှင့် Windows တွင် `host.docker.internal` သည် Docker host စက်ဆီသို့ ညွှန်ပြသည်။ ဤအရာက ကွန်တိန်နာအား သင့်လက်ပ်တော့ပ်ပေါ်တွင် အလုပ်လုပ်နေသော PostgreSQL instance (Docker ውጭရှိ) နှင့် ချိတ်ဆက်နိုင်စေပါသည်။ Linux တွင်မူ `--network=host` သို့မဟုတ် သင့်စက်၏ တကယ့် LAN IP ကို အစားထိုး အသုံးပြုပါ။
+Mac နဲ့ Windows မှာ `host.docker.internal` က Docker host machine ကို ညွှန်ပြပါတယ်။ ဒါက container ကို သင့် laptop ပေါ်မှာ run နေတဲ့ (Docker ရဲ့ အပြင်ဘက်က) PostgreSQL instance နဲ့ ချိတ်ဆက်နိုင်စေပါတယ်။ Linux မှာဆိုရင်တော့ `--network=host` ဒါမှမဟုတ် သင့်စက်ရဲ့ actual LAN IP ကို သုံးပါ။
 </Callout>
 
 ---
 
-## လုံခြုံရေး ခွဲခြမ်းစိတ်ဖြာခြင်း: Trivy တွေ့ရှိမည့်အရာများ (နှင့် မတွေ့ရှိမည့်အရာများ)
+## Security Analysis: What Trivy Will Find (And Not Find)
 
-သင်ခန်းစာ 4 တွင်၊ ဤ image ကို CVE များအတွက် စကင်ဖတ်ရန် Trivy ကို ပေါင်းထည့်မည် ဖြစ်သည်။ သန့်ရှင်းသော image တစ်ခုသည် မည်သို့ပုံစံရှိသည်ကို အစမ်းကြည့်ကြရအောင် -
+Lesson 4 မှာ ဒီ image ကို CVEs တွေအတွက် scan ဖို့ Trivy ကို ထည့်သွင်းသွားမှာပါ။ Clean ဖြစ်တဲ့ image တစ်ခုက ဘယ်လိုပုံစံရှိလဲဆိုတာ ကြည့်ရအောင် -
 
 ```bash
-# Trivy ကို ဒေသတွင်းတွင် ထည့်သွင်းပါ
+# Install Trivy locally
 brew install trivy
 
-# Image ကို စကင်ဖတ်ပါ
+# Scan the image
 trivy image capstone-app:local
 
-# သန့်ရှင်းသော build တစ်ခုအတွက် မျှော်လင့်ထားသော ရလဒ်:
+# Expected output for a clean build:
 # Total: 0 (UNKNOWN: 0, LOW: 0, MEDIUM: 0, HIGH: 0, CRITICAL: 0)
 ```
 
-ဤ image သန့်ရှင်းစွာ စကင်ဖတ်နိုင်ရသည့် အကြောင်းရင်းများ -
-- **Alpine Linux** — အခြေခံ OS အသေးဆုံး၊ မကြာခဏ အပ်ဒိတ်လုပ်ပြီး Ubuntu/Debian ထက် ပက်ကေ့ဂျ် အလွန်နည်းပါးသည်
-- **တည်ဆောက်ရေး တူးလ်များ မပါရှိပါ** — `npm`၊ TypeScript compiler၊ ESLint တို့သည် final image ထဲတွင် မပါရှိပါ
-- **Node ဗားရှင်း အသေချိတ်ထားခြင်း** — `node:20-alpine` သည် Node 20 LTS ၏ နောက်ဆုံး patch ကို အသုံးပြုသည်
+ဒီ image က clean ဖြစ်နေရတဲ့ အကြောင်းရင်းတွေကတော့:
+- **Alpine Linux** — minimal base OS ဖြစ်ပြီး မကြာခဏ update လုပ်တယ်၊ Ubuntu/Debian ထက် packages တွေ အများကြီး ပိုနည်းတယ်
+- **No build tools** — `npm`, TypeScript compiler, ESLint တွေ final image ထဲမှာ မပါဘူး
+- **Pinned Node version** — `node:20-alpine` က Node 20 LTS ရဲ့ နောက်ဆုံး patch ကို သုံးထားတယ်
 
-အမြင့်ဆုံး တသမတ်တည်းဖြစ်စေရန် တိကျသော digest တစ်ခုသို့ ချိတ်ရန် (စည်းမျဉ်းကန့်သတ်ချက်ရှိသော ပတ်ဝန်းကျင်များအတွက် အကြံပြုသည်):
+Reproducibility အပြည့်အဝရဖို့အတွက် specific digest တစ်ခုကို pin လုပ်ချင်တယ်ဆိုရင် (regulated environments တွေအတွက် အကြံပြုပါတယ်):
 ```dockerfile
-# အစားထိုးရန်: FROM node:20-alpine
-FROM node:20-alpine@sha256:abc123...  # တိကျပြီး မပြောင်းလဲနိုင်သော digest
+# Instead of: FROM node:20-alpine
+FROM node:20-alpine@sha256:abc123...  # Exact immutable digest
 
-# လက်ရှိ digest ကို ရယူရန်:
+# Get the current digest:
 docker pull node:20-alpine
 docker inspect node:20-alpine | jq '.[0].RepoDigests'
 ```
 
 ---
 
-## အဆင့်မြင့်: Multi-Environment Images များအတွက် Build Args
+## Advanced: Build Args for Multi-Environment Images
 
-တစ်ခါတစ်ရံတွင် staging နှင့် production အတွက် အပြုအမူ ကွဲပြားရန် လိုအပ်သည် -
+Staging နဲ့ Production အတွက် အပြုအမူ မတူတာတွေ လိုအပ်တဲ့အခါမျိုး ရှိပါတယ် -
 
 ```dockerfile
 # Dockerfile
@@ -320,42 +320,42 @@ ENV APP_VERSION=$APP_VERSION
 ```
 
 ```bash
-# Staging အတွက် တည်ဆောက်ပါ
+# Build for staging
 docker build \
   --build-arg NODE_ENV=staging \
   --build-arg APP_VERSION=$(git rev-parse --short HEAD) \
   -t capstone-app:staging .
 
-# Production အတွက် တည်ဆောက်ပါ
+# Build for production
 docker build \
   --build-arg APP_VERSION=$(git rev-parse --short HEAD) \
   -t capstone-app:prod .
 ```
 
-GitHub Actions (သင်ခန်းစာ 5) တွင်၊ `APP_VERSION` ကို Git SHA အဖြစ် အလိုအလျောက် ပေးပို့မည် ဖြစ်သည်။
+GitHub Actions (Lesson 5) မှာတော့ `APP_VERSION` ကို Git SHA အနေနဲ့ အလိုအလျောက် ပေးပို့သွားမှာ ဖြစ်ပါတယ်။
 
 ---
 
-## CI နှင့် ဒေသတွင်း Image စကင်ဖတ်ခြင်း နှိုင်းယှဉ်ချက်
+## Image Scanning in CI vs Local
 
-| အချက်အလက် | ဒေသတွင်း (`trivy image`) | CI (သင်ခန်းစာ 4) |
+| Aspect | Local (`trivy image`) | CI (Lesson 4) |
 |--------|----------------------|---------------|
-| အချိန် | `docker build` ပြီးနောက် | PR တိုင်းတွင် |
-| ရလဒ် | တာမီနယ် ဇယား (Terminal table) | GitHub Security တက်ဘ် (SARIF ဖော်မတ်) |
-| ရပ်တန့်ခြင်း | ကိုယ်တိုင် ဆုံးဖြတ်ခြင်း | Pipeline သည် CRITICAL/HIGH တွင် ပျက်ကျခြင်း |
-| မှတ်တမ်း | မရှိပါ | GitHub Security တက်ဘ်တွင် ခြေရာခံနိုင်သည် |
+| ဘယ်အချိန်မှာ | `docker build` ပြီးတဲ့အခါ | PR တိုင်းမှာ |
+| Output | Terminal table | GitHub Security tab (SARIF format) |
+| Blocking | ကိုယ်တိုင် ဆုံးဖြတ်ရမယ် | CRITICAL/HIGH တွေ့ရင် Pipeline fail မယ် |
+| History | မရှိပါ | GitHub Security tab မှာ မှတ်တမ်းတင်ထားတယ် |
 
 ---
 
-## အနှစ်ချုပ်
+## Summary
 
-သင်သည် ယခုအခါ အောက်ပါအချက်များ ပါဝင်သော production-hardened Dockerfile တစ်ခုကို ပိုင်ဆိုင်ပြီ ဖြစ်သည် -
-- ~180 MB ရှိသော image ကို ထုတ်လုပ်ရန် အဆင့်သုံးဆင့် (`deps` → `builder` → `runner`) ကို အသုံးပြုထားသည်
-- အနည်းဆုံး server bundle အတွက် `next.config.ts` တွင် `output: 'standalone'` လိုအပ်သည်
-- ကွန်တိန်နာ ထွက်ပြေးနိုင်ခြေ အန္တရာယ်ကို ကန့်သတ်ရန် non-root ယူဆာ (`nextjs`၊ uid 1001) ဖြင့် run သည်
-- OS attack surface ကို အနည်းဆုံးဖြစ်စေရန် Alpine Linux ကို အသုံးပြုထားသည်
-- သင့်လျော်သော Docker layer caching ရှိသည် (dependencies များကို source code နှင့် သီးခြားစီ cache လုပ်ထားသည်)
-- probes များကို သီးခြား မသတ်မှတ်ထားသော ကွန်တိန်နာ runtimes အတွက် `HEALTHCHECK` ညွှန်ကြားချက် ပါဝင်သည်
-- `.env` ဖိုင်များနှင့် `node_modules` များ build context ထဲသို့ မဝင်ရောက်အောင် တားဆီးပေးသော `.dockerignore` ပါရှိသည်
+သဥ်အနေနဲ့ အခုဆိုရင် Production အတွက် လုံခြုံအောင် တည်ဆောက်ထားတဲ့ Dockerfile တစ်ခုကို ပိုင်ဆိုင်သွားပါပြီ -
+- ~180 MB သာရှိတဲ့ image ကို ထုတ်လုပ်ဖို့ stage သုံးခု (`deps` → `builder` → `runner`) ကို အသုံးပြုထားပါတယ်
+- minimal server bundle အတွက် `next.config.ts` မှာ `output: 'standalone'` လိုအပ်ပါတယ်
+- Container breakout risk ကို လျှော့ချဖို့ non-root user (`nextjs`, uid 1001) နဲ့ run ပါတယ်
+- OS attack surface ကို အနည်းဆုံးဖြစ်စေဖို့ Alpine Linux ကို အသုံးပြုထားပါတယ်
+- သင့်လျော်တဲ့ Docker layer caching ရှိပါတယ် (dependencies တွေကို source code နဲ့ သီးသန့် cache လုပ်ထားပါတယ်)
+- Probes တွေကို သီးသန့် မသတ်မှတ်ထားတဲ့ container runtimes တွေအတွက် `HEALTHCHECK` instruction ပါဝင်ပါတယ်
+- Build context ထဲကို `.env` files နဲ့ `node_modules` တွေ မရောက်လာအောင် တားဆီးပေးတဲ့ `.dockerignore` ပါရှိပါတယ်
 
-နောက်သင်ခန်းစာတွင်၊ pull request တိုင်းတွင် linting၊ type checking၊ unit tests နှင့် Trivy စကင်ဖတ်ခြင်းတို့ကို အလိုအလျောက် လုပ်ဆောင်ပေးမည့် GitHub Actions CI pipeline ကို တည်ဆောက်သွားမည် ဖြစ်သည်။
+နောက် lesson မှာတော့ pull request တိုင်းမှာ linting, type checking, unit tests နဲ့ Trivy scanning တွေကို အလိုအလျောက် run ပေးမယ့် GitHub Actions CI pipeline ကို တည်ဆောက်သွားမှာ ဖြစ်ပါတယ်။

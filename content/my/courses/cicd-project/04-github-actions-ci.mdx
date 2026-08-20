@@ -1,21 +1,21 @@
 ---
-title: "အလိုအလျောက် CI ပိုက်လိုင်းကို ပြင်ဆင်ခြင်း (Lint, Test, Security)"
+title: "Configuring the Automated CI Pipeline (Lint, Test, Security)"
 ---
 
-# အစစ်အမှန် CI ပိုက်လိုင်းတစ်ခု တည်ဆောက်ခြင်း
+# Building a Real CI Pipeline
 
-Continuous Integration (စဉ်ဆက်မပြတ် ပေါင်းစပ်ခြင်း) ဆိုသည်မှာ "စမ်းသပ်ချက်အချို့ကို ដំណើរការခြင်း" သက်သက် မဟုတ်ပါ။ Production အဆင့်မီ CI ပိုက်လိုင်းဆိုသည်မှာ သင်၏ အလိုအလျောက် အရည်အသွေးစစ်ဆေးရေးဂိတ် (Quality gate) ဖြစ်ပါသည်။ ၎င်းသည် ပါဝင်ကူညီသူတိုင်းနှင့် commit တိုင်းတွင် တစ်သမတ်တည်းဖြစ်မှုကို သေချာစေသည်။ အလုပ်မလုပ်တော့သော (Broken ဖြစ်နေသော) မည်သည့်အရာမှ `main` သို့ merge မဖြစ်သွားစေပါ။
+Continuous Integration ဆိုတာ "some tests တွေ run နေတာသက်သက်" မဟုတ်ပါဘူး။ Production-grade CI pipeline တစ်ခုဆိုတာ သင့်ရဲ့ automated quality gate ပဲ ဖြစ်ပါတယ်။ သူက contributor တိုင်းနဲ့ commit တိုင်းမှာ consistency ရှိနေဖို့ ထိန်းချုပ်ပေးပါတယ်။ ပျက်နေတဲ့ code ဘာမှ `main` branch ထဲ merge ဖြစ်သွားမှာ မဟုတ်ပါဘူး။
 
-ဤသင်ခန်းစာတွင် သင်သည် အောက်ပါတို့ကို လုပ်ဆောင်ပေးမည့် GitHub Actions CI workflow တစ်ခုကို တည်ဆောက်မည်ဖြစ်သည်-
-1. ESLint ဖြင့် **ကုဒ်စတိုင်ကို စစ်ဆေးခြင်း** — review မလုပ်မီ anti-patterns များကို ဖမ်းယူပေးသည်
-2. TypeScript ဖြင့် **အမျိုးအစားများကို အတည်ပြုခြင်း** — linter မမြင်နိုင်သော အမှားများကို ဖမ်းယူပေးသည်
-3. Vitest ဖြင့် **ယူနစ်စမ်းသပ်မှုများကို ដំណើរការခြင်း** — ပုံမှန်အတိုင်း ပြန်လည်ပျက်စီးမှုများကို အလိုအလျောက် ဖမ်းယူပေးသည်
-4. Trivy ဖြင့် **လုံခြုံရေး အားနည်းချက်များကို စကန်ဖတ်ခြင်း** — production သို့ မရောက်ရှိမီ CVE များကို ဖမ်းယူပေးသည်
-5. **အလုပ်များကို အပြိုင်လုပ်ဆောင်ခြင်း (Parallel)** — နာရီလက်တံအချိန်ကို အနည်းဆုံးဖြစ်စေရန် စစ်ဆေးမှုလေးခုစလုံးသည် တစ်ပြိုင်နက်တည်း ដំណើរការသည်
+ဒီသင်ခန်းစာမှာတော့ အောက်ပါအတိုင်းလုပ်ဆောင်ပေးမယ့် GitHub Actions CI workflow တစ်ခုကို တည်ဆောက်သွားမှာ ဖြစ်ပါတယ်:
+1. **Code style ကို စစ်ဆေးမယ်** (ESLint နဲ့ — review မလုပ်ခင် anti-pattern တွေကို ရှာဖွေပေးတယ်)
+2. **Types တွေကို အတည်ပြုမယ်** (TypeScript နဲ့ — linter မမြင်နိုင်တဲ့ bug တွေကို ရှာဖွေပေးတယ်)
+3. **Unit tests တွေ run မယ်** (Vitest နဲ့ — regression တွေကို automatic ရှာဖွေပေးတယ်)
+4. **Vulnerability တွေ scan ဖတ်မယ်** (Trivy နဲ့ — production ကို မရောက်ခင် CVE တွေကို ဖမ်းယူပေးတယ်)
+5. **Jobs တွေကို parallel အနေနဲ့ run မယ်** (အချိန်ကုန်သက်သာစေဖို့ check ၄ ခုလုံးကို တစ်ပြိုင်နက် run မယ်)
 
 ---
 
-## GitHub Actions အလုပ်လုပ်ပုံ (အကျဉ်းချုပ်)
+## How GitHub Actions Works (Quick Recap)
 
 ```mermaid
 flowchart TD
@@ -29,15 +29,15 @@ flowchart TD
     J1 & J2 & J3 & J4 -->|any fails| BLOCK[Merge blocked ❌]
 ```
 
-**job** တစ်ခုစီသည် သီးခြား VM (runner) တစ်ခုပေါ်တွင် ដំណើរការသည်။ `needs:` ဖြင့် အထူးသတ်မှတ်ထားခြင်း မရှိပါက တူညီသော workflow ထဲရှိ job များသည် မူလအားဖြင့် **အပြိုင် (in parallel)** ដំណើរការကြသည်။
+**Job** တိုင်းဟာ သီးခြား VM (runner) တစ်ခုစီပေါ်မှာ run ပါတယ်။ Workflow တစ်ခုတည်းထဲက jobs တွေဟာ `needs:` လို့ အထူးသတ်မှတ်မထားဘူးဆိုရင် ပုံမှန်အားဖြင့် **in parallel** (တစ်ပြိုင်နက်တည်း) run ကြပါတယ်။
 
-**step** ဆိုသည်မှာ shell အမိန့်ပေးချက်တစ်ခု (သို့) ပြန်လည်အသုံးပြုနိုင်သော action တစ်ခု (`uses:`) ဖြစ်သည်။
+**Step** ဆိုတာကတော့ shell command တစ်ခုတည်း (သို့) reusable action တစ်ခု (`uses:`) ဖြစ်ပါတယ်။
 
 ---
 
-## ပြီးပြည့်စုံသော CI Workflow
+## The Complete CI Workflow
 
-`.github/workflows/ci.yml` ကို ဖန်တီးပါ-
+`.github/workflows/ci.yml` ကို ဖန်တီးပါ:
 
 ```yaml
 # .github/workflows/ci.yml
@@ -201,11 +201,11 @@ jobs:
 
 ---
 
-## Job တစ်ခုချင်းစီကို အသေးစိတ် နားလည်ခြင်း
+## Understanding Each Job in Detail
 
 ### Job 1: ESLint
 
-ESLint သည် တသမတ်တည်းဖြစ်သော ကုဒ်စတိုင်ကို ထိန်းသိမ်းပေးပြီး TypeScript မစစ်ဆေးနိုင်သော သာမန်အမှားများကို ဖမ်းယူပေးသည်။ သင်၏ `next.config.ts` တွင် တည်ဆောက်မှု (build) အတွင်း `eslint` ကို ထည့်သွင်းပြီးသားဖြစ်သော်လည်း သီးခြား CI job တစ်ခုအနေဖြင့် ដំណើរការခြင်းက ပိုမိုမြန်ဆန်သော တုံ့ပြန်မှုကို ရရှိစေသည်။
+ESLint က code style ကို တသမတ်တည်းဖြစ်အောင် ထိန်းပေးပြီး TypeScript မစစ်ဆေးနိုင်တဲ့ common bug တွေကို ဖမ်းယူပေးပါတယ်။ သင့်ရဲ့ `next.config.ts` မှာ build လုပ်တဲ့အခါ `eslint` ပါဝင်ပြီးသား ဖြစ်ပေမဲ့ CI job တစ်ခုအနေနဲ့ သီးသန့် run တာက feedback ပိုမြန်စေပါတယ်။
 
 ```bash
 # What runs in the CI job
@@ -213,13 +213,13 @@ npm run lint
 # Equivalent to: next lint
 ```
 
-Next.js မှ မူလအားဖြင့် သတ်မှတ်ပေးထားသော သာမန် ESLint စည်းမျဉ်းများ-
-- `no-unused-vars` — အသုံးမပြုတော့သော dead code များကို ဖမ်းယူသည်
-- `react-hooks/rules-of-hooks` — hooks များကို အပေါ်ဆုံးအဆင့်တွင်သာ ခေါ်ဆိုရမည်
-- `react-hooks/exhaustive-deps` — useEffect dependency arrays များ အပြည့်အစုံ ပါဝင်ရမည်
-- `@next/next/no-img-element` — စွမ်းဆောင်ရည်ကောင်းမွန်စေရန် `<img>` အစား `<Image>` ကို အသုံးပြုပါ
+Next.js က default အနေနဲ့ enforced လုပ်ထားတဲ့ common ESLint rules တွေကတော့:
+- `no-unused-vars` — မသုံးရသေးတဲ့ code တွေကို ဖမ်းတယ်
+- `react-hooks/rules-of-hooks` — hooks တွေကို top level မှာပဲခေါ်ရမယ်
+- `react-hooks/exhaustive-deps` — useEffect dependency arrays တွေ အပြည့်အစုံပါရမယ်
+- `@next/next/no-img-element` — performance အတွက် `<img>` အစား `<Image>` ကိုသုံးရမယ်
 
-သင့်ရဲ့ ESLint config အပြည့်အစုံကို ကြည့်ရန်-
+သင့်ရဲ့ ESLint config အပြည့်အစုံကို ကြည့်ချင်ရင်:
 ```bash
 cat .eslintrc.json
 # { "extends": ["next/core-web-vitals", "next/typescript"] }
@@ -227,11 +227,11 @@ cat .eslintrc.json
 
 ### Job 2: TypeScript Type Check
 
-`tsc --noEmit` သည် `.js` ဖိုင်များကို မထုတ်လုပ်ဘဲ ကုဒ်ဘေ့စ် တစ်ခုလုံးရှိ TypeScript အမျိုးအစား (types) အားလုံးကို အတည်ပြုပေးသည်။ ဤအရာက အောက်ပါတို့ကို ဖမ်းယူပေးသည်-
-- လုပ်ဆောင်ချက်များ (functions) ထது မှားယွင်းသော argument အမျိုးအစားများကို ပေးပို့မိခြင်း
-- အရာဝတ္ထု (object) တစ်ခုတွင် မရှိသော property များကို ဝင်ရောက်သုံးစွဲမိခြင်း
-- ကိုင်တွယ်ဖြေရှင်းမထားသော null/undefined တန်ဖိုးများ
-- ကိုက်ညီမှုမရှိသော return အမျိုးအစားများ
+`tsc --noEmit` က `.js` ፋایل တစ်ခုမှ မထုတ်လုပ်ဘဲ codebase တစ်ခုလုံးမှာရှိတဲ့ TypeScript types တွေကို validate လုပ်ပေးပါတယ်။ ဒါက အောက်ပါတို့ကို ဖမ်းယူပေးပါတယ်:
+- Function တွေကို argument type မှားပေးမိတာ
+- Object တစ်ခုမှာ မရှိတဲ့ property တွေကို ဝင်သုံးမိတာ
+- Handle မလုပ်ရသေးတဲ့ null/undefined values တွေ
+- Return types မကိုက်ညီတာတွေ
 
 ```bash
 npm run type-check
@@ -245,13 +245,13 @@ npm run type-check
 
 ### Job 3: Vitest Tests
 
-Vitest သည် Vite-native ဖြစ်သော test runner တစ်ခုဖြစ်ပြီး — TypeScript ပရောဂျက်များအတွက် Jest ထက် 10-100 ဆ ပိုမိုမြန်ဆန်သည်။ အဘယ်ကြောင့်ဆိုသော် ၎င်းသည် Babel အစား transpilation အတွက် esbuild ကို အသုံးပြုသောကြောင့် ဖြစ်သည်။
+Vitest ဆိုတာ Vite-native test runner တစ်ခုဖြစ်ပြီး TypeScript project တွေအတွက် Jest ထက် 10-100 ဆ ပိုမြန်ပါတယ်။ ဘာလို့လဲဆိုတော့ Babel ရဲ့အစား transpilation အတွက် esbuild ကို သုံးထားလို့ပါ။
 
 ```bash
 npm run test -- --coverage
 ```
 
-`--coverage` flag သည် ကာဗာရေဂျာ အစီရင်ခံစာ (coverage report) ကို ထုတ်ပေးသည်။ `vitest.config.ts` တွင် အတိုင်းအတာ သတ်မှတ်ချက်များ (thresholds) ကို ဖွဲ့စည်းပါ-
+`--coverage` flag က coverage report တစ်ခုကို generate လုပ်ပေးပါတယ်။ `vitest.config.ts` ထဲမှာ thresholds တွေ သတ်မှတ်ပေးပါ:
 
 ```typescript
 // vitest.config.ts (add coverage configuration)
@@ -277,18 +277,18 @@ export default defineConfig({
 });
 ```
 
-<Callout type="tip" title="လက်တွေ့ကျသော ကာဗာရေဂျာ ပစ်မှတ်များဖြင့် စတင်ပါ">
-ပထမနေ့မှာပင် ကာဗာရေဂျာ ပစ်မှတ်များကို 100% သတ်မှတ်မထားပါနှင့် — ၎င်းသည် မည်သည့်အဓိပ္ပာယ်ရှိသော စမ်းသပ်မှုကိုမျှ မလုပ်ဘဲ အောင်မြင်သွားသော စမ်းသပ်ချက်များကို ရေးသားခြင်းဆီသို့ ဦးတည်သွားစေနိုင်ပါသည်။ 70% ဖြင့် စတင်ပြီး ကုဒ်ဘေ့စ် ရင့်ကျက်လာသည်နှင့်အမျှ တိုးမြှင့်သွားပါ။
+<Callout type="tip" title="Start with Realistic Coverage Targets">
+အစပိုင်းမှာ coverage thresholds ကို 100% လို့ မသတ်မှတ်ပါနဲ့ — ဒါက ဘာမှ အဓိပ္ပာယ်ရှိရှိ test မလုပ်ဘဲ pass ဖြစ်အောင်ပဲ test တွေ ရေးလာစေတတ်ပါတယ်။ 70% ကနေစပြီး codebase ကြီးလာတာနဲ့အမျှ တိုးမြှင့်သွားပါ။
 </Callout>
 
 ### Job 4: Trivy Security Scan
 
-Trivy သည် ဒေတာဘေ့စ်မျိုးစုံမှ လူသိများသော CVE များ (Common Vulnerabilities and Exposures) အတွက် သင့်၏ Docker ရုပ်ပုံ (image) ကို စကန်ဖတ်သည်-
-- **NVD** — NIST အမျိုးသား အားနည်းချက် ဒေတာဘေ့စ် (NIST National Vulnerability Database)
-- **GitHub Advisory Database** — GitHub ၏ အရင်းအမြစ်ဖွင့် အကြံပေး ဒေတာဘေ့စ်
-- **OS-specific databases** — Alpine Linux ၏ လုံခြုံရေး ဒေတာဘေ့စ်၊ Debian စသည်တို့
+Trivy က database பலခုကနေ သင့်ရဲ့ Docker image ထဲမှာရှိတဲ့ known CVEs (Common Vulnerabilities and Exposures) တွေကို scan ဖတ်ပေးပါတယ်:
+- **NVD** — NIST National Vulnerability Database
+- **GitHub Advisory Database** — GitHub's open source advisory database
+- **OS-specific databases** — Alpine Linux's security database, Debian, etc.
 
-`--ignore-unfixed` flag သည် အရေးကြီးသည်- ၎င်းသည် ပြင်ဆင်ရန် မရှိသေးသော အားနည်းချက်များကို ကျော်သွားစေသည်။ ဤ flag ကို မသုံးပါက၊ မည်သည့် ပက်ကေ့ဂျ်ကိုမျှ အဆင့်မြှင့်တင်၍ မပြင်ဆင်နိုင်သော အားနည်းချက်များအတွက် သတိပေးချက်များကို သင်ရရှိမည် ဖြစ်သည်။
+`--ignore-unfixed` flag က အလွန်အရေးကြီးပါတယ်: ဘာလို့လဲဆိုတော့ fix မထွက်သေးတဲ့ vulnerabilities တွေကို ကျော်သွားပေးလို့ပါ။ ဒီ flag ကို မသုံးဘူးဆိုရင် package ဘာတစ်ခုမှ update လုပ်လို့မရနိုင်တဲ့ vulnerabilities တွေအတွက်ပါ alerts တွေ တက်လာပါလိမ့်မယ်။
 
 ```bash
 # Run Trivy locally before pushing
@@ -302,9 +302,9 @@ trivy image --severity CRITICAL,HIGH capstone-app:local
 
 ---
 
-## မြန်ဆန်မှုအတွက် Caching အသုံးပြုခြင်း
+## Caching for Speed
 
-Caching မပါပါက CI job တိုင်းသည် `npm ci` ကို အစကစတင် ដំណើរការမည်ဖြစ်ပြီး — npm registry မှ ပက်ကေ့ဂျ် ၂၀၀ ကျော်ကို အကြိမ်တိုင်း ဒေါင်းလုဒ်လုပ်နေရမည် ဖြစ်သည်။ `setup-node` action ထဲတွင် `cache: "npm"` ကို အသုံးပြုခြင်းဖြင့် လုပ်ဆောင်ချက်များကြားတွင် `~/.npm` ကမ္ဘာလုံးဆိုင်ရာ ကက်ရှ်ကို ပြန်လည်ရယူပေးသည်။
+Cache မလုပ်ထားဘူးဆိုရင် CI job တိုင်းက `npm ci` ကို အစကနေ run ရပါမယ် — npm registry ကနေ package 200 ကျော်ကို အမြဲတမ်း download ဆွဲနေရမှာပါ။ `setup-node` action ထဲမှာ `cache: "npm"` ကို သုံးထားခြင်းအားဖြင့် run တိုင်းကြားမှာ `~/.npm` global cache ကို ပြန်သုံးလို့ရပါတယ်။
 
 ```mermaid
 flowchart LR
@@ -316,19 +316,20 @@ flowchart LR
         WC1[Restore ~/.npm cache] --> WC2[npm ci]
         WC2 -->|20-30 seconds| WC3[Cache HIT: deps from cache]
     end
+
 ```
 
-လုံခြုံရေးစကန်ဖတ်ခြင်း job တွင် Docker layer caching အတွက် GitHub Actions Cache (`type=gha`) ကို အသုံးပြုထားသည်-
+Security-scan job ထဲမှာ Docker layer caching အတွက် GitHub Actions Cache (`type=gha`) ကို သုံးထားပါတယ်:
 ```yaml
 cache-from: type=gha    # Read from GitHub Actions cache
 cache-to: type=gha,mode=max  # Write all layers to cache
 ```
 
-ဆိုလိုသည်မှာ Docker တည်ဆောက်မှုအလွှာများကို ကက်ရှ်လုပ်ထားမည်ဖြစ်သည်။ ဒုတိယအကြိမ် ដំណើរការသည့်အခါ ပြောင်းလဲသွားသော အလွှာများ (ဥပမာ- သင်၏ ဆော့ဖ်ဝဲရင်းမြစ်ကုဒ်) ကိုသာ ပြန်လည်တည်ဆောက်မည်ဖြစ်သည်။
+ဒီတော့ Docker build layers တွေကို cache လုပ်ထားပြီးသား ဖြစ်သွားပါတယ်။ ဒုတိယအကြိမ် run တဲ့အခါ ပြောင်းလဲသွားတဲ့ layers တွေ (ဥပမာ - သင့်ရဲ့ source code) ကိုပဲ ပြန်ပြီး build လုပ်ပါတော့တယ်။
 
 ---
 
-## `concurrency` ဘလောက်- အချိန်အလဟဿ မဖြစ်စေခြင်း
+## The `concurrency` Block: No Wasted Minutes
 
 ```yaml
 concurrency:
@@ -336,20 +337,20 @@ concurrency:
   cancel-in-progress: true
 ```
 
-ဤသည်မှာ တက်ကြွသော ရိုပိုဇယ်တြီ (repositories) များအတွက် အရေးအကြီးဆုံး စွမ်းဆောင်ရည် အကောင်းဆုံးဖြစ်စေခြင်း (performance optimization) များထဲမှ တစ်ခုဖြစ်သည်။
+ဒါက active ဖြစ်တဲ့ repository တွေအတွက် အရေးအကြီးဆုံး performance optimizations တစ်ခု ဖြစ်ပါတယ်။
 
-**အခြေအနေ:** ဆော့ဖ်ဝဲရေးသားသူတစ်ဦးသည် feature branch တစ်ခုသို့ commit ၃ ခုကို အမြန်တင်လိုက်သည်။ `concurrency` မပါပါက GitHub သည် သီးခြား CI ដំណើរការမှု ၃ ခုကို စတင်မည်ဖြစ်ပြီး — ကွန်ပျူတာ အချိန်မိနစ်များကို ၃ ဆ ပိုမိုစားသုံးမည်ဖြစ်သည်။ `concurrency` ပါရှိပါက ဒုတိယမြောက် push ရောက်လာသည့်အခေတ္တတွင် ပထမ CI ដំណើរការမှုကို ဖျက်သိမ်းလိုက်မည်ဖြစ်သည်။ တတိယမြောက် push က ဒုတိယမြောက်ကို ဖျက်သိမ်းမည်။ နောက်ဆုံးပေါ် ដំណើរការမှုအတွက်သာ သင်ပေးချေရမည် ဖြစ်သည်။
+**Scenario:** Developer တစ်ဦးက feature branch တစ်ခုတည်းကို commit ၃ ခု ဆက်တိုက် push လိုက်တယ်။ `concurrency` မပါဘူးဆိုရင် GitHub က CI runs ၃ ခုကို သီးခြားစီ စတင်လိုက်မှာဖြစ်ပြီး compute minutes တွေ ၃ ဆ ကုန်ကျသွားပါမယ်။ `concurrency` သုံးထားမယ်ဆိုရင်တော့ ဒုတိယ push ရောက်လာတာနဲ့ ပထမ CI run ကို cancel လုပ်ပစ်လိုက်ပါမယ်။ တတိယ push က ဒုတိယတစ်ခုကို cancel လုပ်ပါမယ်။ နောက်ဆုံး run အတွက်ပဲ compute minutes ပေးရပါတော့မယ်။
 
 ---
 
-## CI ရလဒ်များကို ကြည့်ရှုခြင်း
+## Viewing CI Results
 
-GitHub သို့ push တင်ပြီး pull request တစ်ခု ဖွင့်လှစ်ပြီးနောက်:
+GitHub ကို push လုပ်ပြီး pull request တစ်ခု ဖွင့်လိုက်ပြီးနောက်:
 
-1. **PR Checks**: GitHub သည် PR စာမျက်နှာတွင် job တစ်ခုချင်းစီအတွက် အခြေအနေကို (✅ သို့မဟုတ် ❌) တိုက်ရိုက်ပြသပေးသည်
-2. **Job Logs**: အဆင့်ချင်း အသေးစိတ် အထွက်ကို ကြည့်ရန် မည်သည့် job ကိုမဆို နှိပ်ပါ
-3. **Security Tab**: Trivy SARIF ရလဒ်များသည် ရိုပိုဇယ်တြီ၏ Security → Code scanning alerts တွင် ပေါ်လာမည်
-4. **Artifacts**: ကာဗာရေဂျာ အစီရင်ခံစာကို workflow ដំណើរការသည့် စာမျက်နှာမှ ဒေါင်းလုဒ်လုပ်နိုင်သည်
+1. **PR Checks**: PR page ပေါ်မှာတင် job တစ်ခုချင်းစီရဲ့ status (✅ သို့မဟုတ် ❌) ကို GitHub က ပြသပေးပါတယ်။
+2. **Job Logs**: Step-by-step output အသေးစိတ်ကို ကြည့်ချင်ရင် ဘယ် job ကိုမဆို နှိပ်ကြည့်နိုင်ပါတယ်။
+3. **Security Tab**: Trivy SARIF results တွေကို repository ရဲ့ Security → Code scanning alerts ထဲမှာ တွေ့ရပါမယ်။
+4. **Artifacts**: Coverage report ကို workflow run page ကနေ download ဆွဲနိုင်ပါတယ်။
 
 ```mermaid
 flowchart TD
@@ -362,26 +363,26 @@ flowchart TD
 
 ---
 
-## Branch Protection Rules: ပိုက်လိုင်းကို တင်းကြပ်စွာ အကောင်အထည်ဖော်ခြင်း
+## Branch Protection Rules: Enforcing the Pipeline
 
-ဆော့ဖ်ဝဲရေးသားသူများသည် `main` သို့ တိုက်ရိုက် push တင်ခြင်းဖြင့် ကျော်လွှားသွားနိုင်မည်ဆိုပါက CI workflow သည် အသုံးမဝင်တော့ပါ။ ၎င်းကို တင်းကြပ်ပါ-
+Developer တွေက `main` branch ကို တိုက်ရ디 push လုပ်ပြီး bypass လုပ်လို့ရနေမယ်ဆိုရင် CI workflow မှာ အဓိပ္ပာယ်ရှိတော့မှာ မဟုတ်ပါဘူး။ ဒါကြောင့် အောက်ပါအတိုင်း enforce လုပ်ထားပါ:
 
-1. **Repository → Settings → Branches → Add branch protection rule** သို့ သွားပါ
-2. Branch အမည် ပုံစံ: `main`
-3. ဖွင့်ရန်:
+1. **Repository → Settings → Branches → Add branch protection rule** ကို သွားပါ။
+2. Branch name pattern: `main`
+3. Enable လုပ်ရန်:
    - ✅ **Require a pull request before merging**
    - ✅ **Require status checks to pass before merging**
      - ထည့်ရန်: `lint`, `type-check`, `test`, `security-scan`
    - ✅ **Require branches to be up to date before merging**
    - ✅ **Do not allow bypassing the above settings**
 
-ဤဖွဲ့စည်းမှုပုံစံပြီးနောက် — ရိုပိုဇယ်တြီ စီမံခန့်ခွဲသူများပင်လျှင် — မည်သူမျှ အလုပ်မလုပ်တော့သော PR တစ်ခုကို `main` သို့ merge လုပ်၍မရတော့ပါ။
+ဒီလို configuration လုပ်ပြီးသွားရင်တော့ repository administrator ဖြစ်နေရင်တောင် ဘယ်သူမှ ပျက်နေတဲ့ PR တစ်ခုကို `main` ထဲ merge လုပ်လို့ ရတော့မှာ မဟုတ်ပါဘူး။
 
 ---
 
-## အချိန်ကြာလာသည်နှင့်အမျှ နောက်ထပ် စစ်ဆေးမှုများ ထည့်သွင်းခြင်း
+## Adding More Checks Over Time
 
-ဤ CI ပိုက်လိုင်းသည် အခြေခံအုတ်မြစ်တစ်ခု ဖြစ်သည်။ သင်၏ ပရောဂျက် ကြီးထွားလာသည်နှင့်အမျှ အောက်ပါတို့ကို ထည့်သွင်းလာမည် ဖြစ်သည်-
+ဒီ CI pipeline ကတော့ အခြေခံအုတ်မြစ်တစ်ခုပါပဲ။ သင်ရဲ့ project ကြီးလာတာနဲ့အမျှ အောက်ပါတို့ကို ထပ်ထည့်လာရပါမယ်:
 
 ```yaml
 # Additional checks to add later
@@ -420,7 +421,7 @@ integration-test:
 
 ---
 
-## သာမန် CI ချို့ယွင်းချက်များကို ဖြေရှင်းခြင်း
+## Troubleshooting Common CI Failures
 
 ### "ESLint found errors"
 ```bash
@@ -456,13 +457,13 @@ npm update package-name
 
 ---
 
-## အနှစ်ချုပ်
+## Summary
 
-ယခုအခါတွင် သင့်တွင် အောက်ပါတို့ကို လုပ်ဆောင်ပေးမည့် GitHub Actions CI ပိုက်လိုင်းတစ်ခု ရှိနေပြီဖြစ်သည်-
-- PR တိုင်းတွင် အရည်အသွေးစစ်ဆေးမှု **လေးခု** (ESLint, TypeScript, Vitest, Trivy) ကို အပြိုင် ដំណើរการပေးသည်
-- commit အသစ်များ push တင်လိုက်သည့်အခါ **မလိုအပ်တော့သော ដំណើរការမှုများကို** အလိုအလျောက် ဖျက်သိမ်းပေးသည် (CI မိနစ်များကို သက်သာစေသည်)
-- ပိုမိုမြန်ဆန်သော တည်ဆောက်မှုများအတွက် **npm dependencies** နှင့် Docker layersများကို ကက်ရှ်လုပ်ပေးသည်
-- မြင်သာစေရန်အတွက် ကာဗာရေဂျာ အစီရင်ခံစာများနှင့် **Trivy SARIF** ကို GitHub သို့ **တင်ვი်းပေးသည်**
-- ပျက်စီးနေသော merge များကို တားဆီးရန် **branch protection rules ဖြင့် တင်းကြပ်နိုင်သည်**
+အခုဆိုရင် သင်မှာ အောက်ပါတို့ကို လုပ်ဆောင်ပေးနိုင်တဲ့ GitHub Actions CI pipeline တစ်ခု ရှိသွားပါပြီ:
+- PR တစ်ခုချင်းစီမှာ quality check **၄ ခု** (ESLint, TypeScript, Vitest, Trivy) ကို parallel အနေနဲ့ run ပေးခြင်း
+- အသစ် commit တွေ push လိုက်တဲ့အခါ မလိုအပ်တော့တဲ့ stale runs တွေကို automatic cancel လုပ်ပေးခြင်း (CI minutes တွေ သက်သာစေတယ်)
+- 10-30 ဆ ပိုမြန်တဲ့ build တွေအတွက် npm dependencies နဲ့ Docker layers တွေကို **cache လုပ်ပေးခြင်း**
+- မြင်သာမှုရှိစေရန် coverage reports နဲ့ **Trivy SARIF** တွေကို GitHub ကို upload လုပ်ပေးခြင်း
+- ပျက်နေတဲ့ merges တွေကို တားဆီးဖို့ **branch protection rules နဲ့ enforce လုပ်နိုင်ခြင်း**
 
-နောက်သင်ခန်းစာတွင်၊ Git SHA ကို တဂ် (tag) အဖြစ်အသုံးပြု၍ Docker ရုပ်ပုံကို တည်ဆောက်ကာ GitHub Container Registry သို့ တင်ပေးမည့် CD workflow တစ်ခုကို ထည့်သွင်းမည် ဖြစ်သည်။
+နောက်သင်ခန်းစာမှာတော့ Git SHA ကို tag အဖြစ်သုံးပြီး Docker image ကို build လုပ်ကာ GitHub Container Registry ထဲ push လုပ်ပေးမယ့် CD workflow တစ်ခုကို ထပ်မံပေါင်းထည့်သွားမှာ ဖြစ်ပါတယ်။

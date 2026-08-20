@@ -10,9 +10,13 @@ import { PlayCircle, ShieldCheck, Zap, Sparkles, Terminal } from "lucide-react";
 
 export async function generateStaticParams() {
   const courses = getAllCourses();
-  return courses.map((course) => ({
-    slug: course.slug,
-  }));
+  const langs = ["en", "my"];
+  return langs.flatMap((lang) =>
+    courses.map((course) => ({
+      lang,
+      slug: course.slug,
+    }))
+  );
 }
 
 export async function generateMetadata({

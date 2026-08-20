@@ -20,7 +20,9 @@ CRITICAL RULES:
 3. DO NOT translate code syntax. Ensure the output is valid TypeScript.
 4. DO NOT add any extra conversational text or markdown formatting like \`\`\`typescript. Just output the raw TypeScript code.
 5. The tone should be educational and professional.
-6. The name of the exported array should be COURSES_MY instead of COURSES.
+6. DO NOT translate technical IT terms (e.g. DevOps, Linux, Command Line, Git, CI/CD, Docker, Kubernetes, Pipeline, Artifact, Volumes, Container, YAML, Terraform, Application, Clean, etc.). Keep them in English. Use natural, conversational Burmese commonly used by developers (Tech-Burmese) rather than formal, literal textbook translations.
+7. The name of the exported array should be COURSES_MY instead of COURSES.
+8. DO NOT add any import statements at the top of the file.
 
 Content to translate:
 ${text}`;

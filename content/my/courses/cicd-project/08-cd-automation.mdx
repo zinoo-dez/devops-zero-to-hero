@@ -1,25 +1,25 @@
 ---
-title: "GitHub Actions မှတစ်ဆင့် K3s သို့ CD Deployments များကို အလိုအလျောက်လုပ်ဆောင်ခြင်း"
+title: "Automating CD Deployments with GitHub Actions to K3s"
 ---
 
-# ပြီးပြည့်စုံသော CD Pipeline
+# The Complete CD Pipeline
 
-ဤသင်ခန်းစာသည် အရာအားလုံးကို ပုံဖော်ပေးမည့်အပိုင်း ဖြစ်ပါသည်။ CD အလုပ်လုပ်ပုံ အဆင့်ဆင့် (Workflow):
+ဒီသင်ခန်းစာကတော့ အရာအားလုံးကို ပုံစံဖော်ပြီး အလုပ်ဖြစ်အောင် ပေါင်းစပ်ပေးမယ့် အပိုင်းဖြစ်ပါတယ်။ CD workflow က ဒီလိုအလုပ်လုပ်ပါတယ်-
 
-1. `main` သို့ merge တင်ပြီး **CI အောင်မြင်သွားပြီးနောက်** အလုပ်စလုပ်သည်
-2. Git SHA တက်ဂ်ကို အသုံးပြု၍ **Docker image ကို တည်ဆောက်သည်**
-3. **GHCR သို့ ပို့ဆောင်သည် (Push လုပ်သည်)**
-4. နောက်ဆုံးပေါ် ဒေတာဘေ့စ် URL (GitHub Secrets မှ ရယူထားသော) ဖြင့် **Kubernetes Secret ကို အပ်ဒိတ်လုပ်သည်**
-5. ပုံအသစ် (image tag) ကို အသုံးပြုရန် **Deployment ကို အပ်ဒိတ်လုပ်သည်**
-6. rollout ပြီးဆုံးသည်အထိ **စောင့်ဆိုင်းသည်**
-7. deployment မှာ ကျန်းမာရေးကောင်းမွန်ကြောင်း အတည်ပြုရန် **smoke test တစ်ခုကို လုပ်ဆောင်သည်**
-8. smoke test မအောင်မြင်ပါက **အလိုအလျောက် ပုံစံဟောင်းသို့ ပြန်ပြောင်းသည် (Rollback လုပ်သည်)**
+1. `main` branch ကို merge လုပ်တဲ့အခါ **CI ပြီးသွားမှသာ** စတင် Run ပါမယ်။
+2. Git SHA tag နဲ့ **Docker image ကို Build** လုပ်ပါတယ်။
+3. **GHCR ကို Push** တင်ပါတယ်။
+4. (GitHub Secrets ကနေရယူထားတဲ့) နောက်ဆုံးပေါ် database URL နဲ့ **Kubernetes Secret ကို Update** လုပ်ပါတယ်။
+5. Image tag အသစ်ကိုသုံးဖို့ **Deployment ကို Update** လုပ်ပါတယ်။
+6. Rollout ပြီးဆုံးတဲ့အထိ **စောင့်ဆိုင်း** ပါတယ်။
+7. Deployment အခြေအနေ ကောင်းမွန်ကြောင်း အတည်ပြုဖို့ **Smoke test တစ်ခု Run** ပါတယ်။
+8. Smoke test မအောင်မြင်ရင် **အလိုအလျောက် Rollback** ပြန်လုပ်ပေးပါတယ်။
 
 ---
 
-## ပြီးပြည့်စုံသော CD Workflow
+## The Complete CD Workflow
 
-`.github/workflows/cd.yml` ကို ဖန်တီးပါ သို့မဟုတ် အပ်ဒိတ်လုပ်ပါ:
+`.github/workflows/cd.yml` ကို ဖန်တီးပါ (သို့မဟုတ်) Update လုပ်ပါ-
 
 ```yaml
 # .github/workflows/cd.yml
@@ -246,7 +246,7 @@ jobs:
 
 ---
 
-## Deployment Flow အလုပ်လုပ်ပုံကို တစ်ဆင့်ချင်း နားလည်ခြင်း
+## Understanding the Deployment Flow Step by Step
 
 ```mermaid
 sequenceDiagram
@@ -287,9 +287,9 @@ sequenceDiagram
 
 ---
 
-## Rollback လုပ်ဆောင်ပေးသည့် စနစ် (Rollback Mechanism)
+## The Rollback Mechanism
 
-Deployment တစ်ခု မအောင်မြင်သည့်အခါ (smoke test က 200 မဟုတ်ဘဲ အခြားတန်ဖိုး ပြန်လာသည့်အခါ) pipeline သည် `kubectl rollout undo` ကို အလိုအလျောက် လုပ်ဆောင်ပေးသည်:
+Deployment တစ်ခု မအောင်မြင်တဲ့အခါ (smoke test က 200 မဟုတ်တဲ့ status ကုဒ် ပြန်ပေးတဲ့အခါ) pipeline က `kubectl rollout undo` ကို အလိုအလျောက် run ပေးပါတယ်-
 
 ```mermaid
 flowchart TD
@@ -302,7 +302,7 @@ flowchart TD
     ROLLBACK --> NOTIFY[❌ Workflow fails\nGitHub notifies team]
 ```
 
-Kubernetes သည် rollout မှတ်တမ်းများကို သိမ်းဆည်းထားပေးသည်:
+Kubernetes ဟာ rollout history တွေကို သိမ်းဆည်းထားပေးပါတယ်-
 ```bash
 # View rollout history
 kubectl -n production rollout history deployment/capstone-app
@@ -320,32 +320,32 @@ kubectl -n production rollout status deployment/capstone-app
 
 ---
 
-## GitHub Environments ကို သတ်မှတ်ခြင်း (Setting Up GitHub Environments)
+## Setting Up GitHub Environments
 
-CD workflow ထဲတွင် သတိပြုမိမည့်အချက်မှာ:
+CD workflow ထဲမှာ ဒါလေးကို သတိထားမိမှာပါ-
 ```yaml
 environment:
   name: production
   url: https://app.yourdomain.com
 ```
 
-GitHub Environments က လုံခြုံရေးအတွက် နောက်ထပ် အကာအကွယ်အလွှာတစ်ခုကို ထပ်ပေါင်းထည့်ပေးသည်:
+GitHub Environments က လုံခြုံရေးအတွက် အလွှာတစ်ခု ထပ်တိုးပေးပါတယ်-
 
-1. **Repository → Settings → Environments → New environment** သို့ သွားပါ
-2. Name: `production` ဟု ပေးပါ
-3. **Required reviewers** ကို ဖွင့်ပါ — deployment မစတင်မီ တစ်စုံတစ်ဦးက အတည်ပြုပေးရပါမည်
-4. **Deployment branches** ကို ဖွင့်ပါ — `main` မှသာ production သို့ deploy လုပ်နိုင်ပါမည်
-5. Environment secrets များကို ထည့်ပါ: `DATABASE_URL` (repository-level secret ထက် ဦးစားပေး အစားထိုးပါမည်)
+1. **Repository → Settings → Environments → New environment** ကို သွားပါ။
+2. Name ကို `production` လို့ ပေးပါ။
+3. **Required reviewers** ကို Enable လုပ်ပါ — Deploy မလုပ်ခင် အခြားသူတစ်ဦးဦးက Approve လုပ်ပေးဖို့ လိုအပ်ပါမယ်။
+4. **Deployment branches** ကို Enable လုပ်ပါ — `main` branch ကနေသာ production ကို deploy လုပ်ခွင့်ရှိပါမယ်။
+5. Environment secrets တွေ ထည့်ပါ: `DATABASE_URL` (repository-level secret ထက် ဒါက ပိုအဓိကကျပါတယ်)
 
-Reviewers များကို ဖွင့်ထားခြင်းဖြင့် build အဆင့်ပြီးသွားသောအခါ deploy job သည် ခေတ္တရပ်တန့်နေမည်ဖြစ်ပြီး လူကိုယ်တိုင် GitHub ပေါ်တွင် "Approve deployment" ကို နှိပ်မှသာ ဆက်လက်လုပ်ဆောင်ပါမည်။
+Reviewers တွေကို enable လုပ်ထားရင် build step ပြီးသွားတဲ့အခါ deploy job က ခေတ္တရပ်သွားပြီး GitHub ပေါ်မှာ လူကိုယ်တိုင် "Approve deployment" ကို နှိပ်မှသာ ဆက်လုပ်သွားပါမယ်။
 
 ---
 
-## Secrets ကို ကိုးကားချက် (Secrets Reference)
+## Secrets Reference
 
-ဤ secrets များကို GitHub တွင် သတ်မှတ်ထားရပါမည် (Repository Settings → Secrets → Actions):
+ဒီ secrets တွေကို GitHub (Repository Settings → Secrets → Actions) မှာ သေချာ ထည့်ပေးထားရပါမယ်-
 
-| Secret Name | Value | ဘယ်နေရာမှာ သုံးသလဲ |
+| Secret Name | Value | Where Used |
 |------------|-------|-----------|
 | `GITHUB_TOKEN` | Auto-injected by GitHub | GHCR login, attestation |
 | `KUBECONFIG_BASE64` | `cat ~/.kube/config \| base64` | kubectl cluster connection |
@@ -355,9 +355,9 @@ Reviewers များကို ဖွင့်ထားခြင်းဖြင
 
 ---
 
-## Deployments များကို အချိန်နှင့်တပြေးညီ စောင့်ကြည့်ခြင်း (Monitoring Deployments in Real Time)
+## Monitoring Deployments in Real Time
 
-CD workflow အလုပ်လုပ်နေစဉ်အတွင်း rolling update ကို တိုက်ရိုက် ကြည့်ရှုနိုင်ပါသည်:
+CD workflow run နေတုန်းမှာ rolling update ဖြစ်နေတာကို တိုက်ရိုက် ကြည့်ရှုနိုင်ပါတယ်-
 
 ```bash
 # Watch pods update in real time
@@ -381,9 +381,9 @@ kubectl -n production rollout status deployment/capstone-app -w
 
 ---
 
-## မအောင်မြင်သော Deployment တစ်ခုကို စစ်ဆေးဖယ်ရှားခြင်း (Debugging a Failed Deployment)
+## Debugging a Failed Deployment
 
-CD workflow မအောင်မြင်ပါက၊ ဤကဲ့သို့ စနစ်တကျ စစ်ဆေးဖယ်ရှားနိုင်ပါသည်:
+CD workflow တစ်ခု မအောင်မြင်တဲ့အခါ အောက်ပါအတိုင်း အဆင့်ဆင့် စစ်ဆေးနိုင်ပါတယ်-
 
 ```bash
 # 1. Check why pods aren't starting
@@ -411,9 +411,9 @@ kubectl -n traefik logs -l app.kubernetes.io/name=traefik --tail=50
 
 ---
 
-## Zero-Downtime အတည်ပြုခြင်း (Zero-Downtime Verification)
+## Zero-Downtime Verification
 
-သင့်၏ rolling update တွင် downtime လုံးဝမရှိကြောင်း သက်သေပြရန် deployment လုပ်ဆောင်နေစဉ်အတွင်း load test ကို လုပ်ဆောင်နိုင်ပါသည်:
+သင့်ရဲ့ rolling update မှာ Downtime လုံးဝ မရှိကြောင်း သက်သေပြဖို့ deployment လုပ်နေစဉ်အတွင်း load test တစ်ခု Run ကြည့်နိုင်ပါတယ်-
 
 ```bash
 # Install hey (HTTP load generator)
@@ -432,16 +432,16 @@ hey -z 5m -c 10 https://app.yourdomain.com/api/health
 
 ---
 
-# အနှစ်ချုပ် (Summary)
+## Summary
 
-ယခုအခါတွင် သင်သည် အောက်ပါတို့ပါဝင်သော ပြီးပြည့်စုံပြီး အလိုအလျောက်လုပ်ဆောင်ပေးသော CD pipeline တစ်ခုကို ပိုင်ဆိုင်ပြီ ဖြစ်ပါသည်:
-- တစ်ခုနှင့်တစ်ခု အပြိုင်မဖြစ်စေရန် **deployments များကို စဉ်ဆက်မပြတ် (serialize) လုပ်ပေးခြင်း**
-- SHA-tagged Docker image ကို တည်ဆောက်ပြီး GHCR သို့ **တည်ဆောက်ကာ ပို့ဆောင်ပေးခြင်း**
-- deploy မလုပ်မီ GitHub Secrets မှနေ၍ **Kubernetes secrets များကို ဆက်သွယ်ပေးခြင်း (sync လုပ်ခြင်း)**
-- manifests အားလုံးကို `kubectl apply` ဖြင့် **အသုံးပြုခြင်း** (idempotent ဖြစ်၍ အကြိမ်များစွာ လုပ်ဆောင်ရန် စိတ်ချရသည်)
-- Deployment ၏ downtime မရှိသော rolling update ကို **လုပ်ဆောင်ပေးခြင်း**
-- rollout ပြီးဆုံးသည်အထိ စောင့်ဆိုင်းပြီး smoke test ကို **လုပ်ဆောင်ပေးခြင်း**
-- smoke test မအောင်မြင်ပါက ယခင်ဗားရှင်းသို့ **အလိုအလျောက် ပြန်လည်ပြောင်းလဲပေးခြင်း (rollback လုပ်ခြင်း)**
-- GitHub Actions run စာမျက်နှာသို့ deployment အနှစ်ချုပ်ကို **ထုတ်ပေးခြင်း**
+အခုဆိုရင် သင်ဟာ အောက်ပါ အချက်တွေ ပါဝင်တဲ့ အပြည့်အစုံ အလိုအလျောက်လုပ်ဆောင်နိုင်တဲ့ CD pipeline တစ်ခုကို တည်ဆောက်ပြီးပါပြီ-
+- တစ်ပြိုင်နက်တည်း push တင်တာတွေ တစ်ခုနဲ့တစ်ခု မလုမိစေရန် **Deployments တွေကို Serialize လုပ်ပေးခြင်း**
+- SHA-tagged Docker image ကို တည်ဆောက်ပြီး GHCR ကို **Build and push လုပ်ခြင်း**
+- Deploy မလုပ်ခင် GitHub Secrets ကနေ Kubernetes secrets တွေကို **Sync လုပ်ခြင်း**
+- `kubectl apply` ဖြင့် manifests အားလုံးကို Apply လုပ်ခြင်း (idempotent ဖြစ်လို့ အကြိမ်ကြိမ် run လို့ရပါတယ်)
+- Deployment ကို **Zero-downtime ဖြစ်စေရန် Rolling update လုပ်ခြင်း**
+- Rollout ပြီးဆုံးသည်အထိ စောင့်ဆိုင်းပြီး smoke test Run ခြင်း
+- Smoke test မအောင်မြင်ပါက ယခင် version ဟောင်းသို့ **အလိုအလျောက် Rollback ပြန်လုပ်ခြင်း**
+- GitHub Actions run page ပေါ်မှာ **Deployment summary ကို ထုတ်ပေးခြင်း**
 
-နောက်သင်ခန်းစာတွင် သင်၏ custom domain ကို သတ်မှတ်ခြင်း၊ DNS မှတ်တမ်းများကို တည်ဆောက်ခြင်းနှင့် အလိုအလျောက် စီမံခန့်ခွဲပေးသော Let's Encrypt certificate ဖြင့် သင့်အပလီကေးရှင်းကို HTTPS မှတစ်ဆင့် ဝင်ရောက်အသုံးပြုနိုင်ခြင်း ရှိမရှိ အတည်ပြုခြင်းတို့ကို လေ့လာရမည် ဖြစ်ပါသည်။
+နောက်လာမယ့် သင်ခန်းစာမှာတော့ custom domain ကို configure လုပ်ဖို့၊ DNS records တွေ သတ်မှတ်ဖို့နဲ့ Let's Encrypt certificate ကို အလိုအလျောက် စီမံခန့်ခွဲပေးပြီး သင့် application ကို HTTPS နဲ့ ဝင်ရောက်သုံးစွဲလို့ရမရ အတည်ပြုမယ့် အကြောင်းအရာတွေကို လေ့လာရမှာ ဖြစ်ပါတယ်။

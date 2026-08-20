@@ -2,9 +2,9 @@
 title: "Deployment Strategies: Blue-Green, Canary & Rolling"
 ---
 
-# Deployment Strategy က ဘaလို့ အရေးကြီးတာလဲ
+# Deployment Strategy က ဘไมို့ အရေးကြီးတာလဲ
 
-Software တွေကို deploy လုပ်တဲ့ ပုံစံက သင့်ရဲ့ user တွေ downtime (ဝန်ဆောင်မှု ရပ်တန့်သွားချိန်) ကြုံရမလားဆိုတာနဲ့၊ အမှားအယွင်းပါလာတဲ့ release တစ်ခုကနေ ဘယ်လောက်မြန်မြန် ပြန်လည် ကုစားနိုင်မလဲဆိုတာကို တိုက်ရိုက် သတ်မှတ်ပေးပါတယ်။ "ဟောင်းတာရပ်၊ အသစ်တာစ" ဆိုတဲ့ ရိုးရှင်းတဲ့ (naive) နည်းလမ်းက deploy လုပ်တိုင်း ဒုတိယပိုင်းကနေ မိနစ်ပိုင်းအထိ downtime ဖြစ်စေပါတယ်။ Production စနစ်တွေမှာဆိုရင် deploy လုပ်တာကို user တွေ မသိသာစေမယ့် ဆန်းပြားတဲ့ routing နည်းလမ်းတွေ လိုအပ်ပါတယ်။
+Software ကို deploy လုပ်တဲ့ ပုံစံက သင့် users တွေ Downtime ကြုံရမလား၊ release တစ်ခု အမှားအယွင်း ဖြစ်သွားရင် ဘယ်လောက်မြန်မြန် ပြန်ပြင် (recover) လုပ်နိုင်မလဲ ဆိုတာကို တိုက်ရိုက် သတ်မှတ်ပေးပါတယ်။ "ဟောင်းတာရပ်၊ အသစ်စ" ဆိုတဲ့ ရိုးစင်းတဲ့ ပုံစံမျိုးက deploy လုပ်တိုင်း စက္ကန့်ပိုင်းကနေ မိနစ်ပိုင်းအထိ Downtime ဖြစ်စေပါတယ်။ Production systems တွေမှာဆိုရင် deployments တွေကို users တွေ မသိသာစေဘဲ လုပ်ဆောင်ပေးနိုင်တဲ့ ခေတ်မီတဲ့ routing strategies တွေ လိုအပ်ပါတယ်။
 
 ```mermaid
 flowchart TD
@@ -18,9 +18,9 @@ flowchart TD
 
 ---
 
-## Strategy 1: Recreate (အားလုံးရပ်၊ အားလုံးစ)
+## Strategy 1: Recreate (Stop All, Start All)
 
-အရိုးရှင်းဆုံး နည်းလမ်းပါ — container ဟောင်း အားလုံးကို ရပ်လိုက်ပြီး၊ container အသစ် အားလုံးကို ပြန်စတာပါ။ Production အတွက် မသင့်တော်ပါဘူး။
+အရှင်းဆုံး Strategy ပါ — old containers တွေကို အကုန်ရပ်လိုက်ပြီးမှ new containers တွေကို အကုန်စတင်တာပါ။ Production အတွက်တော့ မသင့်တော်ပါဘူး။
 
 ```yaml
 # In Kubernetes
@@ -37,13 +37,13 @@ T=0:30  New pods (v2) starting up
 T=0:45  New pods pass health checks   ← Service back up
 ```
 
-**ဘယ်နေရာတွေမှာ သုံးမလဲ**: Development (ဆော့ဖ်ဝဲရေးဆွဲရာ နေရာများ)၊ Production မဟုတ်သော ပတ်ဝန်းကျင်များ၊ နဲ့ ဗားရှင်းနှစ်ခုကို တစ်ပြိုင်နက် မrun နိုင်တဲ့ job တွေ (ဥပမာ - exclusive locks နဲ့ database migrations တွေလိုမျိုး) မှာသာ သုံးပါ။
+**ဒီလိုနေရာတွေမှာပဲ သုံးပါ**: development၊ non-production environments နဲ့ version နှစ်ခုကို တစ်ပြိုင်နက် မrun နိုင်တဲ့ jobs တွေ (ဥပမာ- exclusive locks နဲ့ database migrations တွေလိုမျိုး)။
 
 ---
 
-## Strategy 2: Rolling Update (Kubernetes ရဲ့ မူလသတ်မှတ်ချက်)
+## Strategy 2: Rolling Update (Kubernetes Default)
 
-Kubernetes က pod တွေ တစ်ခုချင်းစီ (သို့မဟုတ် အနည်းငယ်စီ) ကို အစားထိုးသွားပါတယ်။ Rollout လုပ်နေစဉ်အတွင်း ဗားရှင်းဟောင်းနဲ့ အသစ် နှစ်ခုစလုံးက traffic ကို တစ်ပြိုင်နက် လက်ခံဆောင်ရွက်ပေးပါတယ် — ဒါက အဓိက ကျတဲ့ အချက်ပဲ ဖြစ်ပါတယ်။
+Kubernetes က pods တွေကို တစ်ခုချင်းစီ (သို့မဟုတ် အနည်းငယ်စီ) အစားထိုးသွားပါတယ်။ Rollout လုပ်နေစဉ်အတွင်း old နဲ့ new version နှစ်ခုစလုံးက traffic ကို တစ်ပြိုင်နက် လက်ခံ處理 နေကြပါတယ်။ ဒါက အဓိကကျတဲ့ သတ်မှတ်ချက်ပါပဲ။
 
 ```yaml
 # Kubernetes Deployment with rolling update config
@@ -86,9 +86,9 @@ sequenceDiagram
     Note over LB,V2A: Continue until all 4 pods are v2
 ```
 
-**ကန့်သတ်ချက်**: Rolling update လုပ်နေစဉ်အတွင်း သင့် app ရဲ့ ဗားရှင်းဟောင်းနဲ့ အသစ်ဟာ traffic ကို တစ်ပြိုင်နက် ကိုင်တွယ်နေမှာ ဖြစ်ပါတယ်။ ဒါကြောင့် သင့်ရဲ့ ဗားရှင်းအသစ်ဟာ လက်ရှိ database schema နဲ့ **နောက်ပြန် ကိုက်ညီမှု (backward-compatible) ရှိရပါမယ်**။ Migration တစ်ခုထဲမှာ column အမည်ကို ပြောင်းလဲပြီး တစ်ခါတည်း deploy လုပ်လို့ မရပါဘူး။
+**Constraint (ကန့်သတ်ချက်)**: Rolling update လုပ်နေစဉ်အတွင်း app ရဲ့ old နဲ့ new versions တွေက traffic ကို တစ်ပြိုင်နက် Handle လုပ်နေပါတယ်။ သင့်ရဲ့ new version ဟာ ရှိပြီးသား database schema နဲ့ **backward-compatible ဖြစ်ရပါမယ်**။ Migration တစ်ခုထဲမှာ column နာမည်ကို ပြောင်းလဲပြီး တစ်ခါတည်း deploy လို့ မရပါဘူး။
 
-### Rolling Update Best Practice: နောက်ပြန် ကိုက်ညီသော Migrations (Backward-Compatible Migrations)
+### Rolling Update Best Practice: Backward-Compatible Migrations
 
 ```sql
 -- Bad: rename column in one shot (v2 expects 'email' but v1 is still running with 'email_address')
@@ -110,7 +110,7 @@ ALTER TABLE users DROP COLUMN email_address;
 
 ## Strategy 3: Blue-Green Deployment
 
-ပြီးပြည့်စုံပြီး တူညီတဲ့ ပတ်ဝန်းကျင် နှစ်ခုကို ဘေးချင်းယှဉ် run ထားပါတယ် — "Blue" (လက်ရှိ production) နဲ့ "Green" (ဗားရှင်းအသစ်) တို့ ဖြစ်ပါတယ်။ Load balancer သို့မဟုတ် DNS switch ကနေ traffic အားလုံးကို Blue ကနေ Green ဆီ တစ်ခဏချင်း ပြောင်းပေးလိုက်ပါတယ်။
+ပြည့်စုံပြီး တူညီတဲ့ environments နှစ်ခုကို ဘေးချင်းယှဉ် run ထားပါတယ် — "Blue" (လက်ရှိ production) နဲ့ "Green" (version အသစ်) တို့ဖြစ်ပါတယ်။ Load balancer ဒါမှမဟုတ် DNS switch တစ်ခုက traffic အားလုံးကို Blue ကနေ Green ဆီ တစ်ရှိန်ထိုး ပြောင်းပေးလိုက်ပါတယ်။
 
 ```mermaid
 flowchart TD
@@ -131,7 +131,7 @@ flowchart TD
     BEFORE -->|"Switch router\n(< 1 second)"| AFTER
 ```
 
-### Docker Compose ဖြင့် Blue-Green လုပ်ဆောင်ခြင်း
+### Blue-Green with Docker Compose
 
 ```bash
 # Current production: "blue" stack running on port 3000
@@ -165,15 +165,15 @@ nginx -s reload
 COMPOSE_PROJECT_NAME=myapp-green docker compose down
 ```
 
-**ကုန်ကျစရိတ်**: Blue-Green က switch လုပ်တဲ့ အချိန်အတွင်း infrastructure နှစ်ဆ (servers/pods 2 ဆ) လိုအပ်ပါတယ်။ ဒါကြောင့် သေးငယ်တဲ့ app တွေထက် အဓိကကျပြီး အသုံးပြုသူများတဲ့ critical services တွေမှာ ပိုပြီး အသုံးပြုကြပါတယ်။
+**Cost (ကုန်ကျစရိတ်)**: Blue-Green က switch လုပ်တဲ့အချိန်မှာ infrastructure (servers/pods) ကို နှစ်ဆသုံးရပါတယ်။ ဒါကြောင့် သေးငယ်တဲ့ apps တွေထက် အဓိကကျပြီး ကြီးမားတဲ့ services တွေမှာ အဓိက သုံးကြတာ ဖြစ်ပါတယ်။
 
 ---
 
-## Strategy 4: Canary Release (အဆင့်ချင်းပြောင်း Traffic လွှဲခြင်း)
+## Strategy 4: Canary Release (Gradual Traffic Shift)
 
-Canary release က တကယ့် user traffic ရဲ့ ရာခိုင်နှုန်း အနည်းငယ်ကို ဗားရှင်းအသစ်ဆီ ပို့ပေးပါတယ်။ Metrics တွေ အကောင်းဘက်က ရပ်တည်နေရင် traffic ကို တဖြည်းဖြည်း တိုးမြှင့်ပေးပါတယ်။ အမှားအယွင်း (errors) တွေ သိသိသာသာ တက်လာခဲ့ရင်တော့ release ကို အလိုအလျောက် ရပ်တန့်ပစ်လိုက်ပါတယ်။
+Canary release က တကယ့် traffic ရဲ့ ရာခိုင်နှုန်းအနည်းငယ်ကို version အသစ်ဆီ ပို့ပေးပါတယ်။ Metrics တွေ ကောင်းမွန်နေတယ်ဆိုရင် traffic ကို တစ်ဖြည်းဖြည်း တိုးမြှင့်ပေးပါတယ်။ အမှားအယွင်းတွေ (errors) တက်လာရင်တော့ release ကို အလိုအလျောက် ရပ်ပစ်လိုက်ပါတယ်။
 
-မိုင်းတွင်းထဲ လွှတ်တဲ့ "canary ငှက်ငယ်" ကို အစွဲပြုပြီး မှည့်ခေါ်ထားတာပါ — အန္တရာယ်ကို အစောတလျင် သိရှိနိုင်ဖို့အတွက် အကန့်အသတ်နဲ့ စမ်းသပ်တာ ဖြစ်ပါတယ်။
+မိုင်းတွင်းထဲ လွှတ်တဲ့ "canary ငှက်လေး" ကို အစွဲပြုပြီး မှည့်ခေါ်ထားတာပါ — အန္တရာယ်ကို အပြည့်အဝ မခံရခင် ကြိုတင်သိရှိနိုင်ဖို့အတွက် အကန့်အသတ်နဲ့ စမ်းသပ်တာ ဖြစ်ပါတယ်။
 
 ```mermaid
 flowchart LR
@@ -195,7 +195,7 @@ flowchart LR
     GOOD -->|"❌ No — spike detected"| ROLLBACK["Auto-rollback:\nRoute 100% to v1\nTerminate v2 pods"]
 ```
 
-### Argo Rollouts ဖြင့် Kubernetes တွင် Canary ပြုလုပ်ခြင်း
+### Canary in Kubernetes with Argo Rollouts
 
 ```yaml
 # Install: kubectl apply -f https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml
@@ -255,7 +255,7 @@ spec:
             }[5m]))
 ```
 
-### Docker Compose ဖြင့် Canary ပြုလုပ်ခြင်း (Simple Nginx Weighted Upstream)
+### Canary with Docker Compose (Simple Nginx Weighted Upstream)
 
 ```nginx
 # nginx.conf
@@ -280,9 +280,9 @@ docker compose logs green-api | grep "status=5" | wc -l
 
 ---
 
-## Feature Flags: Release မလုပ်ဘဲ Deploy လုပ်ခြင်း
+## Feature Flags: Deploy Without Releasing
 
-Feature flags က deployment နဲ့ release ကို ခွဲထုတ်ပေးပါတယ် — ကုဒ်တွေက production ထৈ ရောက်သွားပေမယ့် user အများစုအတွက်တော့ "ပိတ်ထား" ပါတယ်။
+Feature flags က deployment နဲ့ release ကို ခွဲထုတ်ပေးပါတယ် — code က production ကို ရောက်သွားပေမယ့် users အများစုအတွက်တော့ "ပိတ်ထား" ပါတယ်။
 
 ```typescript
 // Feature flag check using environment variable
@@ -299,44 +299,44 @@ const showNewCheckout = await featureFlags.isEnabled('new-checkout', {
 ```
 
 **အကျိုးကျေးဇူးများ**:
-- User တွေ ချက်ချင်း မမြင်ရသေးတဲ့ code တွေကို deploy လုပ်နိုင်ခြင်း (တဖြည်းဖြည်းချင်း ပြသခြင်း)
-- ထပ်ပြီး deploy လုပ်စရာ မလိုဘဲ အလုပ်မဖြစ်တဲ့ feature တစ်ခုကို ချက်ချင်း ပိတ်ပစ်နိုင်ခြင်း (kill switch)
-- A/B testing ပြုလုပ်နိုင်ခြင်း: user တွေရဲ့ 50% ကို v1 ပြပြီး ကျန် 50% ကို v2 ပြကာ conversion ကို တိုင်းတာနိုင်ခြင်း
+- Users တွေ ချက်ချင်းမမြင်ရသေးတဲ့ code ကို deploy လုပ်နိုင်ခြင်း (gradual reveal)
+- ထပ်ပြီး deploy လုပ်စရာမလိုဘဲ အမှားအယွင်းရှိတဲ့ feature တစ်ခုကို ချက်ချင်း ပိတ်ပစ်နိုင်ခြင်း (kill switch)
+- A/B test လုပ်နိုင်ခြင်း: v1 ကို 50% ပြပြီး v2 ကို 50% ပြကာ conversion ကို တိုင်းတာနိုင်ခြင်း
 
 ---
 
-## သင့်လျော်သော နည်းလမ်းကို ရွေးချယ်ခြင်း
+## မှန်ကန်သော Strategy ကို ရွေးချယ်ခြင်း
 
 | Strategy | Downtime | Rollback speed | Infrastructure cost | Right for |
 |---------|---------|---------------|---------------------|-----------|
-| **Recreate** | မိနစ်ပိုင်း | မိနစ်ပိုင်း | နည်းပါးသည် | Dev/staging သက်သက် |
-| **Rolling Update** | မရှိပါ (maxUnavailable=0 ဖြစ်လျှင်) | ~၅ မိနစ် | အပို မလိုပါ | K8s workloads အများစု |
-| **Blue-Green** | မရှိပါ | < ၁ စက္ကန့် | အကူးအပြောင်းတွင် ၂ ဆ | Traffic များပြီး အရေးကြီးသော services များ |
-| **Canary** | မရှိပါ | အလိုအလျောက် | အနည်းငယ် ပိုကုန်ကျ | အန္တရာယ်များသော feature အပြောင်းအလဲများ |
-| **Feature Flags** | မရှိပါ | ချက်ချင်း | အပို မလိုပါ | မည်သည့်အဖွဲ့ సైઝမဆို |
+| **Recreate** | မိနစ်ပိုင်း | မိနစ်ပိုင်း | နည်းပါး | Dev/staging only |
+| **Rolling Update** | မရှိပါ (maxUnavailable=0 လျှင်) | ~၅ မိနစ် | ထပ်ဆောင်း မလိုပါ | Most K8s workloads |
+| **Blue-Green** | မရှိပါ | < ၁ စက္ကန့် | Transition အချိန်မှာ ၂ ဆ | High-traffic, critical services |
+| **Canary** | မရှိပါ | အလိုအလျောက် | ထပ်ဆောင်း အနည်းငယ် | High-risk feature changes |
+| **Feature Flags** | မရှိပါ | ချက်ချင်း | ထပ်ဆောင်း မလိုပါ | Any size team |
 
 ---
 
-## Deployment အမျိုးအစားအလိုက် Database Migration ဗျူဟာများ
+## Deployment Type တစ်ခုချင်းစီအလိုက် Database Migration Strategy
 
 | Migration type | Rolling Update | Blue-Green | Canary |
 |---------------|---------------|-----------|--------|
-| **Add a new table** | ✅ လုံခြုံသည် (backward-compatible) | ✅ | ✅ |
-| **Add a nullable column** | ✅ လုံခြုံသည် | ✅ | ✅ |
-| **Add a non-null column (with default)** | ✅ လုံခြုံသည် | ✅ | ✅ |
-| **Remove a column** | ❌ Expand-contract လိုအပ်သည် | ✅ (v1 ပိတ်ထားသည်) | ⚠️ Deploy ၃ ခါ လုပ်ရန်လိုသည် |
-| **Rename a column** | ❌ Expand-contract လိုအပ်သည် | ✅ (v1 ပိတ်ထားသည်) | ⚠️ Deploy ၃ ခါ လုပ်ရန်လိုသည် |
-| **Rewrite data format** | ❌ Expand-contract လိုအပ်သည် | ✅ (v1 ပိတ်ထားသည်) | ⚠️ ရှုပ်ထွေးသည် |
+| **Add a new table** | ✅ Safe (backward-compatible) | ✅ | ✅ |
+| **Add a nullable column** | ✅ Safe | ✅ | ✅ |
+| **Add a non-null column (with default)** | ✅ Safe | ✅ | ✅ |
+| **Remove a column** | ❌ Expand-contract required | ✅ (v1 is off) | ⚠️ 3-deploy process |
+| **Rename a column** | ❌ Expand-contract required | ✅ (v1 is off) | ⚠️ 3-deploy process |
+| **Rewrite data format** | ❌ Expand-contract required | ✅ (v1 is off) | ⚠️ Complex |
 
 ---
 
 ## အနှစ်ချုပ်
 
-Deployment strategy ဆိုတာ CI/CD စနစ်တစ်ခုမှာ အရေးအကြီးဆုံး architectural ဆုံးဖြတ်ချက်တွေထဲက တစ်ခု ဖြစ်ပါတယ်-
-- **Recreate**: ရိုးရှင်းပေမယ့် downtime ဖြစ်စေပါတယ် — development မှာပဲ သုံးပါ
-- **Rolling Update**: Kubernetes ရဲ့ မူလစနစ်၊ downtime မရှိပါ၊ ဒါပေမယ့် backward-compatible ဖြစ်တဲ့ schema အပြောင်းအလဲတွေ လိုအပ်ပါတယ် (`maxUnavailable=0`)
-- **Blue-Green**: traffic ကို တစ်ခဏချင်း ပြောင်းလဲနိုင်ပြီး ချက်ချင်း rollback လုပ်နိုင်ပါတယ်၊ အကူးအပြောင်းကာလမှာ infrastructure နှစ်ဆ လိုအပ်ပါတယ်
-- **Canary**: traffic ကို အဆင့်ချင်းပြောင်းလဲပြီး metrics ပေါ်မူတည်၍ အလိုအလျောက် rollback လုပ်နိုင်ပါတယ် (Argo Rollouts) — အန္တရာယ်များတဲ့ အပြောင်းအလဲတွေအတွက် အလွန်လုံခြုံပါတယ်
-- **Feature Flags**: deployment နဲ့ release ကို ခွဲထုတ်ပေးပါတယ် — အမှောင်ထဲမှာ ပို့ပြီး တဖြည်းဖြည်းချင်း ဖော်ပြပါ
+Deployment strategy ဆိုတာ CI/CD system တစ်ခုမှာ အရေးအကြီးဆုံး architectural decisions တွေထဲက တစ်ခုဖြစ်ပါတယ်-
+- **Recreate**: ရိုးရှင်းပေမယ့် downtime ဖြစ်စေတယ် — development မှာပဲ သုံးသင့်
+- **Rolling Update**: Kubernetes ရဲ့ default ဖြစ်ပြီး downtime မရှိပါဘူး၊ ဒါပေမဲ့ backward-compatible schema changes လိုအပ်ပါတယ် (`maxUnavailable=0`)
+- **Blue-Green**: traffic ကို တစ်ခါတည်း ချက်ချင်းပြောင်းလဲနိုင်ပြီး instant rollback လုပ်နိုင်ပါတယ်၊ transition လုပ်နေစဉ် infrastructure နှစ်ဆ လိုအပ်ပါတယ်
+- **Canary**: traffic ကို တစ်ဖြည်းဖြည်းချင်း ပြောင်းလဲပေးပြီး metrics ကိုအခြေခံကာ အလိုအလျောက် rollback လုပ်ပေးနိုင်ပါတယ် (Argo Rollouts) — အန္တရာယ်များတဲ့ အပြောင်းအလဲတွေအတွက် အလွန်လုံခြုံပါတယ်
+- **Feature Flags**: deployment နဲ့ release ကို ခွဲထုတ်ပေးပါတယ် — အစကွယ်ရာမှာ တင်ပြီး တစ်ဖြည်းဖြည်းချင်း ထုတ်ပြတာ ဖြစ်ပါတယ်
 
-နောက်သင်ခန်းစာမှာတော့ CI/CD ရဲ့ observability အကြောင်းကို သင်ယူရမှာ ဖြစ်ပါတယ် — pipeline ရဲ့ ကျန်းမာရေး၊ DORA metrics တွေကို ဘယ်လို တိုင်းတာရမလဲ ဆိုတာနဲ့ စဉ်ဆက်မပြတ် တိုးတက်ကောင်းမွန်လာစေရန် dashboards တွေကို ဘယ်လို အသုံးပြုရမလဲဆိုတာတွေကို လေ့လာရမှာ ဖြစ်ပါတယ်။
+နောက်လာမယ့် lesson မှာတော့ CI/CD ရဲ့ observability အကြောင်းကို သင်ယူရမှာ ဖြစ်ပါတယ် — pipeline health ကို ဘယ်လို တိုင်းတာရမလဲ၊ DORA metrics တွေနဲ့ continuous improvement ဖြစ်အောင် dashboards တွေ ဘယ်လို သုံးရမလဲဆိုတာကို လေ့လာရမှာ ဖြစ်ပါတယ်။

@@ -1,39 +1,39 @@
 ---
-title: "ထုတ်လုပ်ရေး K3s ဆာဗာကို ပြင်ဆင်ခြင်း (Provisioning the Production K3s Server)"
+title: "Provisioning the Production K3s Server"
 ---
 
-# သင်၏ထုတ်လုပ်ရေးဆာဗာကို ပြင်ဆင်ခြင်း
+# Preparing Your Production Server
 
-ဤသင်ခန်းစာတွင် ပထမဆုံးအကြိမ် deployment မလုပ်မီ VPS ပေါ်တွင် သင်လုပ်ဆောင်ရမည့်အရာအားလုံးကို အကျုံးဝင်စေမည် ဖြစ်ပါသည်။ စနစ်တကျ လုံခြုံရေးမြှင့်တင်ထားသော ဆာဗာတစ်ခုသည် လုံခြုံသော ထထုတ်လုပ်ရေးစနစ် (production system) တစ်ခုအတွက် အခြေခံအုတ်မြစ် ဖြစ်ပါသည်။ ဤအဆင့်ကို ကျော်သွားခြင်းသည် လွှင့်တင်ပြီး နာရီပိုင်းအတွင်းမှာပင် ဆာဗာများ ဟက်ခံရနိုင်သည့် အဖြစ်များသော အမှားတစ်ခု ဖြစ်ပါသည်။
+ဒီ Lesson မှာတော့ ပထမဆုံး deployment မလုပ်ခင် VPS ပေါ်မှာ လုပ်ဆောင်ရမယ့် အရာမှန်သမျှကို ရှင်းပြပေးသွားမှာ ဖြစ်ပါတယ်။ Server တစ်လုံးကို လုံခြုံရေးအရ သေချာပြင်ဆင်ထားခြင်း (Hardened) ဟာ လုံခြုံတဲ့ production system တစ်ခုအတွက် အခြေခံအုတ်မြစ် ဖြစ်ပါတယ်။ ဒီအဆင့်ကို ကျော်သွားတာဟာ Live တက်ပြီး နာရီပိုင်းအတွင်းမှာပဲ server ကို ဟက်ခံရနိုင်ခြေရှိတဲ့ အဖြစ်များဆုံး အမှားတစ်ခု ဖြစ်ပါတယ်။
 
-ဤသင်ခန်းစာ ပြီးဆုံးချိန်တွင် သင်၌ အောက်ပါတို့ ရှိလာမည် ဖြစ်သည်-
-- လုံခြုံရေးမြှင့်တင်ထားသော Ubuntu 22.04 VPS တစ်ခု
-- ထည့်သွင်းပြီး အတည်ပြုပြီးသား K3s
-- သင့်လက်ပ်တော့မှ လှမ်းသုံးနိုင်သော Remote `kubectl` အသုံးပြုခွင့်
-- GitHub Actions စီဒီ (CD) အတွက် ပြင်ဆင်ထားသော SSH key အခြေခံသည့် အတည်ပြုခြင်းစနစ် (authentication)
-- Let's Encrypt ClusterIssuer ပါရှိသော cert-manager ကို ထည့်သွင်းထားခြင်း
+ဒီ Lesson ပြီးသွားတဲ့အခါမှာ အောက်ပါတို့ အဆင်သင့် ဖြစ်နေပါလိမ့်မယ်။
+- လုံခြုံရေးပြင်ဆင်ထားပြီးသား Ubuntu 22.04 VPS တစ်လုံး
+- Install လုပ်ပြီး စစ်ဆေးပြီးသား K3s
+- ကိုယ့် Laptop ကနေ လှမ်းသုံးလို့ရမယ့် Remote `kubectl` access
+- GitHub Actions CD အတွက် Configure လုပ်ထားတဲ့ SSH key-based authentication
+- Let's Encrypt `ClusterIssuer` နဲ့တကွ install လုပ်ပြီးသား `cert-manager`
 
 ---
 
-## အဆင့် ၁ - သင်၏ VPS ကို ပြင်ဆင်ပါ (Provision Your VPS)
+## Step 1: Provision Your VPS
 
-ဤလမ်းညွှန်ချက်တွင် **Hetzner Cloud** (ဈေးအသက်သာဆုံး) ကို အသုံးပြုထားသော်လည်း အဆင့်များသည် မည်သည့် ပံ့ပိုးပေးသူ (DigitalOcean, AWS, Linode) မဆို အတူတူပင် ဖြစ်ပါသည်။
+ဒီ Guide မှာတော့ ဈေးအသက်သာဆုံးဖြစ်တဲ့ **Hetzner Cloud** ကို သုံးသွားမှာ ဖြစ်ပေမယ့် အဆင့်တွေက ဘယ် Cloud Provider (DigitalOcean, AWS, Linode) မှာမဆို အတူတူပါပဲ။
 
-### ဆာဗာကို ဖန်တီးပါ
+### Create the Server
 
-Hetzner Cloud Console ပေါ်တွင်:
-1. New server → Location: သင်၏ဒေသ (region)
+Hetzner Cloud Console မှာ:
+1. New server → Location: ကိုယ့် ဒေသနဲ့နီးတဲ့ နေရာ
 2. Image: **Ubuntu 22.04 LTS**
 3. Type: **CX22** (2 vCPU, 4 GB RAM, 40 GB disk)
-4. SSH Key: သင့်ရဲ့ `~/.ssh/id_ed25519.pub` ကို ထည့်ပါ
-5. Firewall: Firewall အသစ်တစ်ခု ဖန်တီးပါ (အောက်တွင် ပြင်ဆင်ထားသည်)
-6. Create server ကို နှိပ်ပါ
+4. SSH Key: ကိုယ့်ရဲ့ `~/.ssh/id_ed25519.pub` ကို Add လုပ်ပါ
+5. Firewall: Firewall အသစ်တစ်ခု ဖန်တီးပါ (အောက်မှာ ဆက်ပြထားတဲ့အတိုင်း configure လုပ်ပါ)
+6. Create server
 
-Public IP လိပ်စာကို မှတ်ထားပါ — ဤသင်ခန်းစာတစ်လျှောက်လုံးတွင် ၎င်းကို သင်အသုံးပြုရပါမည်။
+Public IP address ကို မှတ်ထားပေးပါ — ဒီ Lesson တစ်ခုလုံးမှာ အဲ့ဒါကို သုံးရပါမယ်။
 
-### ဖိုင်းဝေါကို ပြင်ဆင်ပါ (Configure the Firewall)
+### Configure the Firewall
 
-သင် အမှန်တကယ် လိုအပ်သော ပေါ့တ် (ports) များကိုသာ ဖွင့်ပါ:
+တကယ်လိုတဲ့ Port တွေကိုပဲ ဖွင့်ပါ:
 
 | Port | Protocol | Source | Purpose |
 |------|----------|--------|---------|
@@ -43,30 +43,30 @@ Public IP လိပ်စာကို မှတ်ထားပါ — ဤသင�
 | 6443 | TCP | Your IP only | Kubernetes API server |
 
 <Callout type="caution" title="Restrict Port 22 to Your IP">
-SSH ကို အင်တာနက် တစ်ခုလုံးအတွက် ဖွင့်ထားခြင်းသည် အလိုအလျောက် စကားဝှက်ရမ်းရိုက်တိုက်ခိုက်မှုများ (brute-force attacks) ကို ဖြစ်စေနိုင်ပါသည်။ ပေါ့တ် ၂၂ ကို သင့်အိမ်/ရုံး IP သို့သာ ကန့်သတ်ရန် သင်၏ VPS ပံ့ပိုးပေးသူ၏ ဖိုင်းဝေါကို အသုံးပြုပါ။ သင့် IP ပြောင်းလဲသွားပါက ဖိုင်းဝေါ စည်းမျဉ်းကို အပ်ဒိတ်လုပ်ပါ — သို့မဟုတ် bastion host တစ်ခုကို အသုံးပြုပါ။
+Internet တစ်ခုလုံးအတွက် SSH ကို ဖွင့်ထားခဲ့မယ်ဆိုရင် အလိုအလျောက် တိုက်ခိုက်တဲ့ brute-force attacks တွေနဲ့ ကြုံတွေ့ရနိုင်ပါတယ်။ Port 22 ကို ကိုယ့်ရဲ့ Home သို့မဟုတ် Office IP မှာပဲ သုံးလို့ရအောင် VPS provider ရဲ့ firewall ထဲမှာ သတ်မှတ်ပေးပါ။ ကိုယ့် IP ပြောင်းသွားရင် firewall rule ကို ပြန်ပြင်ပေးပါ (သို့မဟုတ်) Bastion host ကို သုံးပါ။
 </Callout>
 
 ---
 
-## အဆင့် ၂ - ဆာဗာ လုံခြုံရေးမြှင့်တင်ပါ (Harden the Server)
+## Step 2: Harden the Server
 
-root အနေဖြင့် သင်၏ ဆာဗာအသစ်သို့ SSH ဖြင့် ဝင်ရောက်ပြီး ဤလုံခြုံရေး အဆင့်များကို လုပ်ဆောင်ပါ:
+Root user နဲ့ ကိုယ့် server အသစ်ထဲကို SSH ဝင်ပြီး ဒီ hardening အဆင့်တွေကို Run ပါ:
 
 ```bash
 ssh root@YOUR_VPS_IP
 ```
 
-### Root မဟုတ်သော အက်မင် အသုံးပြုသူတစ်ဦးကို ဖန်တီးပါ (Create a Non-Root Admin User)
+### Create a Non-Root Admin User
 
 ```bash
-# အသုံးပြုသူအသစ် ဖန်တီးရန်
+# User အသစ်တစ်ခု ဖန်တီးပါ
 adduser deploy
-# (ခိုင်မာသော စကားဝှက်တစ်ခု ထည့်ပါ၊ အခြားကွက်လပ်များကို ဖြည့်ပါ သို့မဟုတ် ကျော်သွားရန် Enter နှိပ်ပါ)
+# (Password ခိုင်မာတာတစ်ခုပေးပါ၊ ကျန်တဲ့ Field တွေမှာတော့ Enter ဆက်တိုက်နှိပ်ပြီး ကျော်သွားလို့ရပါတယ်)
 
-# sudo အခွင့်အရေး ပေးရန်
+# Sudo privileges ပေးပါ
 usermod -aG sudo deploy
 
-# root ၏ ခွင့်ပြုထားသော SSH გასაღေ့များကို အသုံးပြုသူအသစ်ထံ ကူးယူရန်
+# Root ရဲ့ authorized SSH keys တွေကို user အသစ်ဆီ ကူးပေးပါ
 mkdir -p /home/deploy/.ssh
 cp ~/.ssh/authorized_keys /home/deploy/.ssh/
 chown -R deploy:deploy /home/deploy/.ssh
@@ -74,62 +74,62 @@ chmod 700 /home/deploy/.ssh
 chmod 600 /home/deploy/.ssh/authorized_keys
 ```
 
-### SSH လုံခြုံရေးကို ပြင်ဆင်ပါ (Configure SSH Security)
+### Configure SSH Security
 
 ```bash
-# SSH daemon config ကို တည်းဖြတ်ရန်
+# SSH daemon config ကို Edit လုပ်ပါ
 nano /etc/ssh/sshd_config
 ```
 
-ဤတန်ဖိုးများကို သတ်မှတ်ပါ:
+ဒီ Values တွေကို ထည့်ပါ:
 ```bash
 # /etc/ssh/sshd_config — security hardening
 
-# SSH မှတစ်ဆင့် root ဖြင့် ဝင်ရောက်မှုကို ပိတ်ပါ (အစား 'deploy' အသုံးပြုသူကို သုံးပါ)
+# SSH ကနေ root နဲ့ login ဝင်တာကို ပိတ်ပါ (အဲ့ဒီအစား 'deploy' user ကို သုံးပါ)
 PermitRootLogin no
 
-# စကားဝှက်ဖြင့် အတည်ပြုခြင်းကို ပိတ်ပါ (SSH გასაღებებიသာ သုံးရန်)
+# Password authentication ကို ပိတ်ပါ (SSH keys နဲ့ပဲ ဝင်ခွင့်ပြုမယ်)
 PasswordAuthentication no
 ChallengeResponseAuthentication no
 
-# X11 forwarding ကို ပိတ်ပါ (ဆာဗာအတွက် မလိုအပ်ပါ)
+# X11 forwarding ကို ပိတ်ပါ (Server အတွက် မလိုပါဘူး)
 X11Forwarding no
 
-# သီးခြား အသုံးပြုသူများကိုသာ ခွင့်ပြုရန်
+# သတ်မှတ်ထားတဲ့ user တွေကိုပဲ ဝင်ခွင့်ပြုမယ်
 AllowUsers deploy
 
-# အသုံးမပြုဘဲ ရပ်နေသော ဆက်ရှင်များကို ဖြတ်ရန် အချိန်ကို လျှော့ချပါ
+# Idle ဖြစ်နေတဲ့ Session တွေကို ဖြတ်ပစ်ဖို့ Timeout ကို လျှော့ချပါ
 ClientAliveInterval 300
 ClientAliveCountMax 2
 ```
 
 ```bash
-# အပြောင်းအလဲများ အသက်ဝင်စေရန် SSH ကို ပြန်လည်စတင်ပါ
+# ပြောင်းလဲမှုတွေ သက်ရောက်သွားအောင် SSH ကို Restart ချပါ
 systemctl restart sshd
 
-# လက်ရှိဆက်ရှင်ကို မပိတ်မီ တာမီနယ် တက်ဘ်အသစ်တွင် စမ်းသပ်ပါ:
+# လက်ရှိ Session ကို မပိတ်ခင် Terminal Tab အသစ်တစ်ခုဖွင့်ပြီး စမ်းကြည့်ပါ:
 ssh deploy@YOUR_VPS_IP
-# အလုပ်လုပ်သင့်သည်။ အကယ်၍ အလုပ်လုပ်ပါက root ဖြင့် ဝင်ရောက်မှုကို ယခု ပိတ်ပြီးပါပြီ။
+# အလုပ်လုပ်ရပါမယ်။ အလုပ်လုပ်တယ်ဆိုရင်တော့ root login ပိတ်သွားပါပြီ။
 ```
 
-### အလိုအလျောက် လုံခြုံရေး အပ်ဒိတ်များကို ပြင်ဆင်ပါ (Configure Automatic Security Updates)
+### Configure Automatic Security Updates
 
 ```bash
-# unattended-upgrades ကို ထည့်သွင်းရန်
+# unattended-upgrades ကို Install လုပ်ပါ
 apt-get update
 apt-get install -y unattended-upgrades
 
-# အလိုအလျောက် လုံခြုံရေး အပ်ဒိတ်များကို ဖွင့်ရန်
+# Automatic security updates ကို Enable လုပ်ပါ
 dpkg-reconfigure -plow unattended-upgrades
 # Select: Yes
 
-# ပြင်ဆင်ပြီးဖြစ်ကြောင်း အတည်ပြုရန်
+# Properly configure ဖြစ်မဖြစ် စစ်ဆေးပါ
 cat /etc/apt/apt.conf.d/20auto-upgrades
 # APT::Periodic::Update-Package-Lists "1";
 # APT::Periodic::Unattended-Upgrade "1";
 ```
 
-### လိုအပ်သော ကိရိယာများကို ထည့်သွင်းပါ (Install Required Tools)
+### Install Required Tools
 
 ```bash
 apt-get install -y \
@@ -139,89 +139,89 @@ apt-get install -y \
   htop \
   jq \
   net-tools \
-  ufw    # Simple firewall wrapper (optional, use if not using VPS-level firewall)
+  ufw    # Simple firewall wrapper (optional, VPS-level firewall မသုံးဘူးဆိုမှ သုံးပါ)
 ```
 
 ---
 
-## အဆင့် ၃ - K3s ကို ထည့်သွင်းပါ (Install K3s)
+## Step 3: Install K3s
 
-K3s ကို အမိန့်တစ်ကြောင်းတည်းဖြင့် ထည့်သွင်းနိုင်ပါသည်။ ၎င်းသည် Kubernetes API server အပြည့်အစုံ၊ etcd (သို့မဟုတ် SQLite)၊ kubelet၊ kube-proxy၊ CoreDNS နှင့် Traefik တို့ကို binary တစ်ခုတည်းတွင် အားလုံး စနစ်ထည့်သွင်းပေးပါသည်။
+K3s ကို Command တစ်ခုတည်းနဲ့ Install လုပ်လို့ရပါတယ်။ သူက Kubernetes API server အပြည့်အစုံ၊ etcd (သို့မဟုတ် SQLite)၊ kubelet၊ kube-proxy၊ CoreDNS နဲ့ Traefik တို့ကို Binary တစ်ခုတည်းနဲ့ အကုန် Setup လုပ်ပေးပါတယ်။
 
 ```bash
-# deploy အသုံးပြုသူသို့ ပြောင်းရန်
+# Deploy user ထဲကို ပြောင်းဝင်ပါ
 su - deploy
 
-# K3s ကို ထည့်သွင်းရန် (နောက်ဆုံးထွက် တည်ငြိမ်သောဗားရှင်း)
+# K3s ကို Install လုပ်ပါ (Latest stable version)
 curl -sfL https://get.k3s.io | sh -s - \
-  --disable traefik \           # ပိုမိုထိန်းချုပ်နိုင်ရန် Traefik ကို သီးသန့်ထည့်သွင်းပါမည်
-  --write-kubeconfig-mode 644   # root မဟုတ်သူများ kubeconfig ကို ဖတ်ရှုခွင့်ပြုရန်
+  --disable traefik \           # Control ပိုချုပ်လို့ရအောင် Traefik ကို သီးသန့် install လုပ်မှာပါ
+  --write-kubeconfig-mode 644   # Non-root user တွေပါ kubeconfig ကို ဖတ်လို့ရအောင် လုပ်တာပါ
 
-# K3s စတင်ရန် စောင့်ပါ (စက္ကန့် ၃၀-၆၀ ကြာတတ်သည်)
+# K3s စတင်ဖို့ စောင့်ပါ (စက္ကန့် ၃၀ ကနေ ၆၀ လောက် ကြာတတ်ပါတယ်)
 sudo systemctl status k3s
 
-# နုဒ် (node) အဆင်သင့်ဖြစ်ပြီလား စစ်ဆေးရန်
+# Node ဟာ Ready ဖြစ်မဖြစ် စစ်ဆေးပါ
 sudo k3s kubectl get nodes
 # NAME        STATUS   ROLES                  AGE   VERSION
 # your-vps    Ready    control-plane,master   1m    v1.29.x+k3s1
 ```
 
 <Callout type="tip" title="Why Disable Traefik in the Installer?">
-K3s သည် မူလအားဖြင့် Traefik 2.x ပါရှိပြီးသား ဖြစ်ပါသည်။ ထည့်သွင်းစဉ်အတွင်း ၎င်းကို ပိတ်ထားခြင်းဖြင့် Traefik ကို ကျွန်ုပ်တို့၏ ကိုယ်ပိုင် values ဖိုင်ဖြင့် Helm မှတစ်ဆင့် ထည့်သွင်းနိုင်ပြီး IngressClass ဆက်တင်များ၊ ဒက်ရှ်ဘೋರ್ အသုံးပြုခွင့်နှင့် middleware ပြင်ဆင်မှုများကို အပြည့်အဝ ထန်းချုပ်နိုင်မည် ဖြစ်ပါသည်။
+K3s က Default အနေနဲ့ Traefik 2.x ပါလာပါတယ်။ Install လုပ်တဲ့အချိန်မှာ အဲ့ဒါကို Disable လုပ်လိုက်လို့ ကျွန်တော်တို့ရဲ့ ကိုယ်ပိုင် values file သုံးပြီး Traefik ကို Helm နဲ့ Install လုပ်နိုင်မှာ ဖြစ်ပါတယ်။ ဒါကြောင့် IngressClass settings၊ dashboard access နဲ့ middleware configuration တွေအပေါ်မှာ အပြည့်အဝ ထိန်းချုပ်ခွင့် ရရှိစေပါတယ်။
 </Callout>
 
-### Helm မှတစ်ဆင့် Traefik ကို ထည့်သွင်းပါ
+### Install Traefik via Helm
 
 ```bash
-# Helm ကို ထည့်သွင်းရန်
+# Helm ကို Install လုပ်ပါ
 curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
-# Traefik Helm repository ကို ပေါင်းထည့်ရန်
+# Traefik Helm repository ကို Add လုပ်ပါ
 helm repo add traefik https://traefik.github.io/charts
 helm repo update
 
-# Traefik အတွက် values ဖိုင်တစ်ခု ဖန်တီးရန်
+# Traefik အတွက် values file တစ်ခု ဖန်တီးပါ
 cat > /tmp/traefik-values.yaml << 'EOF'
 deployment:
   replicas: 1
 
 ingressClass:
   enabled: true
-  isDefaultIngressClass: true  # All Ingress objects use Traefik by default
+  isDefaultIngressClass: true  # Ingress object အားလုံးက Traefik ကို Default အနေနဲ့ သုံးမယ်
 
 ports:
   web:
     port: 8000
     exposedPort: 80
     redirectTo:
-      port: websecure           # Redirect all HTTP → HTTPS
+      port: websecure           # HTTP အားလုံးကို HTTPS ဆီ Redirect လုပ်မယ်
   websecure:
     port: 8443
     exposedPort: 443
     tls:
       enabled: true
 
-# Prometheus metrics များကို ဖွင့်ရန် (သင်ခန်းစာ ၁၀ တွင် အသုံးပြုသည်)
+# Prometheus metrics တွေကို Enable လုပ်ပါ (Lesson 10 မှာ သုံးပါမယ်)
 metrics:
   prometheus:
     enabled: true
 
-# Dashboard (kubectl port-forward ဖြင့် ဒေသတွင်းတွင် ဝင်သုံးရန်)
+# Dashboard (kubectl port-forward သုံးပြီး Local ကနေ လှမ်းဝင်ဖို့)
 dashboard:
   enabled: true
 
 logs:
   general:
-    level: WARN               # Reduce log noise in production
+    level: WARN               # Production မှာ Log တွေ ရှုပ်မနေအောင် လျှော့ထားတာပါ
 EOF
 
-# Traefik ကို ၎င်း၏ ကိုယ်ပိုင် namespace တွင် ထည့်သွင်းရန်
+# Traefik ကို သူ့ရဲ့ Namespace သီးသန့်နဲ့ Install လုပ်ပါ
 kubectl create namespace traefik
 helm install traefik traefik/traefik \
   -n traefik \
   -f /tmp/traefik-values.yaml
 
-# Traefik အလုပ်လုပ်နေကြောင်း အတည်ပြုရန်
+# Traefik Running ဖြစ်နေပြီလား စစ်ဆေးပါ
 kubectl -n traefik get pods
 # NAME                       READY   STATUS    RESTARTS   AGE
 # traefik-xxxxx              1/1     Running   0          30s
@@ -229,63 +229,63 @@ kubectl -n traefik get pods
 
 ---
 
-## အဆင့် ၄ - Remote kubectl အသုံးပြုခွင့်ကို ပြင်ဆင်ပါ (Configure Remote kubectl Access)
+## Step 4: Configure Remote kubectl Access
 
-သင်၏ လက်ပ်တော့ (နှင့် GitHub Actions) မှနေ၍ `kubectl` အမိန့်များကို လုပ်ဆောင်ရန် လိုအပ်ပါသည်။
+ကိုယ့် Laptop ကနေရော (GitHub Actions ကနေပါ) `kubectl` commands တွေကို Run နိုင်ဖို့ လိုပါတယ်။
 
 ```bash
-# VPS ပေါ်တွင်: kubeconfig ကို ရယူရန်
+# VPS ပေါ်မှာ: kubeconfig ကို ယူပါ
 sudo cat /etc/rancher/k3s/k3s.yaml
 ```
 
-ထွက်လာသော စာသားများကို ကူးယူပါ။ သင်၏ **ဒေသတွင်းစက် (local machine)** ပေါ်တွင်:
+Output ကို Copy ကူးပါ။ ကိုယ့်ရဲ့ **Local Machine** မှာ:
 
 ```bash
-# .kube လမ်းညွှန် မရှိသေးပါက ဖန်တီးရန်
+# .kube directory မရှိသေးရင် ဖန်တီးပါ
 mkdir -p ~/.kube
 
-# kubeconfig ကို ကူးထည့်ပါ (အကြောင်းအရာများကို အစားထိုးပါ)
+# Kubeconfig ကို Paste လုပ်ပါ (Content အဟောင်းကို အစားထိုးပါ)
 nano ~/.kube/config
 
-# အရေးကြီးသည်: ဆာဗာလိပ်စာကို ဤသို့ပြောင်းပါ:
+# အရေးကြီးသည်: Server address ကို အောက်ပါအတိုင်း ပြောင်းပါ
 #   server: https://127.0.0.1:6443
-# မှ ဤသို့:
-#   server: https://YOUR_VPS_IP:6443 သို့ ပြောင်းပါ
+# မှ:
+#   server: https://YOUR_VPS_IP:6443
 
-# ဒေသတွင်း အသုံးပြုခွင့်ကို အတည်ပြုရန်
+# Local access အလုပ်လုပ်မလုပ် စစ်ဆေးပါ
 kubectl get nodes
 # NAME        STATUS   ROLES                  AGE   VERSION
 # your-vps    Ready    control-plane,master   5m    v1.29.x+k3s1
 ```
 
-### Kubeconfig ကို GitHub Secret အဖြစ် သိမ်းဆည်းပါ
+### Store the Kubeconfig as a GitHub Secret
 
-CD workflow (သင်ခန်းစာ ၈) သည် သင်၏ ကလပ်စတာ (cluster) ကို ဆန့်ကျင်၍ `kubectl` အမိန့်များကို လုပ်ဆောင်ရန် လိုအပ်ပါသည်။
+CD Workflow (Lesson 8) က ကိုယ့် Cluster ပေါ်မှာ `kubectl` commands တွေ Run ဖို့ လိုအပ်ပါတယ်။
 
 ```bash
-# သင်၏ ဒေသတွင်းစက်ပေါ်တွင်: kubeconfig ကို base64 ဖြင့် ကုဒ်လုပ်ပါ
+# ကိုယ့် Local Machine မှာ: kubeconfig ကို base64 အဖြစ် encode လုပ်ပါ
 cat ~/.kube/config | base64 | tr -d '\n'
-# (ထွက်လာသည်ကို ကူးယူပါ — ၎င်းသည် ရှည်လျားသော base64 စာသားတန်းတစ်ခု ဖြစ်သည်)
+# (output ကို Copy ကူးပါ — အဲ့ဒါ Base64 string ရှည်ကြီးတစ်ခု ဖြစ်ပါတယ်)
 ```
 
-၎င်းကို GitHub Secret အဖြစ် ထည့်ပါ:
+GitHub Secret အနေနဲ့ Add လုပ်ပါ:
 1. Repository → Settings → Secrets and variables → Actions
-2. New repository secret: `KUBECONFIG_BASE64` = (base64 စာသားတန်းကို ကူးထည့်ပါ)
+2. New repository secret: `KUBECONFIG_BASE64` = (base64 string ကို Paste လုပ်ပါ)
 
 ---
 
-## အဆင့် ၅ - ထုတ်လုပ်ရေး Namespace ကို ဖန်တီးပါ (Create the Production Namespace)
+## Step 5: Create the Production Namespace
 
 ```bash
-# သင်၏ အက်ပ်နေထိုင်မည့် namespace ကို ဖန်တီးရန်
+# App တွေ နေထိုင်မယ့် Namespace ကို ဖန်တီးပါ
 kubectl create namespace production
 
-# ပိုမိုလွယ်ကူစွာ ရှာဖွေနိုင်ရန် အညွှန်း (label) တပ်ပါ
+# Query လုပ်ရ လွယ်ကူအောင် Label တပ်ပါ
 kubectl label namespace production \
   environment=production \
   managed-by=github-actions
 
-# အတည်ပြုရန်
+# စစ်ဆေးပါ
 kubectl get namespace production
 # NAME         STATUS   AGE
 # production   Active   10s
@@ -293,12 +293,12 @@ kubectl get namespace production
 
 ---
 
-## အဆင့် ၆ - cert-manager ကို ထည့်သွင်းပါ (Install cert-manager)
+## Step 6: Install cert-manager
 
-cert-manager သည် Let's Encrypt မှ TLS လက်မှတ်ထုတ်ပေးခြင်းကို အလိုအလျောက် လုပ်ဆောင်ပေးပါသည်။ ၎င်းသည် `Certificate` နှင့် `Ingress` ရင်းမြစ်များကို စောင့်ကြည့်ပြီး လက်မှတ်များကို အလိုအလျောက် ထုတ်ပေးခြင်း/သက်တမ်းတိုးခြင်း လုပ်ဆောင်ပေးပါသည်။
+cert-manager က Let's Encrypt ကနေ TLS certificate တွေကို အလိုအလျောက် ထုတ်ပေးပါတယ်။ သူက `Certificate` နဲ့ `Ingress` resources တွေကို စောင့်ကြည့်နေပြီး Certificates တွေကို အလိုအလျောက် ထုတ်ပေး/သက်တမ်းတိုးပေးပါတယ်။
 
 ```bash
-# Helm မှတစ်ဆင့် cert-manager ကို ထည့်သွင်းရန်
+# Helm သုံးပြီး cert-manager ကို Install လုပ်ပါ
 helm repo add jetstack https://charts.jetstack.io
 helm repo update
 
@@ -308,9 +308,9 @@ helm install cert-manager jetstack/cert-manager \
   -n cert-manager \
   --version v1.14.4 \
   --set installCRDs=true \
-  --set prometheus.enabled=true   # သင်ခန်းစာ ၁၀ အတွက် metrics ကို ဖွင့်ပါ
+  --set prometheus.enabled=true   # Lesson 10 အတွက် Metrics ကို Enable လုပ်ပါ
 
-# cert-manager pods များ Running ဖြစ်နေကြောင်း အတည်ပြုရန် (စက္ကန့် ၃၀-၆၀ ကြာတတ်သည်)
+# cert-manager pods တွေ Running ဖြစ်မဖြစ် စစ်ဆေးပါ (စက္ကန့် ၃၀ ကနေ ၆၀ ကြာပါတယ်)
 kubectl -n cert-manager get pods
 # NAME                                      READY   STATUS    RESTARTS
 # cert-manager-xxx                          1/1     Running   0
@@ -318,9 +318,9 @@ kubectl -n cert-manager get pods
 # cert-manager-webhook-xxx                  1/1     Running   0
 ```
 
-### Let's Encrypt ClusterIssuer ကို ဖန်တီးပါ
+### Create the Let's Encrypt ClusterIssuer
 
-`ClusterIssuer` ဆိုသည်မှာ လက်မှတ်များကို မည်သို့ရယူရမည်ကို cert-manager အား ပြောပြပေးသော cert-manager ရင်းမြစ်တစ်ခု ဖြစ်ပါသည်။ ၎င်းသည် namespace အဆင့်မဟုတ်ဘဲ ကလပ်စတာအဆင့် (cluster-scoped) ဖြစ်သောကြောင့် namespace အားလုံးက ၎င်းကို အသုံးပြုနိုင်ပါသည်။
+`ClusterIssuer` ဆိုတာ cert-manager က certificate တွေကို ဘယ်လိုရယူရမယ်ဆိုတာကို ညွှန်ပြပေးတဲ့ cert-manager resource တစ်ခု ဖြစ်ပါတယ်။ သူက Cluster တစ်ခုလုံးအတွက် သက်ရောက်ပါတယ် (namespace တစ်ခုတည်းအတွက် မဟုတ်ပါ)၊ ဒါကြောင့် Namespace အားလုံးက သုံးလို့ရပါတယ်။
 
 ```yaml
 # clusterissuer-letsencrypt.yaml
@@ -331,20 +331,20 @@ metadata:
 spec:
   acme:
     # Let's Encrypt production endpoint
-    # Rate limited: 50 certificates per domain per week
+    # Rate limited: Domain တစ်ခုကို တစ်ပတ်မှ 50 certificates ပဲ ရမယ်
     server: https://acme-v02.api.letsencrypt.org/directory
-    email: your-email@example.com  # ← သင့်အီးမေးလ်ဖြင့် အစားထိုးပါ (သက်တမ်းကုန်ဆုံးမည့် သတိပေးချက်များအတွက် သုံးသည်)
+    email: your-email@example.com  # ← ကိုယ့်အီးမေးလ်နဲ့ အစားထိုးပါ (သက်တမ်းကုန်မယ့် သတိပေးချက်တွေ ပို့ဖို့ သုံးပါတယ်)
     privateKeySecretRef:
       name: letsencrypt-prod-account-key
     solvers:
       - http01:
           ingress:
-            class: traefik  # HTTP challenge solver အဖြစ် Traefik ကို သုံးပါ
+            class: traefik  # HTTP challenge solver အနေနဲ့ Traefik ကို သုံးမယ်
 ```
 
 ```yaml
 # clusterissuer-letsencrypt-staging.yaml
-# စမ်းသပ်နေစဉ်အတွင်း rate limit ပြဿနာများကို ရှောင်ရှားရန် ဤဟာကို အရင်သုံးပါ
+# Testing လုပ်နေတုန်း Rate limit ပြဿနာ မတက်အောင် ဒါကို အရင်သုံးပါ
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:
@@ -362,11 +362,11 @@ spec:
 ```
 
 ```bash
-# Issuers နှစ်ခုစလုံးကို အသက်သွင်းရန်
+# Issuers နှစ်ခုစလုံးကို Apply လုပ်ပါ
 kubectl apply -f clusterissuer-letsencrypt.yaml
 kubectl apply -f clusterissuer-letsencrypt-staging.yaml
 
-# Ready ဖြစ်နေကြောင်း အတည်ပြုရန်
+# Ready ဖြစ်မဖြစ် စစ်ဆေးပါ
 kubectl get clusterissuer
 # NAME                    READY   AGE
 # letsencrypt-prod        True    30s
@@ -374,41 +374,41 @@ kubectl get clusterissuer
 ```
 
 <Callout type="warning" title="Always Test with Staging First">
-Let's Encrypt production တွင် နှုန်းသတ်မှတ်ချက်များ (rate limits) ရှိပါသည်: တစ်ပတ်လျှင် ဒိုမိန်းတစ်ခုအတွက် လက်မှတ် ၅၀ ဖြစ်သည်။ အမှားရှာဖွေနေစဉ် (debugging) ကန့်သတ်ချက်သို့ ရောက်ရှိသွားပါက ရက် ၇ ရက်တိုင်တိုင် လက်မှတ်အသစ်များ ထုတ်ယူ၍မရအောင် ပိတ်ပင်ခံရမည် ဖြစ်ပါသည်။ ဖွံ့ဖြိုးတိုးတက်ရေးအဆင့်တွင် Staging ClusterIssuer ကို အသုံးပြုပါ — စတိတ်ဂျင်း လက်မှတ်များကို ဘရောက်ဆာများက ယုံကြည်မှုမရှိသော်လည်း လက်မှတ်ထုတ်ပေးသည့် စီးဆင်းမှုကို စမ်းသပ်ရန်အတွက်မူ အတူတူပင် အလုပ်လုပ်ပါသည်။
+Let's Encrypt production မှာ Rate limits ရှိပါတယ်: Register လုပ်ထားတဲ့ Domain တစ်ခုကို တစ်ပတ်မှ Certificate 50 ခုပဲ ရပါတယ်။ Debug လုပ်နေတုန်း Limit ပြည့်သွားရင် ၇ ရက်တိတိ အသစ်ထပ်ယူလို့ မရတော့ပါဘူး။ Development လုပ်နေစဉ် Staging `ClusterIssuer` ကိုပဲ သုံးပါ — Staging certificates တွေကို Browser တွေက မယုံကြည်ကြပေမယ့် Certificate ထုတ်ပေးတဲ့ Flow ကို Test ဖို့အတွက်တော့ အတူတူပါပဲ။
 </Callout>
 
 ---
 
-## အဆင့် ၇ - GitHub Actions အတွက် Deploy SSH Key ကို ဖန်တီးပါ
+## Step 7: Create the Deploy SSH Key for GitHub Actions
 
-CD workflow သည် `kubectl apply` ကို လုပ်ဆောင်ရန် သို့မဟုတ် ပုံရိပ် အပ်ဒိတ်များကို စတင်ရန် သင့်ဆာဗာသို့ SSH ဖြင့် ဝင်ရောက်ရန် လိုအပ်ပါသည်။ သီးသန့် deploy key တစ်ခုကို ဖန်တီးပါ:
+CD Workflow က `kubectl apply` Run ဖို့ သို့မဟုတ် Image Update လုပ်ဖို့ Server ထဲကို SSH ဝင်နိုင်ဖို့ လိုပါတယ်။ Deploy key သီးသန့်တစ်ခု ဖန်တီးပါ:
 
 ```bash
-# သင်၏ ဒေသတွင်းစက်ပေါ်တွင်: သီးသန့် deploy key တစ်ခုကို ဖန်တီးပါ (passphrase မပါဘဲ)
+# ကိုယ့် LOCAL machine မှာ: Deploy key သီးသန့်တစ်ခု ဖန်တီးပါ (Passphrase မပါပါ)
 ssh-keygen -t ed25519 -C "github-actions-deploy" -f ~/.ssh/deploy_key -N ""
 
-# Public key ကို ဆာဗာသို့ ကူးယူပါ
+# Public key ကို Server ဆီ ကူးပေးပါ
 ssh-copy-id -i ~/.ssh/deploy_key.pub deploy@YOUR_VPS_IP
 
-# သို့မဟုတ် ကိုယ်တိုင်:
+# (သို့မဟုတ်) လက်ဖြင့် လုပ်ချင်ရင်:
 cat ~/.ssh/deploy_key.pub | ssh deploy@YOUR_VPS_IP \
   "cat >> ~/.ssh/authorized_keys"
 ```
 
-Private key ကို GitHub Secret အဖြစ် ထည့်ပါ:
+Private key ကို GitHub Secret အနေနဲ့ Add လုပ်ပါ:
 ```bash
 # Private key ကို ထုတ်ပြပါ
 cat ~/.ssh/deploy_key
-# (BEGIN နှင့် END လိုင်းများအပါအဝင် အထွက်စာသား အားလုံးကို ကူးယူပါ)
+# (BEGIN နဲ့ END စာကြောင်းတွေ အပါအဝင် Output တစ်ခုလုံးကို Copy ကူးပါ)
 ```
 
 Repository → Settings → Secrets → New:
-- `SSH_PRIVATE_KEY` = (private key ကို ကူးထည့်ပါ)
+- `SSH_PRIVATE_KEY` = (Private key ကို Paste လုပ်ပါ)
 - `SSH_HOST` = `YOUR_VPS_IP`
 - `SSH_USER` = `deploy`
 
 ```bash
-# ချိတ်ဆက်မှု အလုပ်လုပ်ကြောင်း စမ်းသပ်ပါ (GitHub Actions က ဤဟာကို သုံးပါလိမ့်မည်)
+# ချိတ်ဆက်မှု အလုပ်လုပ်မလုပ် စစ်ဆေးပါ (GitHub Actions က ဒါကို သုံးပါလိမ့်မယ်)
 ssh -i ~/.ssh/deploy_key deploy@YOUR_VPS_IP "kubectl get nodes"
 # NAME        STATUS   ROLES                  AGE
 # your-vps    Ready    control-plane,master   20m
@@ -416,50 +416,50 @@ ssh -i ~/.ssh/deploy_key deploy@YOUR_VPS_IP "kubectl get nodes"
 
 ---
 
-## အဆင့် ၈ - ပြီးပြည့်စုံသော စနစ်ထည့်သွင်းမှုကို အတည်ပြုပါ (Verify the Complete Setup)
+## Step 8: Verify the Complete Setup
 
-သင်ခန်းစာ ၇ သို့ မသွားမီ ဤစစ်ဆေးစာရင်း (checklist) ကို လုပ်ဆောင်ပါ:
+Lesson 7 ကို မသွားခင် ဒီ Checklist ကို Run စစ်ဆေးပါ:
 
 ```bash
-# ✅ K3s အလုပ်လုပ်နေသည်
+# ✅ K3s Running ဖြစ်နေပြီ
 sudo systemctl is-active k3s
 # active
 
-# ✅ Node အဆင်သင့်ဖြစ်နေသည်
+# ✅ Node ဟာ Ready ဖြစ်နေပြီ
 kubectl get nodes
 # Ready
 
-# ✅ Traefik အလုပ်လုပ်နေသည်
+# ✅ Traefik Running ဖြစ်နေပြီ
 kubectl -n traefik get pods
 # Running
 
-# ✅ cert-manager အလုပ်လုပ်နေသည်
+# ✅ cert-manager Running ဖြစ်နေပြီ
 kubectl -n cert-manager get pods
 # All Running
 
-# ✅ ClusterIssuers များ အဆင်သင့်ဖြစ်နေသည်
+# ✅ ClusterIssuers တွေ Ready ဖြစ်နေပြီ
 kubectl get clusterissuer
 # letsencrypt-prod: True
 # letsencrypt-staging: True
 
-# ✅ production namespace ရှိနေသည်
+# ✅ production namespace ရှိနေပြီ
 kubectl get namespace production
 # Active
 
-# ✅ SSH deploy key အလုပ်လုပ်သည်
+# ✅ SSH deploy key အလုပ်လုပ်တယ်
 ssh -i ~/.ssh/deploy_key deploy@YOUR_VPS_IP "echo 'SSH works'"
 # SSH works
 
-# ✅ Remote kubectl အလုပ်လုပ်သည်
+# ✅ Remote kubectl အလုပ်လုပ်တယ်
 kubectl --kubeconfig ~/.kube/config get pods -A
-# (namespace အားလုံးရှိ pods အားလုံးကို ပြသသည်)
+# (Namespace အားလုံးမှာရှိတဲ့ Pod တွေကို ပြပါလိမ့်မယ်)
 ```
 
 ---
 
-## K3s ဗိသုကာကို နားလည်ခြင်း (Understanding the K3s Architecture)
+## Understanding the K3s Architecture
 
-K3s သည် control plane နှင့် data plane ကို (နုဒ်တစ်ခုတည်းပါသော ကလပ်စတာတွင်) ပေါင်းစပ်ထားသော binary တစ်ခုအနေဖြင့် အလုပ်လုပ်သည်:
+K3s က Control plane နဲ့ Data plane ကို ပေါင်းစပ်ထားတဲ့ Single binary အနေနဲ့ (Single-node cluster တစ်ခုပေါ်မှာ) Run ပါတယ်။
 
 ```mermaid
 flowchart TD
@@ -499,47 +499,47 @@ flowchart TD
     KUBELET --> LOCALPATH
 ```
 
-K3s သည် မူလအားဖြင့် etcd အစား **SQLite** ကို အသုံးပြုပါသည်။ နုဒ်တစ်ခုတည်းပါသော ကလပ်စတာအတွက် ဤသည်မှာ အဆင်ပြေပါသည်။ နုဒ်များစွာပါသော HA အတွက်ဆိုပါက embedded etcd သို့မဟုတ် အပြင်ဘက် ဒေတာဘေ့စ်တစ်ခုကို အသုံးပြုရပါမည်။
+K3s ဟာ Default အနေနဲ့ etcd အစား **SQLite** ကို သုံးပါတယ်။ Single-node cluster တစ်ခုအတွက် ဒါက အဆင်ပြေပါတယ်။ Multi-node HA အတွက်ဆိုရင်တော့ Embedded etcd သို့မဟုတ် External database ကို သုံးရပါမယ်။
 
 ---
 
-## ဖြစ်လေ့ရှိသော ပြဿနာများကို ဖြေရှင်းခြင်း (Troubleshooting Common Issues)
+## Troubleshooting Common Issues
 
-### K3s စတင်မလာပါ
+### K3s စတင်လို့ မရဘူး
 ```bash
-# လော့ဂ်များကို စစ်ဆေးရန်
+# Logs တွေကို စစ်ဆေးပါ
 sudo journalctl -u k3s -f --no-pager
 
-# အဖြစ်များသော ပြုပြင်မှု: ပေါ့တ် ၆၄၄၃ နှင့် ၁၀၂၅၀ တို့ကို ဖိုင်းဝေါက ပိတ်ဆို့မထားကြောင်း သေချာစေပါ
+# အဖြစ်များတဲ့ ဖြေရှင်းနည်း: Port 6443 နဲ့ 10250 တွေကို Firewall က ပိတ်ထားခြင်း မရှိကြောင်း သေချာပါစေ
 sudo ss -tlnp | grep 6443
 ```
 
-### Kubernetes API သို့ "Connection refused" ဖြစ်နေသည်
+### Kubernetes API ကို "Connection refused" ဖြစ်နေတယ်
 ```bash
-# K3s API server နားထောင်နေကြောင်း အတည်ပြုရန်
+# K3s API server Listen လုပ်နေမနေ စစ်ဆေးပါ
 curl -k https://YOUR_VPS_IP:6443/healthz
 # ok
 
-# ဖိုင်းဝေါက သင့် IP မှ ပေါ့တ် ၆၄၄၃ ကို ခွင့်ပြုထားကြောင်း စစ်ဆေးပါ
-ufw status  # သို့မဟုတ် VPS ပံ့ပိုးပေးသူ ဖိုင်းဝေါ စည်းမျဉ်းများကို စစ်ဆေးပါ
+# Firewall က သင့် IP ကနေ Port 6443 ကို ဝင်ခွင့်ပေးထားမပေး စစ်ဆေးပါ
+ufw status  # (သို့မဟုတ် VPS provider ရဲ့ firewall rules တွေကို စစ်ပါ)
 ```
 
-### cert-manager webhook မအောင်မြင်ပါ
+### cert-manager webhook Error တက်နေတယ်
 ```bash
 kubectl -n cert-manager describe pod -l app=cert-manager-webhook
-# အများအားဖြင့် အချိန်ကိုက်ပြဿနာဖြစ်သည် — စက္ကန့် ၆၀ စောင့်ပြီး ပြန်ကြိုးစားပါ
+# အများအားဖြင့် Timing ပြဿနာပါ — စက္ကန့် ၆၀ လောက်စောင့်ပြီး ထပ်ကြိုးစားပါ
 ```
 
 ---
 
-## အကျဉ်းချုပ်
+## Summary
 
-သင်၏ ထုတ်လုပ်ရေးဆာဗာသည် ယခုအခါ အဆင်သင့်ဖြစ်နေပါပြီ:
-- SSH key ဖြင့်သာ ဝင်ရောက်ခြင်း၊ root ဖြင့် ဝင်ရောက်မှုကို ပိတ်ထားခြင်းနှင့် အလိုအလျောက် လုံခြုံရေး အပ်ဒိတ်များပါရှိသော **Ubuntu 22.04**
-- Traefik ingress controller (K3s မူလအတိုင်းမဟုတ်ဘဲ Helm ဖြင့်) ထည့်သွင်းထားသော **K3s**
-- လက်ပ်တော့မှ လှမ်းသုံးနိုင်ပြီး GitHub Secret အဖြစ် သိမ်းဆည်းထားသော **Remote `kubectl` အသုံးပြုခွင့်**
-- စတိတ်ဂျင်းနှင့် ထုတ်လုပ်ရေး Let's Encrypt ClusterIssuers များပါရှိသော **cert-manager**
-- ဖန်တီးပြီး အညွှန်းတပ်ထားသော **`production` namespace**
-- ဆာဗာတွင် ထည့်သွင်းပြီး GitHub Secrets တွင် သိမ်းဆည်းထားသော **Deploy SSH key**
+သင့်ရဲ့ Production server အဆင်သင့် ဖြစ်သွားပါပြီ:
+- **Ubuntu 22.04** ကို SSH key-only auth၊ root login ပိတ်ထားခြင်း၊ automatic security updates တွေနဲ့ လုံခြုံရေးပြင်ဆင်ပြီးသား
+- **K3s** ကို Traefik ingress controller နဲ့တကွ Install ပြီးသား (K3s default ကို မသုံးဘဲ Helm နဲ့ သွင်းထားတာပါ)
+- **Remote `kubectl` access** ကို Laptop ကနေ သုံးလို့ရအောင် လုပ်ထားပြီး GitHub Secret အနေနဲ့ သိမ်းဆည်းပြီးသား
+- **cert-manager** မှာ Staging နဲ့ Production Let's Encrypt `ClusterIssuers` နှစ်ခုစလုံး ပါဝင်ပြီးသား
+- **`production` namespace** ဖန်တီးပြီး Label တပ်ပြီးသား
+- **Deploy SSH key** ကို Server ပေါ် တင်ထားပြီး GitHub Secrets ထဲမှာ ထည့်ပြီးသား
 
-နောက်သင်ခန်းစာတွင်၊ ကလပ်စတာအတွင်းရှိ သင့်အက်ပ်၏ လိုချင်သော အနေအထားကို သတ်မှတ်ပေးသည့် Kubernetes manifests များကို (Deployment, Service, Ingress, ConfigMap, Secret) ရေးသားရမည် ဖြစ်ပါသည်။
+နောက် Lesson မှာတော့ သင့်ရဲ့ Application ရဲ့ လိုချင်တဲ့ ပုံစံ (Desired state) ကို Cluster ထဲမှာ သတ်မှတ်ပေးမယ့် Kubernetes manifests တွေကို (Deployment, Service, Ingress, ConfigMap, Secret) ရေးသားသွားမှာ ဖြစ်ပါတယ်။

@@ -1,25 +1,25 @@
 ---
-title: "Artifact စီမံခန့်ခွဲမှု၊ ပြင်ဆင်ပြောင်းလဲ၍မရနိုင်မှု (Immutability) နှင့် Provenance"
+title: "Artifact Management, Immutability & Provenance"
 ---
 
-# Build Artifact ဆိုတာ ဘာလဲ?
+# Build Artifact ဆိုတာ What Is?
 
-Artifact ဆိုသည်မှာ CI pipeline တစ်ခုမှ ထွက်ရှိလာသော မပြောင်းလဲနိုင်သည့် (immutable)၊ စမ်းသပ်စစ်ဆေးပြီးသား output တစ်ခုဖြစ်ပြီး production သို့ တကယ်တမ်း deploy လုပ်မည့် အရာဖြစ်ပါသည်။ Artifact အမျိုးအစားများသည် ဆယ်စုနှစ်များတစ်လျှောက် သိသာစွာ ပြောင်းလဲတိုးတက်လာခဲ့သည်-
+Artifact ဆိုတာ CI pipeline ကနေ ထွက်လာတဲ့ immutable ဖြစ်ပြီး test ပြီးသား output တစ်ခုဖြစ်ပါတယ် — ဒါကတော့ production ကို တကယ် deploy လုပ်မယ့် item ပါပဲ။ Artifact ရဲ့ ပုံစံက ဆယ်စုနှစ်တွေအတွင်း အများကြီး ဖွံ့ဖြိုးတိုးတက်လာခဲ့ပါတယ်:
 
 | Era | Artifact Type | Example | Problem |
 |-----|--------------|---------|---------|
-| **1990s** | Raw binary / zip | `app.war`, `app.zip` | "ငါ့စက်ထဲမှာတော့ အလုပ်လုပ်တယ်" ("It works on my machine") |
-| **2000s** | VM image | AWS AMI, OVA | ဖိုင်အရွယ်အစားကြီးမားခြင်း (GB)၊ လွှဲပြောင်းရန် နှေးကွေးခြင်း |
-| **2010s** | Container image | Docker image | ✅ နေရာတိုင်းသယ်ဆောင်ရလွယ်ကူခြင်း (Portable)၊ မြန်ဆန်ခြင်း၊ layered ဖြစ်ခြင်း |
-| **Today** | OCI image + SBOM + signature | Signed Docker image | ✅ + လုံခြုံစိတ်ချရခြင်း၊ စစ်ဆေးစိစစ်နိုင်ခြင်း (Auditable) |
+| **1990s** | Raw binary / zip | `app.war`, `app.zip` | "It works on my machine" |
+| **2000s** | VM image | AWS AMI, OVA | ကြီးမားတယ် (GB), transfer လုပ်ဖို့ နှေးကွေးတယ် |
+| **2010s** | Container image | Docker image | ✅ Portable ဖြစ်တယ်, မြန်တယ်, layered ဖြစ်တယ် |
+| **Today** | OCI image + SBOM + signature | Signed Docker image | ✅ + secure ဖြစ်တယ်, auditable ဖြစ်တယ် |
 
-ခေတ်သစ် စံသတ်မှတ်ချက်မှာ **OCI container image** ဖြစ်ပြီး application နှင့် ၎င်း၏ တိကျသော runtime environment ကို တွဲဖက်ထုပ်ပိုးထားသည့် portable ဖြစ်သော၊ layered ဖြစ်သော၊ content-addressed package တစ်ခုဖြစ်ပါသည်။
+ခေတ်မီ standard ကတော့ **OCI container image** ဖြစ်ပါတယ် — ဒါက application နဲ့ သူ့ရဲ့ exact runtime environment ကို ပေါင်းစပ်ပေးထားတဲ့ portable ဖြစ်ပြီး၊ layered ဖြစ်ကာ content-addressed ဖြစ်တဲ့ package တစ်ခုပဲ ဖြစ်ပါတယ်။
 
 ---
 
 ## The Immutable Server Pattern
 
-Artifact စီမံခန့်ခွဲမှုတွင် အရေးအကြီးဆုံးမူဝါဒမှာ - **artifact တစ်ခုကို build လုပ်ပြီး စမ်းသပ်ပြီးပါက ၎င်းကို မည်သည့်အခါမျှ ထပ်မံပြင်ဆင်ခြင်း မပြုလုပ်ရပါ**။
+Artifact management မှာ အရေးကြီးဆုံး principle ကတော့: **artifact တစ်ခုကို build ပြီး test ပြီးသွားရင် ဘယ်တော့မှ ပြန်မပြင်တော့ပါဘူး** (once an artifact is built and tested, it is never modified)။
 
 ```mermaid
 flowchart LR
@@ -40,12 +40,12 @@ flowchart LR
     end
 ```
 
-**Configuration Drift** ဆိုသည်မှာ ပြင်ဆင်ပြောင်းလဲနိုင်သော (mutable) ဆာဗာများသည် အချိန်ကြာလာသည်နှင့်အမျှ တစ်ခုနှင့်တစ်ခု မတူညီဘဲ ကွဲပြားသွားခြင်းကို ဆိုလိုပါသည်။ SSH ဝင်ရောက်မှုတိုင်း၊ ကိုယ်တိုင် manual ဝင်ပြင်ဆင်မှု (hotfix) တိုင်း၊ တစ်ကြိမ်သုံး `apt-get` တိုင်းသည် ဆာဗာတစ်ခုစီကို သီးခြားဆန်သော "snowflake" (တစ်မူထူးခြားနေသည့် အခြေအနေ) ဖြစ်သွားစေပြီး ပြန်လည်တည်ဆောက်ရန် မဖြစ်နိုင်တော့ခြင်း၊ ယုံကြည်စိတ်ချစွာ debug ပြုလုပ်ရန် မဖြစ်နိုင်တော့ခြင်းနှင့် စိတ်ချလက်ချ scale ချဲ့ရန် မဖြစ်နိုင်တော့ခြင်းတို့ကို ဖြစ်စေပါသည်။
+Mutable server တွေဟာ အချိန်ကြာလာတာနဲ့အမျှ ကွဲလွဲလာတာကို **Configuration Drift** လို့ ခေါ်ပါတယ်။ SSH session တိုင်း၊ manual hotfix တိုင်းနဲ့ တစ်ခါသုံး `apt-get` တိုင်းဟာ server တိုင်းကို ဘယ်သူမှ အပြည့်အဝ နားမလည်နိုင်တဲ့, debug လုပ်လို့ မရနိုင်တဲ့, reliable ဖြစ်အောင် scale လုပ်လို့ မရနိုင်တဲ့ unique "snowflake" တစ်ခုအဖြစ် တဖြည်းဖြည်း ပြောင်းလဲသွားစေပါတယ်။
 
-Immutable artifacts များကို အသုံးပြုခြင်းဖြင့်-
-- Staging နှင့် Production တို့သည် **လုံးဝတူညီသော image** (တူညီသော SHA256 digest) ကို အသုံးပြုလည်ပတ်နိုင်မည်
-- Rollback ပြုလုပ်ခြင်းဆိုသည်မှာ "ယခင် image tag အဟောင်းသို့ ပြန်ပြောင်းခြင်း" ဖြစ်ပြီး code ပြင်ဆင်ရန် သို့မဟုတ် pipeline ပြန် run ရန် မလိုတော့ပါ
-- ဆာဗာတိုင်းကို အစားထိုးနိုင်သည် — ဆာဗာတစ်ခု ပျက်စီးသွားပါက ဖျက်ပစ်ပြီး တူညီသော image ဖြင့် အသစ်တစ်ခု ချက်ချင်း run နိုင်သည်
+Immutable artifact တွေနဲ့ဆိုရင်တော့:
+- Staging နဲ့ Production တို့ဟာ **exact same image** ကို run ကြပါတယ် (same SHA256 digest)
+- Rollback လုပ်တယ်ဆိုတာ "previous image tag ကို switch လုပ်တာ" ကို ဆိုလိုပါတယ် — code වෙනလဲစရာမလို၊ pipeline ထပ် run စရာမလိုပါဘူး
+- Server တိုင်းကို replace လုပ်လို့ရပါတယ် — တစ်ခုကို destroy လို့, image တူတူနဲ့ အသစ်တစ်ခုကို spin up လိုက်လို့ရပါတယ်
 
 ---
 
@@ -69,23 +69,23 @@ flowchart TD
     NOTE["⚠️ If you rebuild between Staging and Production:\na library dependency may have been updated by its maintainer.\nYou are no longer deploying the code you tested."]
 ```
 
-Environment တစ်ခုနှင့်တစ်ခုကြားတွင် သင့် image ကို ဘယ်တော့မှ ထပ်မံ rebuild မလုပ်ပါနှင့်။ Image ၏ SHA256 digest သည် သင်စမ်းသပ်ထားသောအရာနှင့် သင်လက်တွေ့ run နေသောအရာ အမှန်တကယ်တူညီကြောင်း အာမခံချက်ဖြစ်ပါသည်။
+Environment တွေကြားမှာ image ကို ဘယ်တော့မှ ထပ်မံ build မလုပ်ပါနဲ့။ Image ရဲ့ SHA256 digest ဟာ ကိုယ် test ပြီးသားဟာကိုပဲ run နေတယ်ဆိုတဲ့ အာမခံချက်ဖြစ်ပါတယ်။
 
 ---
 
-## Tagging Strategy: `:latest` တစ်ခုတည်းကို ဘယ်တော့မှ မသုံးပါနှင့်
+## Tagging Strategy: Never Use `:latest` Alone
 
 ```
 ❌ Anti-pattern: tagging everything as :latest
-   - Deployment: docker pull myapp:latest  → Could be any version
-   - Rollback: docker pull myapp:latest    → Still the broken version!
-   - Debugging: what code is running?      → No idea
+   - Deployment: docker pull myapp:latest  → ဘယ် version ဖြစ်မှန်း မသိနိုင်ပါ
+   - Rollback: docker pull myapp:latest    → ပျက်နေတဲ့ version ပဲ ဆက်ဖြစ်နေမှာပါ!
+   - Debugging: ဘယ် code က run နေတာလဲ?      → လုံးဝ မသိနိုင်ပါ
 
 ✅ Production tagging strategy:
-   myapp:abc1234        ← Git SHA (immutable, links to exact commit)
-   myapp:v1.5.2         ← SemVer (human-readable release version)
-   myapp:main           ← Latest commit on main branch
-   myapp:latest         ← Convenience alias (mutable — for human use only)
+   myapp:abc1234        ← Git SHA (immutable ဖြစ်တယ်, exact commit နဲ့ ချိတ်ဆက်ပေးတယ်)
+   myapp:v1.5.2         ← SemVer (လူတွေ ဖတ်လို့ရတဲ့ release version)
+   myapp:main           ← main branch ပေါ်က Latest commit
+   myapp:latest         ← အဆင်ပြေစေဖို့သုံးတဲ့ alias (mutable ဖြစ်တယ် — လူသုံးဖို့အတွက်သာ ဖြစ်ပါတယ်)
 ```
 
 ```bash
@@ -113,42 +113,42 @@ docker push ghcr.io/yourorg/myapp --all-tags
 
 ---
 
-## သင့်လျော်သော Container Registry ကို ရွေးချယ်ခြင်း
+## Choosing the Right Container Registry
 
-| Registry | အကောင်းဆုံး အသုံးဝင်ပုံ | Auth | ကုန်ကျစရိတ် |
+| Registry | Best For | Auth | Cost |
 |---------|---------|------|------|
-| **GitHub GHCR** (`ghcr.io`) | GitHub projects များအတွက် | GitHub token | Public အတွက် အခမဲ့၊ GitHub plans များတွင် ပါဝင်ပြီး |
-| **Docker Hub** (`docker.io`) | Open-source public images များအတွက် | Docker token | အခမဲ့ (rate limit ရှိ)၊ Private အတွက် အခပေး |
-| **AWS ECR** | AWS (ECS/EKS) deployment များအတွက် | IAM roles | သိုလှောင်မှု $0.10/GB |
-| **Google Artifact Registry** | GCP (GKE) deployment များအတွက် | Service accounts | သိုလှောင်မှု $0.10/GB |
-| **Azure Container Registry** | Azure (AKS) deployment များအတွက် | Service principals | Tier အလိုက် ကုန်ကျစရိတ် |
-| **Harbor** (self-hosted) | Air-gapped / Enterprise များအတွက် | Internal | Infrastructure ကုန်ကျစရိတ်သာ ရှိ |
+| **GitHub GHCR** (`ghcr.io`) | GitHub projects | GitHub token | Public အတွက် Free; GitHub plans တွေနဲ့ တွဲပါပြီးသား |
+| **Docker Hub** (`docker.io`) | Open-source public images | Docker token | Free (rate limited ရှိ); private အတွက် paid ဖြစ်ပါတယ် |
+| **AWS ECR** | AWS (ECS/EKS) deployments | IAM roles | $0.10/GB storage |
+| **Google Artifact Registry** | GCP (GKE) deployments | Service accounts | $0.10/GB storage |
+| **Azure Container Registry** | Azure (AKS) deployments | Service principals | Tiered pricing |
+| **Harbor** (self-hosted) | Air-gapped / enterprise | Internal | Infrastructure cost only |
 
-### Registry ဆိုင်ရာ အကောင်းဆုံး လုပ်ထုံးလုပ်နည်းများ (Best Practices)
+### Registry Best Practices
 
 ```bash
-# Use image digest (immutable) not just tag (mutable) in production
-# Tag can be overwritten — digest cannot
+# Production မှာ tag (mutable) တစ်ခုတည်းကို မသုံးဘဲ image digest (immutable) ကို သုံးပါ
+# Tag ကို overwrite လုပ်လို့ရပေမဲ့ — digest ကို မရပါဘူး
 docker pull ghcr.io/yourorg/myapp:v1.5.2
 # → sha256:a1b2c3d4e5f6...
 
-# Reference by digest in Kubernetes (truly immutable)
+# Kubernetes မှာ digest နဲ့ ညွှန်းဆိုပါ (truly immutable ဖြစ်စေပါတယ်)
 image: ghcr.io/yourorg/myapp@sha256:a1b2c3d4e5f6...
 
-# Enable content trust (verify signed images before pull)
+# Enable content trust (pull မလုပ်ခင် signed image တွေကို verify လုပ်ပါ)
 export DOCKER_CONTENT_TRUST=1
 docker pull ghcr.io/yourorg/myapp:v1.5.2
-# Validates signature before accepting image
+# Image ကို လက်မခံခင် signature ကို validate လုပ်ပါတယ်
 
-# Set up registry garbage collection to clean old images
-# (Registries grow large over time — tag pruning is essential)
+# ပုံဟောင်းများကို ရှင်းလင်းရန် registry garbage collection ကို သတ်မှတ်ပါ
+# (Registry တွေက အချိန်ကြာလာတာနဲ့အမျှ ကြီးလာတတ်ပါတယ် — tag pruning က အလွန်အရေးကြီးပါတယ်)
 ```
 
 ---
 
 ## Software Bill of Materials (SBOM)
 
-SBOM ဆိုသည်မှာ သင့် artifact အတွင်းရှိ အစိတ်အပိုင်းတိုင်း (OS package တိုင်း၊ npm library တိုင်း၊ ဆက်စပ်နေသော transitive dependency တိုင်း) ၏ ကွန်ပျူတာဖတ်ရှုနိုင်သော စာရင်းအင်း (inventory) တစ်ခုဖြစ်ပါသည်။ ၎င်းသည် သင့် software အတွက် ပါဝင်ပစ္စည်းများစာရင်း (ingredient list) ပင် ဖြစ်သည်။
+SBOM ဆိုတာ artifact တစ်ခုထဲမှာ ပါဝင်တဲ့ component တိုင်း — OS package တိုင်း၊ npm library တိုင်း၊ transitive dependency တိုင်းရဲ့ machine-readable inventory တစ်ခုပဲ ဖြစ်ပါတယ်။ ဒါက ကိုယ့် software အတွက် ပါဝင်ပစ္စည်းစာရင်း (ingredient list) ပဲ ဖြစ်ပါတယ်။
 
 ```bash
 # Generate SBOM using Syft
@@ -171,36 +171,36 @@ cosign attest \
   ghcr.io/yourorg/myapp:v1.5.2
 ```
 
-**SBOMs အဘယ်ကြောင့် အရေးကြီးသနည်း**-
-- **Log4Shell (CVE-2021-44228)**- အဆိုပါ အလွန်စိုးရိမ်ရသော Java လုံခြုံရေးအားနည်းချက် ထွက်ပေါ်လာချိန်တွင် SBOM မရှိသော အဖွဲ့များသည် ၎င်းတို့၏ application များ ထိခိုက်မှုရှိမရှိကို ရက်ပေါင်းများစွာ အချိန်ယူ၍ manual စစ်ဆေးခဲ့ကြရသည်။ SBOM ရှိသော အဖွဲ့များမှာမူ ၎င်းတို့၏ inventory ထဲတွင် ရှာဖွေမှုတစ်ခု ပြုလုပ်ရုံဖြင့် မိနစ်ပိုင်းအတွင်း အဖြေတိကျစွာ ရရှိခဲ့ကြသည်။
-- **ဥပဒေနှင့် စည်းမျဉ်းလိုက်နာမှု (Regulatory compliance)**- NIST SP 800-218၊ FedRAMP နှင့် PCI DSS ကဲ့သို့သော စံသတ်မှတ်ချက်များသည် software supply chain လုံခြုံရေးအတွက် SBOM များကို မဖြစ်မနေ လိုအပ်ချက်တစ်ခုအဖြစ် ပိုမိုသတ်မှတ်လာကြသည်။
+**SBOM တွေက ဘာကြောင့် အရေးကြီးတာလဲ**:
+- **Log4Shell (CVE-2021-44228)**: ဒီလို Java vulnerability ကြီး ထွက်လာတဲ့အခါ SBOM မရှိတဲ့ team တွေဟာ ကိုယ့် application တွေ ထိခိုက်မှုရှိမရှိ ရက်ပေါင်းများစွာ manual လိုက်စစ်ခဲ့ရပါတယ်။ SBOM ရှိတဲ့ team တွေကတော့ inventory ထဲမှာ search လုပ်လိုက်ရုံနဲ့ မိနစ်ပိုင်းအတွင်း အဖြေအပြည့်အစုံ ရရှိခဲ့ပါတယ်။
+- **Regulatory compliance**: NIST SP 800-218၊ FedRAMP နဲ့ PCI DSS တို့က software supply chain security အတွက် SBOM တွေကို ပိုမိုတောင်းဆိုလာကြပါပြီ။
 
 ---
 
-## Cosign (Sigstore) ဖြင့် Image Signing ပြုလုပ်ခြင်း
+## Image Signing with Cosign (Sigstore)
 
-Image signing သည် သတ်မှတ်ထားသော image တစ်ခုကို သင်ယုံကြည်ရသော CI pipeline မှ ထုတ်လုပ်ထားခြင်းဖြစ်ပြီး တစ်စုံတစ်ရာ ပြင်ဆင်ဖျက်ဆီးထားခြင်း (tampered) မရှိကြောင်း သက်သေပြပေးပါသည်။ Public key ရှိသူ မည်သူမဆို ၎င်းကို စစ်ဆေးအတည်ပြု (verify) နိုင်သည်-
+Image signing ဆိုတာက သတ်မှတ်ထားတဲ့ image တစ်ခုဟာ ကိုယ့်ရဲ့ trusted ဖြစ်တဲ့ CI pipeline ကနေ ထွက်လာတာဖြစ်ပြီး တမင် ဝင်ရောက်ပြင်ဆင်ထားတာ (tamper လုပ်ထားတာ) မရှိကြောင်း သက်သေပြတာဖြစ်ပါတယ်။ Public key ရှိတဲ့ ဘယ်သူမဆို ဒါကို verify လုပ်နိုင်ပါတယ်:
 
 ```bash
 # Install cosign
 brew install sigstore/tap/cosign
 
-# Generate a key pair (for keyless signing, use OIDC instead)
+# Generate a key pair (keyless signing အတွက်ဆိုရင် OIDC ကို အစားထိုးသုံးပါ)
 cosign generate-key-pair
 
-# Sign an image (after pushing to registry)
+# Sign an image (registry ကို push ပြီးမှ လုပ်ပါ)
 cosign sign \
   --key cosign.key \
   ghcr.io/yourorg/myapp:v1.5.2
-# Enters the signature as an OCI artifact in the same registry
+# Registry တူတူမှာ signature ကို OCI artifact တစ်ခုအနေနဲ့ ထည့်သွင်းပေးပါတယ်
 
-# Verify a signature before deployment
+# deployment မလုပ်ခင် signature ကို verify လုပ်ပါ
 cosign verify \
   --key cosign.pub \
   ghcr.io/yourorg/myapp:v1.5.2
 # Verified OK ✅
 
-# Keyless signing in GitHub Actions (uses OIDC, no key management)
+# Keyless signing in GitHub Actions (OIDC ကို သုံးပါတယ်၊ key management မလိုပါဘူး)
 - name: Sign image
   uses: sigstore/cosign-installer@v3
   
@@ -215,7 +215,7 @@ cosign verify \
 
 ---
 
-## SBOM နှင့် Signing ကို CI/CD တွင် ပေါင်းစပ်ထည့်သွင်းခြင်း
+## Integrating SBOM + Signing into CI/CD
 
 ```yaml
 # .github/workflows/publish.yml
@@ -225,7 +225,7 @@ jobs:
     permissions:
       contents: read
       packages: write
-      id-token: write    # Required for keyless OIDC signing
+      id-token: write    # Keyless OIDC signing အတွက် လိုအပ်ပါတယ်
 
     steps:
       - uses: actions/checkout@v4
@@ -244,7 +244,7 @@ jobs:
         with:
           push: true
           tags: ghcr.io/${{ github.repository }}:${{ github.sha }}
-          # Include SBOM and provenance attestation
+          # SBOM နဲ့ provenance attestation ကို ထည့်သွင်းပါ
           sbom: true
           provenance: true
 
@@ -268,19 +268,19 @@ jobs:
 
 ---
 
-## Artifact ထိန်းသိမ်းထားရှိမှုဆိုင်ရာ မူဝါဒများ (Retention Policies)
+## Artifact Retention Policies
 
-Registry များတွင် images များသည် အချိန်တိုအတွင်း လျင်မြန်စွာ စုပုံလာတတ်သည်။ မလိုအပ်သည်များကို ရှင်းလင်းဖယ်ရှားခြင်း (pruning) မပြုလုပ်ပါက သိုလှောင်မှုစရိတ်များ အတိုင်းအဆမရှိ မြင့်တက်လာနိုင်သည်-
+Registry တွေမှာ image တွေ အများကြီး စုပုံလာတတ်ပါတယ်။ Pruning (ရှင်းလင်းခြင်း) မလုပ်ရင် storage cost တွေ အဆုံးအမ မရှိ ကြီးထွားလာပါလိမ့်မယ်:
 
 ```bash
-# GitHub GHCR: delete old images via GitHub API
-# Delete all images older than 90 days except the last 5 versions
+# GitHub GHCR: GitHub API မှတစ်ဆင့် ပုံဟောင်းများကို ဖျက်ပོါ
+# နောက်ဆုံး version 5 ခုမှလွဲ၍ ရက် 90 ကျော်သွားသော image အားလုံးကို ဖျက်ပါ
 gh api --method DELETE \
   /user/packages/container/myapp/versions \
   --jq '.[] | select(.metadata.container.tags | length == 0) | .id' \
   | xargs -I {} gh api --method DELETE /user/packages/container/myapp/versions/{}
 
-# ECR lifecycle policy (auto-cleans old images)
+# ECR lifecycle policy (ပုံဟောင်းများကို အလိုအလျောက် ရှင်းလင်းပေးသည်)
 aws ecr put-lifecycle-policy \
   --repository-name myapp \
   --lifecycle-policy-text '{
@@ -300,12 +300,12 @@ aws ecr put-lifecycle-policy \
 
 ---
 
-## အကျဉ်းချုပ် (Summary)
+## Summary
 
-ခေတ်မီ Artifact စီမံခန့်ခွဲမှုစနစ်ကို အဓိကမဏ္ဍိုင် (၄) ရပ်ပေါ်တွင် တည်ဆောက်ထားပါသည်-
-- **Immutability (ပြင်ဆင်ပြောင်းလဲ၍မရနိုင်မှု)**- build လုပ်ပြီး စမ်းသပ်ပြီးပါက artifact ကို မည်သည့်အခါမျှ မပြင်ဆင်တော့ပါ — configuration drift ဖြစ်ပေါ်မှုကို လုံးဝဖယ်ရှားပေးနိုင်သည်
-- **Traceability (ခြေရာခံစုံစမ်းနိုင်မှု)**- artifact တိုင်းကို ၎င်းအား ထုတ်လုပ်ခဲ့သော git SHA ဖြင့် tag လုပ်ထားသည် — deploy လုပ်ထားသော မည်သည့် version ၏ မူရင်း code ကိုမဆို အချိန်မရွေး ပြန်လည်ရှာဖွေနိုင်သည်
-- **Provenance (မူရင်းဇစ်မြစ်ခိုင်လုံမှု)**- SBOMs များက အတွင်း၌ အတိအကျ မည်သည့်အရာများ ပါဝင်သည်ကို မှတ်တမ်းတင်ထားပြီး signatures များ (Cosign/Sigstore) က artifact သည် သင်ယုံကြည်ရသော pipeline မှ လာခြင်းဖြစ်ကြောင်း သက်သေပြသည်
-- **Retention (ထိန်းသိမ်းရှင်းလင်းမှု)**- သတ်မှတ်ထားသော အချိန်ဇယားအတိုင်း image အဟောင်းများကို ရှင်းလင်းပါ — registry များ၏ နေရာလွတ်သည် အကန့်အသတ်မရှိ မဟုတ်ပါ၊ အဖွဲ့အများစုသည် နောက်ဆုံး tagged version ၁၀ ခုမှ ၃၀ ခုအထိသာ ထိန်းသိမ်းထားလေ့ရှိသည်
+Modern artifact management ကို မဏ္ဍိုင် (၄) ရပ်နဲ့ တည်ဆောက်ထားပါတယ်:
+- **Immutability**: build ပြီး test ပြီးသွားရင် artifact ကို ဘယ်တော့မှ ပြန်မပြင်ပါဘူး — configuration drift တွေ ကင်းစင်သွားပါတယ်။
+- **Traceability**: artifact တိုင်းကို ထုတ်လုပ်ပေးခဲ့တဲ့ git SHA နဲ့ tag လုပ်ထားပါတယ် — deploy လုပ်ထားတဲ့ ဘယ် version အတွက်မဆို code ကို ဘယ်တော့မဆို ရှာဖွေနိုင်ပါတယ်။
+- **Provenance**: SBOM တွေက အတွင်းမှာ ဘာတွေပါလဲဆိုတာကို အသေးစိတ်ဖော်ပြပေးပြီး signature (Cosign/Sigstore) တွေက artifact ဟာ ကိုယ့်ရဲ့ trusted pipeline ကနေ လာတာဖြစ်ကြောင်း သက်သေပြပါတယ်။
+- **Retention**: schedule လုပ်ပြီး ပုံဟောင်းတွေကို ရှင်းထုတ်ပါ — registry တွေက အကန့်အသတ်မရှိ ကြီးမားနေတာ မဟုတ်ပါဘူး။ team အများစုကတော့ နောက်ဆုံး tag လုပ်ထားတဲ့ version 10–30 လောက်ကိုသာ ဆက်လက်ထိန်းသိမ်းထားကြပါတယ်။
 
-နောက်သင်ခန်းစာတွင် အရည်အသွေးမပြည့်မီသော code များကို သင့် artifact registry ထံ မရောက်ရှိစေရန် တားဆီးပေးသည့် အရည်အသွေးစစ်ဆေးရေးဂိတ်များဖြစ်သော Automated testing gates များအကြောင်းကို ကျွမ်းကျင်စွာ လေ့လာသွားမည်ဖြစ်ပါသည်။
+နောက်လာမယ့် lesson မှာတော့ automated testing gates အကြောင်းကို လေ့လာရမှာ ဖြစ်ပါတယ် — ဒါကတော့ bad code တွေ artifact registry ဆီ မရောက်သွားအောင် တားဆီးပေးမယ့် quality checkpoint တွေပဲ ဖြစ်ပါတယ်။

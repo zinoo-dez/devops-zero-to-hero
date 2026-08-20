@@ -1,33 +1,33 @@
 ---
-title: "Production Next.js + DB App ကို သတ်မှတ်ခြင်း (Setting Up)"
+title: "Setting Up the Production Next.js + DB App"
 ---
 
-# အပလီကေးရှင်းကို ဖန်တီးခြင်း
+# Creating the Application
 
-PostgreSQL ဒေတာဘေ့စ်ပါရှိသော လက်တွေ့ကျသော Next.js 14 အပလီကေးရှင်းတစ်ခုကို သင် တည်ဆောက်မည်ဖြစ်သည်။ ရည်မှန်းချက်မှာ ရိုးရှင်းလွန်းသော "Hello World" တစ်ခု မဟုတ်ပါ — ၎င်းသည် သင့်လျော်သော connection pooling ပါရှိသော၊ Kubernetes probes များ အသုံးပြုသည့် health check endpoint ပါရှိသော၊ အစစ်အမှန် CRUD API ပါရှိသော နှင့် ဒေတာများကို ပြသပေးသော frontend ပါရှိသော production-quality (ထုတ်လုပ်မှုအဆင့်မီ) အပ်တစ်ခု ဖြစ်သည်။
+သင်သည် PostgreSQL database နှင့် ချိတ်ဆက်ထားသော လက်တွေ့ကျကျ Next.js 14 application တစ်ခုကို တည်ဆောက်မည်ဖြစ်သည်။ ဤရည်ရွယ်ချက်သည် အရုပ်ဆန်ဆန် "Hello World" တစ်ခုမျှ မဟုတ်ပါ — ၎င်းသည် မှန်ကန်သော connection pooling ပါဝင်သော၊ Kubernetes probes များအသုံးပြုသည့် health check endpoint ပါဝင်သော၊ တကယ့် CRUD API နှင့် ဒေတာများကို ပြသပေးသော frontend ပါဝင်သော production-quality app တစ်ခု ဖြစ်သည်။
 
-ဤအပလီကေးရှင်းသည် ဤသင်တန်း၏ ကျန်ရှိသော အပိုင်းများအတွက် အလိုအလျောက် deploy လုပ်မည့် အပ် ဖြစ်ပါသည်။
+ဤ app သည် ဤ course တစ်ခုလုံးအတွက် သင် အလိုအလျောက် deploy လုပ်မည့် app ဖြစ်လာမည်ဖြစ်သည်။
 
 ---
 
-## Next.js 14 နှင့် App Router ကို အ ஏன் အသုံးပြုရသနည်း။
+## Why Next.js 14 with the App Router?
 
-App Router (Next.js 13 တွင် စတင်မိတ်ဆက်ခဲ့သည်) သည် ယခုအခါ production စံနှုန်း ဖြစ်လာသည်။ ဤ capstone အတွက် ၎င်းကို မှန်ကန်သော ရွေးချယ်မှုဖြစ်စေသည့် အကြောင်းရင်းများမှာ အောက်ပါအတိုင်း ဖြစ်သည် -
+App Router (Next.js 13 တွင် စတင်မိတ်ဆက်ခဲ့သည်) သည် ယခုအခါ production standard ဖြစ်လာသည်။ ဤ capstone အတွက် ၎င်းကို မှန်ကန်သော ရွေးချယ်မှုဖြစ်စေသည့် အချက်များမှာ အောက်ပါအတိုင်းဖြစ်သည်-
 
-| အင်္ဂါရပ် (Feature) | အကျိုးကျေးဇူး (Benefit) |
+| Feature | Benefit |
 |---------|---------|
-| **Server Components** | ဒေတာဆွဲထုတ်ခြင်းကို ဆာဗာတွင် လုပ်ဆောင်သည် — ပထမဆုံး စာမျက်နှာဖွင့်ချိန်တွင် browser မှ API ခေါ်ဆိုမှုများ မရှိပါ |
-| **API Routes** | `/api/*` လမ်းကြောင်းများသည် serverless ပုံစံ ഹാൻഡ്‌లರ್‌များ အဖြစ် လုပ်ဆောင်သည် — သီးခြား Express ဆာဗာ မလိုအပ်ပါ |
-| **Built-in TypeScript** | Frontend နှင့် API ကုဒ်နှစ်ခုစလုံးတွင် အမျိုးအစား လုံခြုံမှု (Type safety) ရှိခြင်း |
-| **`output: 'standalone'`** | အနည်းဆုံး Node.js ဆာဗာ ဘန်းဒယ်လ်ကို ဖန်တီးပေးသည်၊ multi-stage Docker builds များအတွက် အထူးသင့်လျော်သည် |
-| **Edge-compatible** | အနာဂတ်တွင် လိုအပ်ပါက edge runtimes များတွင် ដំណើរការနိုင်သည် |
+| **Server Components** | Data fetching ကို server ပေါ်တွင် လုပ်ဆောင်သည် — initial page load အတွက် browser မှ API calls ခေါ်ဆိုရန် မလိုပါ |
+| **API Routes** | `/api/*` routes များကို serverless-style handlers များအနေဖြင့် လုပ်ဆောင်သည် — သီးသန့် Express server လိုအပ်ချက်မရှိပါ |
+| **Built-in TypeScript** | Frontend နှင့် API code နှစ်ခုလုံးတွင် Type safety ကို ရရှိစေသည် |
+| **`output: 'standalone'`** | အနည်းဆုံး Node.js server bundle ကို ဖန်တီးပေးသည်၊ multi-stage Docker builds များအတွက် အထူးသင့်လျော်သည် |
+| **Edge-compatible** | အနာဂတ်တွင် လိုအပ်ပါက edge runtimes များတွင်လည်း Run နိုင်သည် |
 
 ---
 
-## အဆင့် ၁ - ပရောဂျက်ကို အစပြုခြင်း (Initialize)
+## Step 1: Initialize the Project
 
 ```bash
-# ပရောဂျက်ကို ဖန်တီးပါ (--app သည် App Router ကို ဖွင့်ပေးသည်)
+# Create the project (--app enables the App Router)
 npx create-next-app@latest capstone-app \
   --typescript \
   --eslint \
@@ -39,42 +39,42 @@ npx create-next-app@latest capstone-app \
 cd capstone-app
 ```
 
-ဖလက်ဂ် (flag) တစ်ခုချင်းစီ၏ လုပ်ဆောင်ချက် -
-- `--typescript` — ပထမနေ့မှစ၍ TypeScript ကို အသုံးပြုခြင်း၊ နောက်ပိုင်းတွင် migration ပြဿနာ မရှိတော့ပါ
-- `--eslint` — ESLint config အသင့်ပါရှိခြင်း၊ CI pipeline lint အဆင့်အတွက် လိုအပ်သည်
-- `--tailwind` — Utility-first CSS ဖြစ်ပြီး၊ အမြန် UI အလုပ်လုပ်ရန် ကောင်းမွန်သည်
-- `--app` — App Router ကို အသုံးပြုခြင်း (အမွေဆက်ခံ `pages/` directory မဟုတ်ပါ)
-- `--no-src-dir` — ဖိုင်များကို `src/` အောက်တွင် ထည့်မည့်အစား root `app/` directory တွင်သာ ထားရှိခြင်း
+Flag တစ်ခုချင်းစီ၏ လုပ်ဆောင်ချက်များ-
+- `--typescript` — ပထမနေ့မှစ၍ TypeScript ကို အသုံးပြုခြင်း၊ နောက်ပိုင်းတွင် migration လုပ်ရသည့် ဒုက္ခမရှိတော့ပါ
+- `--eslint` — CI pipeline lint step အတွက် လိုအပ်သော ESLint config အဆင်သင့်ဖြစ်နေခြင်း
+- `--tailwind` — Utility-first CSS၊ မြန်ဆန်သော UI အလုပ်များအတွက် အလွန်ကောင်းမွန်ခြင်း
+- `--app` — App Router ကို အသုံးပြုခြင်း (legacy `pages/` directory ကို မသုံးပါ)
+- `--no-src-dir` — ဖိုင်များကို `src/` အောက်တွင် ထည့်မထားဘဲ root `app/` directory ထက်တွင်သာ ထားရှိခြင်း
 
 ---
 
-## အဆင့် ၂ - ဒေတာဘေ့စ် မှီခိုမှုများ (Dependencies) ကို ထည့်သွင်းခြင်း
+## Step 2: Install Database Dependencies
 
 ```bash
-# Node.js အတွက် PostgreSQL ക്ലയന്റ്
+# PostgreSQL client for Node.js
 npm install pg
 npm install -D @types/pg
 
-# ဒေသတွင်း ဖွံ့ဖြိုးတိုးတက်မှု (local development) အတွက် dotenv ကိုလည်း ထည့်သွင်းပါ
+# Also install dotenv for local development
 npm install -D dotenv-cli
 ```
 
-`pg` පැကေ့ဂျ်သည် Node.js အတွက် တရားဝင် PostgreSQL ക്ലയന്റ് ဖြစ်သည်။ ၎င်းသည် connection pooling၊ parameterized queries (SQL injection ကို ကာကွယ်ပေးသည်) နှင့် prepared statements များကို ထောက်ပံ့ပေးသည်။
+`pg` package သည် Node.js အတွက် တရားဝင် PostgreSQL client ဖြစ်သည်။ ၎င်းသည် connection pooling၊ parameterized queries (SQL injection ကို ကာကွယ်ပေးသည်) နှင့် prepared statements များကို ပံ့ပိုးပေးသည်။
 
 ---
 
-## အဆင့် 3 - Standalone Output အတွက် `next.config.ts` ကို ပြင်ဆင်ခြင်း
+## Step 3: Configure `next.config.ts` for Standalone Output
 
-ဤအရာသည် သင်ခန်းစာ 3 ရှိ Docker multi-stage build အတွက် **အလွန်အရေးကြီးသည်**။ ၎င်းမပါပါက Next.js သည် သင်၏ image ကို ကြီးထွားစေမည့် အပြည့်အစုံ `node_modules/` directory ကို ထုတ်ပေးမည် ဖြစ်သည်။
+ဒါက Lesson 3 ရှိ Docker multi-stage build အတွက် **အလွန်အရေးကြီးသည်** (critical)။ ဤသို့ configure မလုပ်ပါက Next.js သည် သင်၏ image ကို ကြီးထွားစေမည့် full `node_modules/` directory တစ်ခုလုံးကို ထုတ်ပေးလိမ့်မည်။
 
 ```typescript
 // next.config.ts
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  output: "standalone",  // ← အနည်းဆုံး server.js ဘန်းဒယ်လ်ကို ထုတ်ပေးသည်
+  output: "standalone",  // ← Generates a minimal server.js bundle
   experimental: {
-    // ကွန်တိန်နာများတွင် cold start အချိန်များကို တိုးတက်စေသည်
+    // Improve cold start times in containers
     instrumentationHook: true,
   },
 };
@@ -82,43 +82,43 @@ const nextConfig: NextConfig = {
 export default nextConfig;
 ```
 
-`output: "standalone"` ထုတ်ပေးသည့် အရာ -
+`output: "standalone"` မှ ထုတ်ပေးမည့် ပုံစံ-
 ```
 .next/
 └── standalone/
-    ├── server.js        ← တစ်ခုတည်းသော ဝင်ပေါက် (entry point) ('next start' ကို အစားထိုးသည်)
-    ├── node_modules/    ← runtime တွင် အမှန်တကယ် လိုအပ်သော မော်ဂျူးများသာ
-    └── .next/           ← Compile လုပ်ထားသော အပလီကေးရှင်း ကုဒ်
+    ├── server.js        ← Single entry point (replaces 'next start')
+    ├── node_modules/    ← Only the modules actually needed at runtime
+    └── .next/           ← Compiled application code
 ```
 
 ---
 
-## အဆင့် 4 - ပရောဂျက် Directory တည်ဆောက်ပုံ
+## Step 4: Project Directory Structure
 
-သင်ခန်းစာ 7 ပြီးဆုံးသည့်အခါ သင်ရရှိမည့် ပြီးပြည့်စုံသော ဖိုင်တည်ဆောက်ပုံမှာ အောက်ပါအတိုင်း ဖြစ်သည် -
+Lesson 7 ပြီးဆုံးချိန်တွင် သင်ရရှိမည့် ပြီးပြည့်စုံသော file structure မှာ အောက်ပါအတိုင်းဖြစ်သည်-
 
 ```
 capstone-app/
 ├── app/                          ← Next.js App Router
 │   ├── layout.tsx                ← Root layout (HTML shell)
-│   ├── page.tsx                  ← ပင်မစာမျက်နှာ (item စာရင်းကို ပြသသည်)
-│   ├── globals.css               ← Tailwind အခြေခံ စတိုင်များ
+│   ├── page.tsx                  ← Home page (shows item list)
+│   ├── globals.css               ← Tailwind base styles
 │   └── api/
 │       ├── health/
 │       │   └── route.ts          ← GET /api/health (K8s liveness/readiness)
 │       └── items/
-│           ├── route.ts          ← GET /api/items၊ POST /api/items
+│           ├── route.ts          ← GET /api/items, POST /api/items
 │           └── [id]/
 │               └── route.ts     ← DELETE /api/items/:id
 ├── lib/
 │   └── db.ts                    ← PostgreSQL connection pool (singleton)
 ├── components/
-│   └── ItemList.tsx             ← အပြန်အလှန်တုံ့ပြန်သော UI အတွက် Client component
+│   └── ItemList.tsx             ← Client component for interactive UI
 ├── Dockerfile                   ← Multi-stage production Dockerfile
 ├── .dockerignore
-├── .env.example                 ← Commit လုပ်ရန် လုံခြုံသည်: တန်ဖိုးအစစ်များ မပါသော ပုံစံခွက်
-├── .env.local                   ← Commit မလုပ်ရပါ: ဒေသတွင်း dev အချက်အလက်များ
-├── docker-compose.dev.yml       ← ဒေသတွင်း ဖွံ့ဖြိုးတိုးတက်ရေး စတက်ခ်
+├── .env.example                 ← Safe to commit: template without real values
+├── .env.local                   ← NOT committed: real dev credentials
+├── docker-compose.dev.yml       ← Local development stack
 ├── k8s/                         ← Kubernetes manifests
 │   ├── namespace.yaml
 │   ├── configmap.yaml
@@ -128,22 +128,22 @@ capstone-app/
 │   └── ingress.yaml
 └── .github/
     └── workflows/
-        ├── ci.yml               ← CI: lint, test, scan (PR တိုင်းတွင်)
-        └── cd.yml               ← CD: build, push, deploy (main သို့ merge လုပ်သည့်အခါ)
+        ├── ci.yml               ← CI: lint, test, scan (on every PR)
+        └── cd.yml               ← CD: build, push, deploy (on merge to main)
 ```
 
 ---
 
-## အဆင့် 5 - ဒေတာဘေ့စ် ချိတ်ဆက်မှု ပူးလ် (Database Connection Pool)
+## Step 5: The Database Connection Pool
 
-Connection pool တစ်ခုသည် မေးမြန်းချက် (query) တိုင်းအတွက် TCP ချိတ်ဆက်မှုအသစ်တစ်ခုကို ဖန်တີ້မည့်အစား ဒေတာဘေ့စ်ချိတ်ဆက်မှုများကို ပြန်လည်အသုံးပြုသည်။ ဤအရာသည် စွမ်းဆောင်ရည်အတွက် မရှိမဖြစ် လိုအပ်သည် — PostgreSQL ချိတ်ဆက်မှုတစ်ခုကို တည်ဆောက်ရန် 5-50ms ခန့် ကြာမြင့်သည်။ ဝန်ပိနေချိန်တွင် တောင်းဆိုမှုတစ်ခုလျှင် ချိတ်ဆက်မှုအသစ်တစ်ခု ဖန်တီးခြင်းသည် ဆိုးရွားသော ရလဒ်ကို ဖြစ်စေနိုင်ပါသည်။
+Connection pool တစ်ခုသည် query တစ်ခုချင်းစီအတွက် TCP connection အသစ် အမြဲဖန်တီးနေမည့်အစား database connections များကို ပြန်လည်အသုံးပြုသည်။ ၎င်းသည် performance အတွက် အရေးကြီးသည် — PostgreSQL connection တစ်ခု တည်ဆောက်ရန် ~5-50ms ကြာမြင့်သည်။ Load များနေချိန်တွင် request တစ်ခုချင်းစီအတွက် connection အသစ် ဖန်တီးနေခြင်းသည် ဆိုးရွားသော ရလဒ်ကို ဖြစ်စေနိုင်င်သည်။
 
 ```typescript
 // lib/db.ts
 import { Pool } from "pg";
 
-// ဖွံ့ဖြိုးတိုးတက်မှုကာလအတွင်း Next.js hot-reload လုပ်သည့်အခါ
-// (မော်ဂျူးများကို ပြန်လည်သွင်းယူသည့်အခါ) ပူးလ်အစုံလိုက်များစွာ ဖြစ်ပေါ်ခြင်းကို ကာကွယ်ရန် singleton ပုံစံကို အသုံးပြုခြင်း
+// Using a singleton pattern to prevent multiple pool instances during
+// Next.js hot-reload in development (which re-imports modules)
 declare global {
   // eslint-disable-next-line no-var
   var _pgPool: Pool | undefined;
@@ -152,18 +152,18 @@ declare global {
 function createPool(): Pool {
   return new Pool({
     connectionString: process.env.DATABASE_URL,
-    max: 10,                   // ပူးလ်အတွင်းရှိ အများဆုံး ချိတ်ဆက်မှုများ
-    min: 2,                    // ချိတ်ဆက်မှု အနည်းဆုံး ၂ ခုကို ဖွင့်ထားပါ
-    idleTimeoutMillis: 30000,  // စက္ကန့် 30 ကြာ အလုပ်မလုပ်ပါက idle ချိတ်ဆက်မှုများကို ပိတ်ပါ
-    connectionTimeoutMillis: 5000,  // DB ကို မချိတ်ဆက်နိုင်ပါက အမြန်ဆုံး အမှားပြပါ
-    // production အတွက် SSL ပြင်ဆင်မှု (managed DB အများစုသည် ၎င်းကို လိုအပ်သည်)
+    max: 10,                   // Maximum connections in the pool
+    min: 2,                    // Keep at least 2 connections open
+    idleTimeoutMillis: 30000,  // Close idle connections after 30s
+    connectionTimeoutMillis: 5000,  // Fail fast if DB is unreachable
+    // SSL configuration for production (many managed DBs require it)
     ssl: process.env.NODE_ENV === "production"
       ? { rejectUnauthorized: true }
       : false,
   });
 }
 
-// Singleton: ဖွံ့ဖြိုးတိုးတက်ရေးတွင် ပူးလ်ကို ပြန်လည်အသုံးပြုပါ (hot-reload), production တွင် အသစ်ဖန်တီးပါ
+// Singleton: reuse pool in development (hot-reload), create fresh in production
 const pool = global._pgPool ?? createPool();
 
 if (process.env.NODE_ENV !== "production") {
@@ -174,26 +174,26 @@ export default pool;
 ```
 
 <Callout type="warning" title="Connection Pool Sizing">
-Kubernetes replicas 3 ခုဖြင့်၊ တစ်ခုချင်းစီတွင် `max: 10` ရှိပါက၊ သင်သည် တပြိုင်နက်တည်း ချိတ်ဆက်မှု 30 အထိ ဖွင့်လှစ်နိုင်ပါသည်။ သင်၏ PostgreSQL `max_connections` သတ်မှတ်ချက် (မူလတန်ဖိုး: 100) သည် `replicas × pool.max` ထက် ပိုများကြောင်း သေချာစေပါ။ သင်ခန်းစာ 7 တွင်၊ သင်သည် PgBouncer ကို သတ်မှတ်မည် သို့မဟုတ် replica တစ်ခုလျှင် `max: 5` ကို အသုံးပြုပါမည်။
+Kubernetes replicas 3 ခု ရှိပြီး တစ်ခုချင်းစီတွင် `max: 10` ရှိပါက, သင်သည် တစ်ချိန်တည်းတွင် connections 30 အထိ ဖွင့်လှစ်နိုင်သည်။ သင်၏ PostgreSQL `max_connections` setting (default: 100) သည် `replicas × pool.max` ထက် ပိုများကြောင်း သေချာအောင် လုပ်ပါ။ Lesson 7 တွင်, သင်သည် PgBouncer ကို configure လုပ်မည် သို့မဟုတ် replica တစ်ခုချင်းစီအတွက် `max: 5` ကို အသုံးပြုမည် ဖြစ်သည်။
 </Callout>
 
 ---
 
-## အဆင့် 6 - ကျန်းမာရေး စစ်ဆေးမှု API လမ်းကြောင်း (Health Check API Route)
+## Step 6: Health Check API Route
 
-Kubernetes သည် **liveness** နှင့် **readiness** probes များအတွက် `/api/health` endpoint ကို အသုံးပြုသည် -
+Kubernetes သည် **liveness** နှင့် **readiness** probes များအတွက် `/api/health` endpoint ကို အသုံးပြုသည်-
 
-- **Liveness probe**: "ဤ pod သည် အသက်ရှင်နေသေးသလား?" — 3 ကြိမ် ဆက်တိုက် မအောင်မြင်ပါက K8s သည် pod ကို ပြန်လည်စတင်သည်
-- **Readiness probe**: "ဤ pod သည် traffic ကို လက်ခံရန် အသင့်ဖြစ်ပြီလား?" — မအောင်မြင်ပါက K8s သည် ၎င်းကို Service endpoints များမှ ဖယ်ရှားသည်
+- **Liveness probe**: "ဤ pod အသက်ရှင်နေသေးသလား?" — 3 ကြိမ် ဆက်တိုက် မအောင်မြင်ပါက K8s သည် pod ကို restart ချသည်
+- **Readiness probe**: "ဤ pod သည် traffic ကို လက်ခံရန် အဆင်သင့်ဖြစ်ပြီလား?" — မအောင်မြင်ပါက K8s သည် ၎င်းကို Service endpoints များမှ ဖယ်ရှားသည်
 
-သင်၏ ကျန်းမာရေး စစ်ဆေးမှုသည် "Node process အလုပ်လုပ်နေသလား" ဆိုသည်ကိုသာမက အစစ်အမှန် စနစ်အဆင်သင့်ဖြစ်မှုကို စစ်ဆေးသင့်သည် -
+သင်၏ health check သည် "Node process run နေသလား" ဆိုရုံသာမက တကယ့် system readiness ကို စစ်ဆေးသင့်သည်-
 
 ```typescript
 // app/api/health/route.ts
 import { NextResponse } from "next/server";
 import pool from "@/lib/db";
 
-export const dynamic = "force-dynamic"; // ဤ endpoint ကို ဘယ်သောအခါမှ မကတ်ချ်ပါနှင့်
+export const dynamic = "force-dynamic"; // Never cache this endpoint
 
 interface HealthStatus {
   status: "ok" | "degraded" | "error";
@@ -210,7 +210,7 @@ export async function GET() {
   const startTime = Date.now();
 
   try {
-    // ဒေတာဘေ့စ် မေးမြန်းချက် ကြန့်ကြာမှုကို တိုင်းတာပါ
+    // Measure database query latency
     const dbStart = Date.now();
     await pool.query("SELECT 1");
     const dbLatency = Date.now() - dbStart;
@@ -243,16 +243,16 @@ export async function GET() {
       version: process.env.APP_VERSION ?? "unknown",
     };
 
-    console.error("[health] ဒေတာဘေ့စ် ချိတ်ဆက်နိုင်မှု စစ်ဆေးမှု မအောင်မြင်ပါ:", error);
+    console.error("[health] Database connectivity check failed:", error);
 
     return NextResponse.json(body, {
-      status: 503, // Service Unavailable — K8s သည် ၎င်းကို ကျန်းမာရေး မကောင်းဟု အဓိပ္ပာယ်ကောက်သည်
+      status: 503, // Service Unavailable — K8s interprets this as unhealthy
     });
   }
 }
 ```
 
-**ဒေသတွင်းတွင် စမ်းသပ်ရန်:**
+**Local တွင် စမ်းသပ်ရန်:**
 ```bash
 curl http://localhost:3000/api/health | jq
 # {
@@ -266,15 +266,15 @@ curl http://localhost:3000/api/health | jq
 
 ---
 
-## အဆင့် 7 - အရာဝတ္ထုများ CRUD API (Items CRUD API)
+## Step 7: Items CRUD API
 
 ```typescript
 // app/api/items/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import pool from "@/lib/db";
 
-// ပထမဆုံး တောင်းဆိုမှုတွင် ဒေတာဘေ့စ် migrations များကို လုပ်ဆောင်ပါ
-// Production တွင် သင့်လျော်သော migration tool တစ်ခုကို အသုံးပြုပါ (ဥပမာ Flyway, golang-migrate)
+// Run database migrations on first request
+// In production, use a proper migration tool (e.g., Flyway, golang-migrate)
 let initialized = false;
 
 async function ensureTable() {
@@ -289,7 +289,7 @@ async function ensureTable() {
   initialized = true;
 }
 
-// GET /api/items — အရာဝတ္ထုအားလုံးကို စာရင်းပြုစုပါ (အသစ်ဆုံးကို ရှေ့ဆုံးမှထား၍)
+// GET /api/items — List all items (newest first)
 export async function GET() {
   try {
     await ensureTable();
@@ -302,21 +302,21 @@ export async function GET() {
     });
   } catch (error) {
     console.error("[items GET]", error);
-    return NextResponse.json({ error: "အရာဝတ္ထုများကို ဆွဲထုတ်ရန် ပျက်ကွက်ခဲ့သည်" }, { status: 500 });
+    return NextResponse.json({ error: "Failed to fetch items" }, { status: 500 });
   }
 }
 
-// POST /api/items — အရာဝတ္ထုအသစ်တစ်ခုကို ဖန်တီးပါ
+// POST /api/items — Create a new item
 export async function POST(req: NextRequest) {
   try {
     await ensureTable();
 
     const body = await req.json();
 
-    // ထည့်သွင်းမှုကို စစ်ဆေးခြင်း — အသုံးပြုသူ ထည့်သွင်းမှုကို ဘယ်သောအခါမှ မယုံကြည်ပါနှင့်
+    // Input validation — never trust user input
     if (!body.name || typeof body.name !== "string") {
       return NextResponse.json(
-        { error: "name လိုအပ်ပြီး string ဖြစ်ရပါမည်" },
+        { error: "name is required and must be a string" },
         { status: 400 }
       );
     }
@@ -325,20 +325,20 @@ export async function POST(req: NextRequest) {
 
     if (name.length === 0 || name.length > 200) {
       return NextResponse.json(
-        { error: "name သည် စာလုံးရေ 1 နှင့် 200 ကြား ရှိရပါမည်" },
+        { error: "name must be between 1 and 200 characters" },
         { status: 400 }
       );
     }
 
     const result = await pool.query(
       "INSERT INTO items (name) VALUES ($1) RETURNING id, name, created_at",
-      [name]  // Parameterized query — SQL injection ကို ကာကွယ်သည်
+      [name]  // Parameterized query — prevents SQL injection
     );
 
     return NextResponse.json(result.rows[0], { status: 201 });
   } catch (error) {
     console.error("[items POST]", error);
-    return NextResponse.json({ error: "အရာဝတ္ထု ဖန်တီးရန် ပျက်ကွက်ခဲ့သည်" }, { status: 500 });
+    return NextResponse.json({ error: "Failed to create item" }, { status: 500 });
   }
 }
 ```
@@ -348,7 +348,7 @@ export async function POST(req: NextRequest) {
 import { NextRequest, NextResponse } from "next/server";
 import pool from "@/lib/db";
 
-// DELETE /api/items/:id — ID ဖြင့် အရာဝတ္ထုတစ်ခုကို ဖျက်ပါ
+// DELETE /api/items/:id — Delete an item by ID
 export async function DELETE(
   _req: NextRequest,
   { params }: { params: { id: string } }
@@ -356,7 +356,7 @@ export async function DELETE(
   const id = parseInt(params.id, 10);
 
   if (isNaN(id)) {
-    return NextResponse.json({ error: "မမှန်ကန်သော ID" }, { status: 400 });
+    return NextResponse.json({ error: "Invalid ID" }, { status: 400 });
   }
 
   try {
@@ -366,20 +366,20 @@ export async function DELETE(
     );
 
     if (result.rowCount === 0) {
-      return NextResponse.json({ error: "အရာဝတ္ထုကို မတွေ့ရှိပါ" }, { status: 404 });
+      return NextResponse.json({ error: "Item not found" }, { status: 404 });
     }
 
     return new NextResponse(null, { status: 204 });
   } catch (error) {
     console.error("[items DELETE]", error);
-    return NextResponse.json({ error: "အရာဝတ္ထုကို ဖျက်ရန် ပျက်ကွက်ခဲ့သည်" }, { status: 500 });
+    return NextResponse.json({ error: "Failed to delete item" }, { status: 500 });
   }
 }
 ```
 
 ---
 
-## အဆင့် 8 - Frontend စာမျက်နှာ (Frontend Page)
+## Step 8: Frontend Page
 
 ```typescript
 // app/page.tsx
@@ -390,7 +390,7 @@ export default function HomePage() {
     <main className="max-w-2xl mx-auto py-16 px-4">
       <h1 className="text-3xl font-bold mb-2">CI/CD Capstone App</h1>
       <p className="text-gray-500 mb-8">
-        အရာဝတ္ထုများကို PostgreSQL တွင် သိမ်းဆည်းထားပြီး GitHub Actions မှတဆင့် အလိုအလျောက် deploy လုပ်ပါသည်။
+        Items are stored in PostgreSQL and deployed automatically via GitHub Actions.
       </p>
       <ItemList />
     </main>
@@ -448,7 +448,7 @@ export function ItemList() {
       <div className="flex gap-2 mb-6">
         <input
           className="flex-1 border rounded px-3 py-2 text-sm"
-          placeholder="ပစ္စည်းအသစ် အမည်..."
+          placeholder="New item name..."
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && addItem()}
@@ -458,12 +458,12 @@ export function ItemList() {
           disabled={loading}
           className="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700 disabled:opacity-50"
         >
-          {loading ? "ထည့်သွင်းနေသည်..." : "ပစ္စည်းထည့်ရန်"}
+          {loading ? "Adding..." : "Add Item"}
         </button>
       </div>
 
       {items.length === 0 ? (
-        <p className="text-gray-400 text-sm">ပစ္စည်းများ မရှိသေးပါ။ အထက်တွင် တစ်ခု ထည့်ပါ!</p>
+        <p className="text-gray-400 text-sm">No items yet. Add one above!</p>
       ) : (
         <ul className="space-y-2">
           {items.map((item) => (
@@ -473,7 +473,7 @@ export function ItemList() {
                 onClick={() => deleteItem(item.id)}
                 className="text-red-500 text-xs hover:underline"
               >
-                ဖျက်မည်
+                Delete
               </button>
             </li>
           ))}
@@ -486,33 +486,33 @@ export function ItemList() {
 
 ---
 
-## အဆင့် 9 - ပတ်ဝန်းကျင် ပြင်ဆင်မှု (Environment Configuration)
+## Step 9: Environment Configuration
 
 ```bash
-# .env.example — ဤဖိုင်ကို COMMIT လုပ်ပါ (လျှို့ဝှက်ချက်အစစ်များ မပါပါ)
-# .env.local သို့ ကူးယူပြီး တန်ဖိုးအစစ်များကို ဖြည့်ပါ
+# .env.example — COMMIT THIS FILE (no real secrets)
+# Copy to .env.local and fill in real values
 DATABASE_URL=postgres://appuser:changeme@localhost:5432/capstone
 APP_VERSION=dev
 NODE_ENV=development
 ```
 
 ```bash
-# .env.local — COMMIT မလုပ်ပါနှင့် (.gitignore ထဲသို့ ထည့်ပါ)
+# .env.local — DO NOT COMMIT (add to .gitignore)
 DATABASE_URL=postgres://appuser:apppass@localhost:5432/capstone
 APP_VERSION=dev
 ```
 
 ```bash
-# .env.local ကို gitignore ထားရှိကြောင်း သေချာစေပါ (create-next-app သည် ဤအရာကို အလိုအလျောက် လုပ်ဆောင်ပေးသည်)
+# Ensure .env.local is gitignored (create-next-app does this automatically)
 cat .gitignore | grep env
-# .env*.local ← ဤနေရာတွင် ရှိရပါမည်
+# .env*.local ← should be here
 ```
 
 ---
 
-## အဆင့် 10 - Docker Compose ဖြင့် ဒေသတွင်း ဖွံ့ဖြိုးတိုးတက်မှု (Local Development)
+## Step 10: Local Development with Docker Compose
 
-ညွှန်ကြားချက်တစ်ခုတည်းဖြင့် ဒေသတွင်းတွင် full stack ကို ដំណើរការပါ -
+Command တစ်ခုတည်းဖြင့် full stack ကို local တွင် run ပါ-
 
 ```yaml
 # docker-compose.dev.yml
@@ -520,14 +520,14 @@ services:
   app:
     build:
       context: .
-      target: builder  # slim runner အစား builder stage ကို အသုံးပြုပါ (dev အတွက် ပိုမိုလွယ်ကူသည်)
+      target: builder  # Use the builder stage, not the slim runner (easier for dev)
     command: npm run dev
     ports:
       - "3000:3000"
     volumes:
-      - .:/app                  # hot-reload အတွက် source ကို mount လုပ်ပါ
-      - /app/node_modules       # ကွန်တိန်နာ၏ node_modules ကို မပျက်မယွင်း ထားပါ
-      - /app/.next              # compile ထွက်လာသည့် ဖိုင်များကို ကွန်တိန်နာတွင် ထားပါ
+      - .:/app                  # Mount source for hot-reload
+      - /app/node_modules       # Keep container's node_modules intact
+      - /app/.next              # Keep compiled output in container
     environment:
       DATABASE_URL: postgres://appuser:apppass@db:5432/capstone
       NODE_ENV: development
@@ -556,36 +556,36 @@ volumes:
 ```
 
 ```bash
-# Dev stack ကို စတင်ပါ
+# Start the dev stack
 docker compose -f docker-compose.dev.yml up -d
 
-# လော့ဂ်များကို ကြည့်ရှုပါ
+# Watch logs
 docker compose -f docker-compose.dev.yml logs -f app
 
-# Health endpoint ကို စမ်းသပ်ပါ
+# Test the health endpoint
 curl http://localhost:3000/api/health | jq
 # { "status": "ok", "db": { "status": "connected", "latencyMs": 2 } }
 
-# ပစ္စည်းတစ်ခု ထည့်ပါ
+# Add an item
 curl -X POST http://localhost:3000/api/items \
   -H "Content-Type: application/json" \
-  -d '{"name": "ကျွန်ုပ်၏ ပထမဆုံး ပစ္စည်း"}'
+  -d '{"name": "My first item"}'
 
-# ပစ္စည်းများကို စာရင်းပြုစုပါ
+# List items
 curl http://localhost:3000/api/items | jq
 
-# အားလုံးကို ရပ်တန့်ပါ
+# Stop everything
 docker compose -f docker-compose.dev.yml down
 ```
 
 ---
 
-## အဆင့် 11 - ယူနစ် စမ်းသပ်မှုများ (Unit Tests) ထည့်သွင်းခြင်း
+## Step 11: Add Unit Tests
 
-CI pipeline (သင်ခန်းစာ 4) သည် pull request တိုင်းတွင် ဤစမ်းသပ်မှုများကို အလိုအလျောက် လုပ်ဆောင်ပေးပါမည်။
+CI pipeline (Lesson 4) သည် pull request တိုင်းတွင် ဤ test များကို အလိုအလျောက် run လိမ့်မည်။
 
 ```bash
-# Vitest ကို ထည့်သွင်းပါ (မြန်ဆန်သော၊ Vite-native test runner)
+# Install Vitest (fast, Vite-native test runner)
 npm install -D vitest @vitejs/plugin-react jsdom @testing-library/react @testing-library/jest-dom
 ```
 
@@ -619,7 +619,7 @@ import "@testing-library/jest-dom";
 // __tests__/api-health.test.ts
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// ဒေတာဘေ့စ် ပူးလ်ကို Mock လုပ်ပါ
+// Mock the database pool
 vi.mock("@/lib/db", () => ({
   default: {
     query: vi.fn().mockResolvedValue({ rows: [{ "?column?": 1 }] }),
@@ -627,7 +627,7 @@ vi.mock("@/lib/db", () => ({
 }));
 
 describe("/api/health", () => {
-  it("ဒေတာဘေ့စ်သို့ ချိတ်ဆက်နိုင်သည့်အခါ 200 ကို ပြန်ပေးသည်", async () => {
+  it("returns 200 when database is reachable", async () => {
     const { GET } = await import("@/app/api/health/route");
     const response = await GET();
     const body = await response.json();
@@ -637,7 +637,7 @@ describe("/api/health", () => {
     expect(body.db.status).toBe("connected");
   });
 
-  it("ဒေတာဘေ့စ်သို့ မချိတ်ဆက်နိုင်သည့်အခါ 503 ကို ပြန်ပေးသည်", async () => {
+  it("returns 503 when database is unreachable", async () => {
     const pool = (await import("@/lib/db")).default;
     vi.mocked(pool.query).mockRejectedValueOnce(new Error("Connection refused"));
 
@@ -653,7 +653,7 @@ describe("/api/health", () => {
 ```
 
 ```json
-// package.json — test script ကို ထည့်ပါ
+// package.json — add the test script
 {
   "scripts": {
     "dev": "next dev",
@@ -668,34 +668,34 @@ describe("/api/health", () => {
 ```
 
 ```bash
-# ဒေသတွင်းတွင် စမ်းသပ်မှုများကို လုပ်ဆောင်ပါ
+# Run tests locally
 npm test
 
-# လင့်ခ် စစ်ဆေးပါ
+# Run lint
 npm run lint
 
-# အမျိုးအစား စစ်ဆေးပါ (compilation output မရှိပါ၊ အမျိုးအစား အမှားများကိုသာ စစ်ဆေးသည်)
+# Type-check (no compilation output, just type errors)
 npm run type-check
 ```
 
 ---
 
-## အဆင့် 12 - Git Repository ကို အစပြုပြီး GitHub သို့ ပို့ပါ (Push)
+## Step 12: Initialize the Git Repository and Push to GitHub
 
 ```bash
-# Git ကို အစပြုပါ (create-net-app သည် ဤအရာကို ပြီးနှင့်ပြီးသား ဖြစ်နိုင်သည်)
+# Initialize git (create-next-app may have already done this)
 git init
 git add .
-git commit -m "feat: PostgreSQL နှင့် health check ပါရှိသော ပထမဆုံး Next.js အပ်"
+git commit -m "feat: initial Next.js app with PostgreSQL and health check"
 
-# GitHub တွင် repository အသစ်တစ်ခု ဖန်တီးပါ (CLI သို့မဟုတ် browser မှတဆင့်)
-# ထို့နောက် remote ကို ထည့်ပါ
+# Create a new repository on GitHub (via CLI or browser)
+# Then add the remote
 git remote add origin git@github.com:YOUR_USERNAME/capstone-app.git
 git push -u origin main
 ```
 
-<Callout type="tip" title="GitHub CLI ကို အသုံးပြုပါ">
-GitHub CLI သည် ဤအရာကို ပိုမိုမြန်ဆန်စေသည် -
+<Callout type="tip" title="Use the GitHub CLI">
+GitHub CLI သည် ဤအရာကို ပိုမိုမြန်ဆန်စေသည်-
 ```bash
 brew install gh
 gh auth login
@@ -705,50 +705,50 @@ gh repo create capstone-app --public --source=. --push
 
 ---
 
-## ဖြစ်လေ့ရှိသော ပြဿနာများကို ဖြေရှင်းခြင်း (Troubleshooting Common Issues)
+## Troubleshooting Common Issues
 
-### ဒေသတွင်းတွင် "ဒေတာဘေ့စ်သို့ ချိတ်ဆက်၍မရပါ" ဖြစ်နေခြင်း
+### "Can't connect to database" locally
 ```bash
-# postgres ကွန်တိန်နာ ကျန်းမာမှု ရှိမရှိ စစ်ဆေးပါ
+# Check if the postgres container is healthy
 docker compose -f docker-compose.dev.yml ps
-# ရှာဖွေရမည့်အရာ: Status = healthy (starting မဟုတ်ပါ)
+# LOOK FOR: Status = healthy (not starting)
 
-# postgres လော့ဂ်များကို စစ်ဆေးပါ
+# Check postgres logs
 docker compose -f docker-compose.dev.yml logs db
 
-# အတည်ပြုရန် ကိုယ်တိုင် ချိတ်ဆက်ကြည့်ပါ
+# Connect manually to verify
 docker compose -f docker-compose.dev.yml exec db \
   psql -U appuser -d capstone -c "SELECT 1"
 ```
 
-### "Module not found: @/lib/db" ဖြစ်နေခြင်း
+### "Module not found: @/lib/db"
 ```bash
-# သင်၏ tsconfig.json တွင် path alias ရှိကြောင်း သေချာစေပါ
+# Ensure your tsconfig.json has the path alias
 cat tsconfig.json | grep paths
-# တွေ့ရမည့်အရာ: "@/*": ["./*"]
+# Should see: "@/*": ["./*"]
 
-# next.config.ts တွင်လည်း ထို alias ရှိကြောင်း သေချာစေပါ
-# create-next-app သည် --import-alias "@/*" ဖြင့် ဤအရာကို အလိုအလျောက် ထည့်သွင်းပေးသည်
+# Ensure next.config.ts has the same alias
+# create-next-app adds this automatically with --import-alias "@/*"
 ```
 
-### Docker တွင် Hot-reload အလုပ်မလုပ်ခြင်း
+### Hot-reload not working in Docker
 ```bash
-# docker-compose.dev.yml ရှိ volume mount ပုံစံသည် ဤအရာကို ကိုင်တွယ်ပေးသင့်သည်။
-# မဖြစ်ပါက WATCHPACK_POLLING=true ကို သတ်မှတ်ထားကြောင်း သေချာစေပါ:
+# The volume mount approach in docker-compose.dev.yml should handle this.
+# If not, ensure WATCHPACK_POLLING=true is set:
 environment:
   WATCHPACK_POLLING: "true"
 ```
 
 ---
 
-## အကျဉ်းချုပ် (Summary)
+## Summary
 
-ယခုအခါတွင် သင့်တွင် အောက်ပါတို့ ပါဝင်သော production-quality အပလီကေးရှင်းတစ်ခု ရှိလာပါပြီ -
-- သင့်လျော်သော timeout ပြင်ဆင်မှုပါရှိသော ဒေတာဘေ့စ် ချိတ်ဆက်မှု ပူးလ်
-- အစစ်အမှန် ဒေတာဘေ့စ် ချိတ်ဆက်နိုင်မှုကို စစ်ဆေးပေးသော `/api/health` endpoint (သင်ခန်းစာ 7 ရှိ Kubernetes probes များ အသုံးပြုသည်)
-- ထည့်သွင်းမှု စစ်ဆေးခြင်း (input validation) နှင့် parameterized queries (SQL injection မရှိစေရန်) ပါရှိသော ပြီးပြည့်စုံသော CRUD API
-- အပြန်အလှန်တုံ့ပြန်သော frontend component
-- Health endpoint အတွက် ယူနစ် စမ်းသပ်မှုများ (Unit tests)
-- ဒေသတွင်း Docker Compose dev ပတ်ဝန်းကျင်
+ယခုအခါတွင် သင့်တွင် အောက်ပါတို့ပါဝင်သော production-quality application တစ်ခု ရှိလာပါပြီ-
+- မှန်ကန်သော timeout configuration ပါရှိသော database connection pool
+- တကယ့် database connectivity ကို စစ်ဆေးပေးသော `/api/health` endpoint (Lesson 7 တွင် Kubernetes probes များက အသုံးပြုသည်)
+- Input validation နှင့် parameterized queries ပါဝင်သော full CRUD API (SQL injection ကင်းစင်သည်)
+- Interactive frontend component တစ်ခု
+- Health endpoint အတွက် unit tests များ
+- Local Docker Compose dev environment တစ်ခု
 
-နောက်သင်ခန်းစာတွင်၊ ဤအပလီကေးရှင်းကို အနည်းဆုံး၊ လုံခြုံသော ကွန်တိန်နာ image တစ်ခုအဖြစ် ပက်ကေ့ခ်လုပ်ပေးမည့် production-hardened multi-stage Dockerfile ကို သင် ရေးသားမည် ဖြစ်ပါသည်။
+နောက်လာမည့် lesson တွင်၊ ဤ application ကို minimal နှင့် secure ဖြစ်သော container image တစ်ခုအဖြစ် ပုံဖော်ပေးမည့် production-hardened multi-stage Dockerfile ကို ရေးသားမည် ဖြစ်သည်။

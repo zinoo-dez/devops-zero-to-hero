@@ -1,18 +1,18 @@
 ---
-title: "Observability in CI/CD: DORA Metrics & Pipeline Dashboards"
+title: "CI/CD တွင် Observability: DORA Metrics နှင့် Pipeline Dashboards"
 ---
 
-# သင့်ရဲ့ Pipeline ကို Production System တစ်ခုလို သဘောထားခြင်း
+# သင့် Pipeline ကို Production System တစ်ခုကဲ့သို့ ဆက်ဆံခြင်း
 
-အကယ်၍ သင့်ရဲ့ CI/CD pipeline ပျက်သွားခဲ့မယ်ဆိုရင် developer ၁၀၀ ဟာ ကုဒ်တွေကို production တင်ဖို့အတွက် တားဆီးခံထားရပါလိမ့်မယ်။ ဒါပေမဲ့ အသင်းအများစုကတော့ သူတို့ရဲ့ application ကို သေချာစောင့်ကြည့် (monitor) ကြပေမဲ့ pipeline ကိုတော့ လုံးဝဥဿုံ လျစ်လျူရှုထားကြပါတယ် — အရေးကြီးတဲ့ release တစ်ခုမလုပ်ခင် မနက် ၂ နာရီမှာ pipeline ပြိုကျမှသာ သတိရတတ်ကြပါတယ်။
+သင့်ရဲ့ CI/CD pipeline သာ ကျသွားခဲ့မယ်ဆိုရင် developer ၁၀၀ က code တင်လို့မရတော့ဘဲ လမ်းမှာ ပိတ်ကုန်ပါလိမ့်မယ်။ ဒါပေမဲ့ အသင်းအများစုကတော့ သူတို့ရဲ့ Application ကိုတော့ သေချာ monitor လုပ်ကြပေမဲ့ pipeline ကိုတော့ လုံးဝဥဿုံ လျစ်လျູရှုထားတတ်ကြပါတယ် — critical release တစ်ခုမလုပ်ခင် မနက် ၂ နာရီမှာ pipeline ကျသွားမှသာ အလုအယက် ဖြစ်လာကြပါတော့တယ်။
 
-ထူးချွန်တဲ့ DevOps အသင်းတွေကတော့ pipeline ကို အရေးအကြီးဆုံး production system တစ်ခုအနေနဲ့ သဘောထားကြပါတယ်: dashboard တွေ၊ alert တွေ၊ SLO တွေနဲ့ စဉ်ဆက်မပြတ် တိုးတက်အောင် လုပ်ဆောင်မှု (continuous optimization) တွေ ထည့်သွင်းထားကြပါတယ်။
+Elite DevOps အသင်းတွေကတော့ pipeline ကို mission-critical production system တစ်ခုအနေနဲ့ သတ်မှတ်ဆက်ဆံကြပါတယ်: dashboards တွေ တပ်ဆင်တာ၊ alerts တွေ လုပ်ထားတာ၊ SLOs တွေ သတ်မှတ်တာနဲ့ စဉ်ဆက်မပြတ် optimize လုပ်နေတာတွေကို လုပ်ဆောင်ကြပါတယ်။
 
 ---
 
-## DORA Metrics: လုပ်ငန်းသုံး စံနှုန်း
+## DORA Metrics: လုပ်ငန်းခွင် Standard တစ်ခု
 
-Google မှ **DevOps Research and Assessment** (DORA) အသင်းဟာ အင်ဂျင်နီယာအသင်းပေါင်း ထောင်ပေါင်းများစွာကို နှစ်ပေါင်းများစွာ လေ့လာခဲ့ပါတယ်။ သူတို့ဟာ ထူးချွန်တဲ့အသင်းတွေနဲ့ စွမ်းဆောင်ရည်ညံ့တဲ့အသင်းတွေကို ကိန်းဂဏန်းအချက်အလက်အရ ခွဲခြားပေးနိုင်တဲ့ metric ၄ ခုကို ဖော်ထုတ်ခဲ့ပြီး — ဒီ metric တွေကို တိုးမြှင့်ခြင်းဟာ လုပ်ငန်းရဲ့ ရလဒ်တွေကိုပါ တိုက်ရိုက် တိုးတက်စေတယ်ဆိုတာကို သက်သေပြခဲ့ပါတယ်။
+Google က **DevOps Research and Assessment** (DORA) အသင်းဟာ အင်ဂျင်နီယာအသင်းပေါင်း ထောင်ပေါင်းများစွာကို နှစ်ပေါင်းများစွာ လေ့လာခဲ့ပါတယ်။ သူတို့ဟာ elite (ထူးချွန်တဲ့) အသင်းတွေနဲ့ low performer (စွမ်းဆောင်ရည်နိမ့်တဲ့) အသင်းတွေကို ကွဲပြားစေတဲ့ metrics ၄ ခုကို ဖော်ထုတ်နိုင်ခဲ့ပြီး — ဒီ metrics တွေ တိုးတက်လာတာနဲ့အမျှ လုပ်ငန်းပိုင်းဆိုင်ရာ ရလဒ်တွေပါ တိုက်ရိုက် တိုးတက်လာတယ်ဆိုတာကို သက်သေပြခဲ့ပါတယ်။
 
 ```mermaid
 quadrantChart
@@ -31,33 +31,33 @@ quadrantChart
 
 ### DORA Metrics ၄ ခု
 
-| Metric | တိုင်းတာသည်မှာ | ထူးချွန် (Elite) | ညံ့ဖျင်း (Low) |
+| Metric | တိုင်းတာသည့်အရာ | Elite | Low |
 |--------|---------|-------|-----|
-| **Deployment Frequency (ဖြန့်ချိမှု အကြိမ်ရေ)** | ကုဒ်တွေကို production ကို ဘလောက်မကြာခဏ တင်သလဲ | တစ်ရက်လျှင် အကြိမ်များစွာ | တစ်လလျှင် တစ်ကြိမ် (သို့) အောက် |
-| **Lead Time for Changes (ပြောင်းလဲမှုအတွက် ကြာချိန်)** | Commit လုပ်ချိန် → production ရောက်ချိန် | ၁ နာရီအောက် | ၁ လ မှ ၆ လ |
-| **Mean Time to Recovery / MTTR (ပြန်လည်ကောင်းမွန်ရန် ကြာချိန်)** | ပြဿနာစတင်တွေ့ရှိချိန် → ဝန်ဆောင်မှု ပြန်လည်စတင်နိုင်ချိန် | ၁ နာရီအောက် | ၁ ပတ် မှ ၁ လ |
-| **Change Failure Rate (အပြောင်းအလဲကြောင့် ပျက်စီးမှုနှုန်း)** | ပြဿနာဖြစ်စေသော deploy များ၏ ရာခိုင်နှုန်း | ၀ မှ ၁၅% | ၄၆ မှ ၆၀% |
+| **Deployment Frequency** | Production ကို code ဘယ်လောက်ကြာကြာ ပို့လဲ | တစ်ရက်လျှင် အကြိမ်များစွာ | တစ်လတစ်ကြိမ် (သို့) အောက် |
+| **Lead Time for Changes** | Commit လုပ်ချိန်မှ production ရောက်ချိန်အထိ | ၁ နာရီအောက် | ၁ လမှ ၆ လအထိ |
+| **Mean Time to Recovery (MTTR)** | ပြဿနာစတွေ့ချိန်မှ service ပြန်ကောင်းသွားချိန်အထိ | ၁ နာရီအောက် | ၁ ပတ်မှ ၁ လအထိ |
+| **Change Failure Rate** | ပြဿနာဖြစ်စေတဲ့ deploys နှုန်း (%) | 0 မှ 15% | 46 မှ 60% |
 
-**အဓိက တွေ့ရှိချက်**: အရှိန်အဟုန် (Velocity) နဲ့ တည်ငြိမ်မှု (Stability) တို့ဟာ ဆန့်ကျင်ဘက်တွေ **မဟုတ်ပါဘူး**။ ထူးချွန်တဲ့အသင်းတွေဟာ ပိုပြီး မကြာခဏ deploy လုပ်ကြသလို ချို့ယွင်းချက်လည်း ပိုနည်းပါတယ်။ စေ့စပ်သေချာတဲ့ စမ်းသပ်မှုတွေ၊ အလိုအလျောက်လုပ်ဆောင်မှုတွေ (automation) နဲ့ အသုတ်လိုက်ငယ်တွေ (small batch sizes) က အဲဒီနှစ်ခုစလုံးကို တစ်ပြိုင်နက်တည်း လုပ်ဆောင်နိုင်စေပါတယ်။
+**အဓိက သိရှိရမည့်အချက်**: Velocity (အမြန်နှုန်း) နဲ့ Stability (တည်ငြိမ်မှု) တို့ဟာ ဆန့်ကျင်ဘက်တွေ **မဟုတ်ပါဘူး**။ Elite အသင်းတွေဟာ deployment တွေကို ပိုမိုလုပ်ဆောင်ကြသလို failures (ချို့ယွင်းချက်) လည်း ပိုနည်းပါတယ်။ စေ့စပ်သေချာတဲ့ testing၊ automation နဲ့ batch အရွယ်အစား သေးငယ်မှုတို့က ဒါတွေအားလုံးကို တစ်ပြိုင်နက်တည်း ဖြစ်လာစေပါတယ်။
 
 ---
 
-## DORA Metrics များကို စုဆောင်းခြင်း
+## DORA Metrics များကို ကောက်ယူခြင်း
 
 ```bash
-# Deployment Frequency — from GitHub API
+# Deployment Frequency — GitHub API မှ ရယူခြင်း
 gh api \
   /repos/OWNER/REPO/deployments \
   --jq '[.[] | select(.environment == "production")] | length' \
   -H "Accept: application/vnd.github+json"
 
-# Lead Time — from PR merged to deployment
+# Lead Time — PR merged ဖြစ်ချိန်မှ deployment အထိ
 # (commit timestamp → production deployment timestamp)
 gh api /repos/OWNER/REPO/pulls \
   --jq '.[] | {number: .number, merged_at: .merged_at, head_sha: .merge_commit_sha}' | \
   head -20
 
-# Change Failure Rate — incidents vs deployments
+# Change Failure Rate — incidents နှင့် deployments နှိုင်းယှဉ်ခြင်း
 INCIDENTS=$(gh api /repos/OWNER/REPO/issues \
   --jq '[.[] | select(.labels[].name == "incident" and (.created_at > "2026-01-01"))] | length')
 DEPLOYS=$(gh api /repos/OWNER/REPO/deployments \
@@ -65,15 +65,15 @@ DEPLOYS=$(gh api /repos/OWNER/REPO/deployments \
 echo "CFR: $((INCIDENTS * 100 / DEPLOYS))%"
 ```
 
-### Four Keys (Google) ဖြင့် အလိုအလျောက် DORA တိုင်းတာခြင်း
+### Four Keys (Google) ဖြင့် Automated DORA ပြုလုပ်ခြင်း
 
 ```bash
-# Google's open-source DORA metrics tool
+# Google ၏ open-source DORA metrics tool
 git clone https://github.com/GoogleCloudPlatform/fourkeys.git
 cd fourkeys
 
-# Deploy with Cloud Run + BigQuery (measures from GitHub/GitLab/Tekton events)
-# Dashboard auto-generate all four DORA metrics
+# Cloud Run + BigQuery ဖြင့် deploy လုပ်ခြင်း (GitHub/GitLab/Tekton events များမှ တိုင်းတာသည်)
+# Dashboard သည် DORA metrics ၄ ခုစလုံးကို အလိုအလျောက် ဖန်တီးပေးသည်
 gcloud run deploy --source . --region us-central1
 ```
 
@@ -81,12 +81,12 @@ gcloud run deploy --source . --region us-central1
 
 ## စောင့်ကြည့်ရမည့် အဓိက Pipeline Metrics များ
 
-DORA အပြင်၊ ဤ pipeline နှင့် သက်ဆိုင်သော metric များကိုလည်း ခြေရာခံပါ:
+DORA အပြင်၊ pipeline နဲ့သက်ဆိုင်တဲ့ ဒီ metrics တွေကိုလည်း track လုပ်သင့်ပါတယ်:
 
-### ၁။ Build Duration Trend (တည်ဆောက်ချိန် ကြာမြင့်မှု လမ်းကြောင်း)
+### ၁. Build Duration Trend
 
 ```yaml
-# GitHub Actions: track build times in job summaries
+# GitHub Actions: job summaries တွင် build times များကို track လုပ်ရန်
 - name: Record build time
   if: always()
   run: |
@@ -99,10 +99,10 @@ DORA အပြင်၊ ဤ pipeline နှင့် သက်ဆိုင်သ
     echo "| Cache Hit | ${{ steps.build.outputs.cache-hit }} |" >> $GITHUB_STEP_SUMMARY
 ```
 
-### ၂။ Test Suite Health Dashboard
+### ၂. Test Suite Health Dashboard
 
 ```yaml
-# Publish JUnit test results to GitHub
+# JUnit test results များကို GitHub သို့ publish လုပ်ရန်
 - name: Publish test results
   uses: EnricoMi/publish-unit-test-result-action@v2
   if: always()
@@ -111,7 +111,7 @@ DORA အပြင်၊ ဤ pipeline နှင့် သက်ဆိုင်သ
       test-results/**/*.xml
       coverage/cobertura-coverage.xml
 
-# Track flaky tests with a dedicated label
+# သီးသန့် label တစ်ခုသုံး၍ flaky tests များကို track လုပ်ရန်
 - name: Report flaky tests
   if: failure()
   run: |
@@ -126,12 +126,12 @@ DORA အပြင်၊ ဤ pipeline နှင့် သက်ဆိုင်သ
       --body "Pipeline run: $GITHUB_RUN_URL"
 ```
 
-### ၃။ Queue Time Monitoring (တန်းစီစောင့်ဆိုင်းချိန် စောင့်ကြည့်ခြင်း)
+### ၃. Queue Time Monitoring
 
-CI runner တွေ ပြည့်နေတဲ့အခါ၊ developer တွေရဲ့ job တွေ မစတင်ခင်မှာတင် တန်းစီပြီး စောင့်ဆိုင်းနေရပါတယ်။ ဒီမမြင်ရတဲ့ စောင့်ဆိုင်းချိန်ဟာ lead time ကို ကြီးမားစွာ လွှမ်းမိုးသွားနိုင်ပါတယ်:
+CI runners တွေ ပြည့်ကျပ်နေတဲ့အခါ developers တွေဟာ သူတို့ရဲ့ jobs တွေ စတင်မလုပ်ခင် queue ထဲမှာ စောင့်ဆိုင်းရပါတယ်။ ဒီလို မမြင်ရတဲ့ စောင့်ဆိုင်းချိန်တွေက lead time ကို အများကြီး သက်ရောက်နိုင်ပါတယ်:
 
 ```yaml
-# Detect long queue times and alert
+# ကြာမြင့်တဲ့ queue times များကို ရှာဖွေပြီး alert ပို့ရန်
 - name: Check queue time
   run: |
     QUEUED_AT="${{ github.event.workflow_run.created_at }}"
@@ -142,7 +142,7 @@ CI runner တွေ ပြည့်နေတဲ့အခါ၊ developer တွ�
     echo "Queue time: ${QUEUE_SECONDS}s"
     
     if [ $QUEUE_SECONDS -gt 300 ]; then
-      # Alert on Slack: runners are saturated
+      # Slack တွင် alert ပို့ရန်: runners များ ပြည့်ကျပ်နေပါသည်
       curl -X POST "${{ secrets.SLACK_WEBHOOK }}" \
         -d "{\"text\":\"⚠️ CI Queue time ${QUEUE_SECONDS}s — consider adding more runners\"}"
     fi
@@ -152,11 +152,11 @@ CI runner တွေ ပြည့်နေတဲ့အခါ၊ developer တွ�
 
 ## Pipeline Observability Dashboard: Grafana + GitHub Actions
 
-အချိန်နှင့်တပြေးညီ pipeline dashboard တစ်ခုရရှိရန် GitHub Actions metrics များကို Grafana သို့ ပို့ဆောင်ပါ:
+ရီးရဲလ်တိုင်းမ် pipeline dashboard တစ်ခုအတွက် GitHub Actions metrics များကို Grafana သို့ export လုပ်ပါ:
 
 ```yaml
 # .github/workflows/pipeline-metrics.yml
-# Runs after every workflow and pushes metrics to a time-series store
+# workflow တိုင်းပြီးဆုံးတိုင်း run ပြီး metrics များကို time-series store သို့ ပို့ပေးသည်
 on:
   workflow_run:
     workflows: ["*"]
@@ -199,22 +199,22 @@ Pipeline Dashboard:
 
 ---
 
-## CI ကုန်ကျစရိတ်များကို ပိုမိုကောင်းမွန်အောင် လုပ်ဆောင်ခြင်း (CI Cost Optimization)
+## CI Cost Optimization
 
-GitHub Actions က runner-minute အပေါ်မူတည်ပြီး ကောက်ခံပါတယ်။ အကောင်းဆုံး မလုပ်ဆောင်ထားတဲ့ pipeline တစ်ခုဟာ ငွေကြေးနဲ့ အချိန်တွေကို လေလွင့်စေပါတယ်:
+GitHub Actions က runner-minute ပေါ်မူတည်ပြီး ကုန်ကျစရိတ် ယူပါတယ်။ Optimize မလုပ်ထားတဲ့ pipeline တစ်ခုဟာ ငွေကြေးနဲ့ အချိန်တွေကို အလဟဿ ဖြစ်စေပါတယ်:
 
 ```yaml
-# Cancel in-progress runs on new push (don't wait for old jobs)
+# push အသစ်လုပ်လာပါက လက်ရှိ run နေသည်များကို cancel လုပ်ရန် (ဟောင်းများကို ဆက်မစောင့်ပါ)
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Only run expensive jobs on push to main, not on every PR
+# PR တိုင်းတွင် မဟုတ်ဘဲ main သို့ push လုပ်မှသာ ကုန်ကျစရိတ်များသော jobs များကို run ရန်
 scan-container:
   if: github.ref == 'refs/heads/main'
   ...
 
-# Use caching aggressively
+# Caching ကို ထိရောက်စွာ အသုံးပြုရန်
 - uses: actions/cache@v4
   with:
     path: ~/.npm
@@ -222,21 +222,21 @@ scan-container:
     restore-keys: |
       ${{ runner.os }}-node-
 
-# Run independent jobs in parallel (not sequential)
+# တစ်ခုပြီးမှတစ်ခုမဟုတ်ဘဲ တူရာ jobs များကို parallel ဖြင့် run ရန်
 jobs:
   unit-test:    { ... }
-  lint:         { ... }     # Runs in parallel with unit-test
-  type-check:   { ... }     # Runs in parallel with unit-test and lint
+  lint:         { ... }     # unit-test နှင့်အတူ parallel ဖြင့် run သည်
+  type-check:   { ... }     # unit-test နှင့် lint တို့နှင့်အတူ parallel ဖြင့် run သည်
   integration:
-    needs: [unit-test, lint, type-check]   # Only after all three pass
+    needs: [unit-test, lint, type-check]   # သုံးခုစလုံး အောင်မြင်မှသာ run သည်
 ```
 
 ---
 
-## Pipeline ကျန်းမာရေးအတွက် သတိပေးချက်များ ထည့်သွင်းခြင်း (Alerting)
+## Pipeline Health ကို Alert ပို့ခြင်း
 
 ```yaml
-# Slack notification on pipeline failure
+# pipeline ကျရှုံးပါက Slack တွင် notification ပို့ရန်
 notify-failure:
   needs: [build, test, deploy]
   if: failure()
@@ -264,9 +264,9 @@ notify-failure:
 
 ---
 
-## စဉ်ဆက်မပြတ် တိုးတက်လိုသည့် ယဉ်ကျေးမှုကို တည်ဆောက်ခြင်း
+## စဉ်ဆက်မပြတ် တိုးတက်ကောင်းမွန်လာစေမည့် ယဉ်ကျေးမှုကို တည်ဆောက်ခြင်း
 
-DORA metrics တွေဟာ အင်ဂျင်နီယာပိုင်းဆိုင်ရာ တိုးတက်မှုအတွက် တုံ့ပြန်မှုစက်ဝန်း (feedback loop) တစ်ခုကို ဖန်တီးပေးပါတယ်:
+DORA metrics တွေဟာ အင်ဂျင်နီယာပိုင်းဆိုင်ရာ တိုးတက်မှုအတွက် feedback loop တစ်ခုကို ဖန်တီးပေးပါတယ်:
 
 ```mermaid
 flowchart LR
@@ -278,23 +278,22 @@ flowchart LR
     MEASURE --> ANALYSE --> IMPROVE --> MEASURE2 --> ANALYSE
 ```
 
-**လက်တွေ့ကျသော အချိန်ဇယား**:
-- **အပတ်စဉ် (Weekly)**: build duration လမ်းကြောင်းနဲ့ flaky test အရေအတွက်တို့ကို ပြန်လည်သုံးသပ်ပါ
-- **လစဉ် (Monthly)**: အသင်းရဲ့ ပစ်မှတ်တွေနဲ့ DORA metrics များကို နှိုင်းယှဉ်သုံးသပ်ပါ
-- **သုံးလတစ်ကြိမ် (Quarterly)**: တိုးတက်ရမည့် ရည်မှန်းချက်များ ချမှတ်ပါ (ဥပမာ - "Lead Time ကို ၄၅ မိနစ်မှ မိနစ် ၂၀ သို့ လျှော့ချရန်")
+**လက်တွေ့ကျင့်သုံးရမည့် အချိန်ဇယား**:
+- **အပတ်စဉ်**: build duration trend နဲ့ flaky test အရေအတွက်တို့ကို ပြန်လည်သုံးသပ်ရန်
+- **လစဉ်**: DORA metrics များကို အသင်း၏ ပန်းတိုင်များနှင့် နှိုင်းယှဉ်သုံးသပ်ရန်
+- **သုံးလတစ်ကြိမ်**: တိုးတက်မှု ပန်းတိုင်များ သတ်မှတ်ရန် (ဥပမာ - "Lead Time ကို ၄၅ မိနစ်မှ မိနစ် ၂၀ သို့ လျှော့ချရန်")
 
-ရုံးခန်းရှိ dashboard တွေမှာ (သို့မဟုတ် အပတ်စဉ် standup မှာ) pipeline metrics တွေကို ပြသတဲ့ အသင်းတွေဟာ တိုးတက်မှုစက်ဝန်းကို ဂိမ်းတစ်ခုလို ပျော်စရာဖြစ်စေပါတယ် — Dockerfile cache ကို အကောင်းဆုံးလုပ်ဆောင်လိုက်လို့ အသင်းက Lead Time ၄၅ မိနစ်ကနေ မိနစ် ၂၀ ကို ကျဆင်းသွားတာကို တွေ့လိုက်ရတဲ့အခါ၊ အခြားတိုးတက်မှုတွေ ထပ်လုပ်ဖို့အတွက် တွန်းအားသစ်တွေ ဖြစ်လာစေပါတယ်။
+ရုံးခန်းအတွင်း dashboards တွေမှာ (သို့မဟုတ် weekly standup မှာ) pipeline metrics တွေကို ပြသထားတဲ့အသင်းတွေဟာ တိုးတက်မှုစက်ဝိုင်းကို ပိုမိုထိရောက်စေပါတယ် — Dockerfile cache optimization ကြောင့် Lead Time ၄၅ မိနစ်ကနေ မိနစ် ၂၀ ကို ကျဆင်းသွားတာကို အသင်းက မြင်လိုက်ရတဲ့အခါ နောက်ထပ် တိုးတက်မှုတွေ ဆက်လုပ်ဖို့အတွက် တွန်းအားကောင်း တစ်ခု ဖြစ်လာစေပါတယ်။
 
 ---
 
-## အနှစ်ချုပ်
+## အကျဉ်းချုပ်
 
-စောင့်ကြည့်စစ်ဆေးနိုင်သော (Observable) CI/CD pipelines များကို တိုင်းတာနိုင်သည်၊ သတိပေးချက်ထုတ်ပေးနိုင်သည်၊ စဉ်ဆက်မပြတ် တိုးတက်အောင် လုပ်ဆောင်နိုင်သည်:
-- **DORA metrics** (Deployment Frequency, Lead Time, MTTR, Change Failure Rate) တွေဟာ DevOps ကျန်းမာရေးအတွက် လုပ်ငန်းသုံး စံနှုန်း KPI တွေ ဖြစ်ကြပါတယ် — ထူးချွန်တဲ့အသင်းတွေဟာ မကြာခဏ deploy လုပ်ကြသလို ချို့ယွင်းမှုနှုန်းလည်း နည်းပါးကြပါတယ်
-- **build duration trend** (cache ယိုယွင်းလာမှု)၊ **queue time** (runner ပြည့်ကျပ်မှု) နဲ့ **flaky test rate** (pipeline ယုံကြည်စိတ်ချရမှု) တို့ကို စောင့်ကြည့်ပါ
-- **InfluxDB + Grafana** သို့ metrics များကို ပို့ပါ (သို့မဟုတ်) အလိုအလျောက် DORA dashboards တွေအတွက် **Google Four Keys** ကို အသုံးပြုပါ
-- push အသစ်လုပ်တဲ့အခါ **in-progress run တွေကို ပယ်ဖျက်ပါ (cancel)**၊ သီးခြား job တွေကို **အပြိုင် (parallel)** လုပ်ဆောင်ပါ၊ PR တိုင်းမှာ ကုန်ကျစရိတ်များတဲ့ scan တွေကို ကျော်သွားဖို့ **conditional job execution** ကို အသုံးပြုပါ
-- အပြည့်အစုံသော အချက်အလက်များ (repo, commit, actor, run URL) နဲ့တကွ **Slack** မှတစ်ဆင့် ချို့ယွင်းချက်များကို သတိပေးချက် ပို့ပါ
-- သုံးလတစ်ကြိမ် တိုးတက်မှုစက်ဝန်းကို မောင်းနှင်ဖို့ DORA metrics များကို အသုံးပြုပါ — တိုင်းတာပါ → ခွဲခြွဲစိတ်ဖြာပါ → တိုးတက်အောင်လုပ်ပါ → ပြန်လည်တိုင်းတာပါ
-
-နောက်သင်ခန်းစာမှာတော့၊ rollback ပြုလုပ်နည်းဗျူဟာတွေနဲ့ incident automation အကြောင်းကို လေ့လာရမှာဖြစ်ပါတယ် — production ချို့ယွင်းချက်တွေကို နာရီပေါင်းများစွာ စောင့်စရာမလိုဘဲ စက္ကန့်ပိုင်းအတွင်း ဘယ်လိုပြန်လည်ကုစားရမလဲဆိုတာကို သင်ယူရမှာ ဖြစ်ပါတယ်။
+Observable ဖြစ်တဲ့ CI/CD pipelines တွေကို တိုင်းတာနိုင်တယ်၊ alert ပို့နိုင်တယ်၊ စဉ်ဆက်မပြတ် တိုးတက်အောင် လုပ်ဆောင်နိုင်ပါတယ်:
+- **DORA metrics** (Deployment Frequency, Lead Time, MTTR, Change Failure Rate) တွေဟာ DevOps ကျန်းမာရေးအတွက် industry-standard KPIs တွေဖြစ်ပါတယ် — elite အသင်းတွေဟာ deployment တွေကို မကြာခဏ လုပ်ဆောင်ကြသလို failure နှုန်းလည်း နည်းပါးကြပါတယ်
+- **build duration trend** (cache ကျဆင်းခြင်း), **queue time** (runner ပြည့်ကျပ်ခြင်း) နဲ့ **flaky test rate** (pipeline ယုံကြည်စိတ်ချရမှု) တို့ကို စောင့်ကြည့်ပါ
+- Metrics များကို **InfluxDB + Grafana** သို့ export လုပ်ပါ (သို့မဟုတ်) အလိုအလျောက် DORA dashboards အတွက် **Google Four Keys** ကို အသုံးပြုပါ
+- push အသစ်လုပ်လာပါက run နေဆဲများကို **cancel-in-progress** လုပ်ပါ၊ သီးသန့် jobs များကို **parallel** ဖြင့် run ပါ၊ PR များတွင် ကုန်ကျစရိတ်များသော scan များကို ကျော်သွားရန် **conditional job execution** ကို အသုံးပြုပါ
+- အပြည့်အစုံ context (repo, commit, actor, run URL) တွေပါတဲ့ **Slack** မှတဆင့် failures များကို alert ပို့ပါ
+- သုံးလတစ်ကြိမ် တိုးတက်မှုစက်ဝိုင်းကို မောင်းနှင်ရန် DORA metrics များကို အသုံးပြုပါ — measure → analyse → improve → re-measure
+- နောက်သင်ခန်းစာမှာတော့ rollback strategies နဲ့ incident automation အကြောင်းကို လေ့လာရမှာဖြစ်ပါတယ် — production failures တွေဖြစ်လာတဲ့အခါ နာရီပေါင်းများစွာ စောင့်စရာမလိုဘဲ စက္ကန့်ပိုင်းအတွင်း ဘwie ပြန်လည်ကုစားရမလဲဆိုတာကို လေ့လာရပါမယ်။

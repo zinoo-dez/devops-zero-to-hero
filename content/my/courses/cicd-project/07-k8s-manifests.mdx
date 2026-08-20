@@ -4,18 +4,18 @@ title: "Writing Production Kubernetes Manifests"
 
 # Kubernetes Manifests: Declaring Your Desired State
 
-Kubernetes သည် declarative (ကြေညာချက်အခြေပြု) ဖြစ်သည်- သင်က သင် *ဘာလိုချင်သည်* ကို (image X ၏ replicas 3 ခုပါသော Deployment တစ်ခု) ပြောပြပြီး ၎င်းကို *ဘယ်လိုဖန်တီးရမလဲ* ဆိုለသည်ကို ၎င်းက တွက်ချက်လုပ်ဆောင်ပေးပါသည်။ ဤသင်ခန်းစာရှိ manifest များသည် သင့်အပလီကေးရှင်းအတွက် ပြည့်စုံပြီး production အဆင့်မီသော configuration များ ဖြစ်ကြပါသည်။
+Kubernetes သည် declarative ဖြစ်သည်- သင်က ဘာလိုချင်တယ်ဆိုတာကို ပြောပြရုံပါပဲ (image X ရဲ့ 3 replicas ပါတဲ့ Deployment တစ်ခုလိုချင်တယ်ပေါ့)၊ ပြီးတော့ Kubernetes က အဲဒါကို ဘယ်လိုဖန်တီးရမလဲဆိုတာကို တွက်ချက်လုပ်ဆောင်ပေးပါတယ်။ ဒီသင်ခန်းစာထဲက manifests တွေကတော့ သင့်ရဲ့ Application အတွက် အပြည့်အစုံနဲ့ Production-quality ရှိတဲ့ Configuration တွေပဲ ဖြစ်ပါတယ်။
 
-သင့် repository ၏ root ရှိ `k8s/` လမ်းညွှန် (directory) ထဲတွင် manifest ဖိုင်ခြောက်ခုကို ဖန်တီးရပါမည်-
+သင့် repository ရဲ့ root မှာရှိတဲ့ `k8s/` directory အောက်မှာ manifest files ခြောက်ခုကို ဖန်တီးရပါမယ်-
 
 ```
 k8s/
-├── namespace.yaml      ← Namespace နှင့် resource quotas များ
-├── configmap.yaml      ← လျှို့ဝှက်ချက်မဟုတ်သော configuration များ (NODE_ENV စသည်ဖြင့်)
-├── secret.yaml         ← ပုံစံခွက် (Template) သက်သက်သာ! တကယ့်တန်ဖိုးများကို CI/CD က သတ်မှတ်သည်
-├── deployment.yaml     ← probes နှင့် resource limits များပါဝင်သော Application Pod များ
-├── service.yaml        ← အတွင်းပိုင်း cluster နက်ဝิร์ကချိတ်ဆက်မှု
-└── ingress.yaml        ← TLS ဖြင့် ပြင်ပ tráfico လမ်းကြောင်းသတ်မှတ်ခြင်း
+├── namespace.yaml      ← Namespace and resource quotas
+├── configmap.yaml      ← Non-secret configuration (NODE_ENV, etc.)
+├── secret.yaml         ← Template only! Real values set by CI/CD
+├── deployment.yaml     ← Application Pods with probes and resource limits
+├── service.yaml        ← Internal cluster networking
+└── ingress.yaml        ← External traffic routing with TLS
 ```
 
 ---
@@ -33,8 +33,8 @@ metadata:
     managed-by: github-actions
 
 ---
-# ResourceQuota: ဤ namespace အတွင်းရှိ pod အားလုံး စားသုံးနိုင်သည့် ကန့်သတ်ချက်များ။
-# ၎င်းသည် ထိန်းမနိုင်သိမ်းမရဖြစ်နေသော deployment တစ်ခုက server ရင်းမြစ်အားလုံးကို မကုန်ခမ်းသွားစေရန် ကာကွယ်ပေးသည်။
+# ResourceQuota: Hard limits on what all pods in this namespace can consume.
+# This prevents a runaway deployment from consuming all server resources.
 apiVersion: v1
 kind: ResourceQuota
 metadata:
@@ -43,19 +43,19 @@ metadata:
 spec:
   hard:
     # Compute limits
-    requests.cpu: "4"          # ခွင့်ပြုထားသော စုစုပေါင်း CPU requests (4 cores)
-    requests.memory: 4Gi       # ခွင့်ပြုထားသော စုစုပေါင်း memory requests
-    limits.cpu: "8"            # ခွင့်ပြုထားသော စုစုပေါင်း CPU limits
-    limits.memory: 8Gi         # ခွင့်ပြုထားသော စုစုပေါင်း memory limits
+    requests.cpu: "4"          # Total CPU requests allowed (4 cores)
+    requests.memory: 4Gi       # Total memory requests allowed
+    limits.cpu: "8"            # Total CPU limits allowed
+    limits.memory: 8Gi         # Total memory limits allowed
 
     # Object count limits
-    pods: "20"                 # ဤ namespace ထဲတွင် အများဆုံး pods ၂၀
+    pods: "20"                 # Maximum 20 pods in this namespace
     services: "10"
     persistentvolumeclaims: "5"
 
 ---
-# LimitRange: ကိုယ်ပိုင် resource limits များကို မသတ်မှတ်ထားသော pods များပေါ်တွင် အကျုံးဝင်စေမည့် ပုံသေ resource limits များ။
-# resource သတ်မှတ်ချက် မပါရှိသော pods များက အကန့်အသတ်မရှိ resource များကို စားသုံးခြင်းမှ ကာကွယ်ပေးသည်။
+# LimitRange: Default resource limits applied to pods that don't specify their own.
+# Prevents pods with no resource definitions from consuming unlimited resources.
 apiVersion: v1
 kind: LimitRange
 metadata:
@@ -65,21 +65,21 @@ spec:
   limits:
     - type: Container
       default:
-        cpu: "500m"             # ပုံသေ limit: 0.5 CPU cores
-        memory: "512Mi"         # ပုံသေ limit: 512 MB
+        cpu: "500m"             # Default limit: 0.5 CPU cores
+        memory: "512Mi"         # Default limit: 512 MB
       defaultRequest:
-        cpu: "100m"             # ပုံသေ request: 0.1 CPU cores
-        memory: "128Mi"         # ပုံသေ request: 128 MB
+        cpu: "100m"             # Default request: 0.1 CPU cores
+        memory: "128Mi"         # Default request: 128 MB
       max:
-        cpu: "2"                # မည်သည့် container တစ်ခုမျှ 2 cores ထက် ပိုမသုံးရပါ
-        memory: "2Gi"           # မည်သည့် container တစ်ခုမျှ 2 GB ထက် ပိုမသုံးရပါ
+        cpu: "2"                # No single container may use > 2 cores
+        memory: "2Gi"           # No single container may use > 2 GB
 ```
 
 ---
 
 ## Manifest 2: ConfigMap
 
-ConfigMap တစ်ခုသည် အရေးကြီးပြီး လျှို့ဝှက်ထားရမည့် မဟုတ်သော configuration များကို သိမ်းဆည်းပေးသည်။ ဤနေရာရှိ တန်ဖိုးများသည် Git သို့ commit လုပ်ရန် လုံခြုံစိတ်ချရပါသည်။
+ConfigMap တစ်ခုက sensitive မဖြစ်တဲ့ Configuration တွေကို သိမ်းဆည်းပေးပါတယ်။ ဒီထဲက Value တွေကို Git ထဲကို Commit တင်ဖို့ လုံခြုံစိတ်ချရပါတယ်။
 
 ```yaml
 # k8s/configmap.yaml
@@ -97,7 +97,7 @@ data:
   HOSTNAME: "0.0.0.0"
   NEXT_TELEMETRY_DISABLED: "1"
 
-  # Database pool configuration (လျှို့ဝှက်ချက်မဟုတ်သော ဆက်တင်များ)
+  # Database pool configuration (non-secret settings)
   DB_MAX_CONNECTIONS: "5"
   DB_IDLE_TIMEOUT_MS: "30000"
 
@@ -111,12 +111,12 @@ data:
 ## Manifest 3: Secret Template
 
 <Callout type="caution" title="Never Commit Real Secrets to Git">
-သင့် repository ထဲရှိ `secret.yaml` ဖိုင်တွင် **placeholder တန်ဖိုးများ** သာ ပါဝင်သင့်သည်။ တကယ့်တန်ဖိုးများ (တကယ့် credentials များပါရှိသော DATABASE_URL) ကို မူရင်း GitHub Secrets များနှင့်အတူ `kubectl create secret` ကို အသုံးပြု၍ CD pipeline က သတ်မှတ်ပေးပါလိမ့်မည်။ အကယ်၍ တကယ့် credentials များကို commit လုပ်မိပါက ချက်ချင်းပြောင်းလဲပါ (rotate လုပ်ပါ) နှင့် သင့်စနစ်ကို ထိခိုက်ခံလိုက်ရပြီဟု ယူဆပါ။
+သင့် repository ထဲမှာရှိတဲ့ `secret.yaml`ဖိုင်မှာ **Placeholder values** တွေပဲ ပါဝင်သင့်ပါတယ်။ တကယ်တမ်း သုံးမယ့် Real values တွေ (တကယ့် credentials တွေပါတဲ့ DATABASE_URL ပေါ့) ကိုတော့ အစစ်အမှန် GitHub Secrets တွေနဲ့အတူ `kubectl create secret` ကိုသုံးပြီး CD pipeline ကနေ ထည့်သွင်းပေးမှာ ဖြစ်ပါတယ်။ တကယ်လို့သာ တကယ့် Credentials တွေကို Commit တင်မိသွားမယ်ဆိုရင် ချက်ချင်းပြောင်းလဲပစ်ပါ (Rotate လုပ်ပါ) ပြီးတော့ သင့်ရဲ့ System ကို လုံခြုံရေးအရ ထိခိုက်ခံလိုက်ရပြီလို့ မှတ်ယူလိုက်ပါ။
 </Callout>
 
 ```yaml
-# k8s/secret.yaml — ပုံစံခွက်သက်သက်သာ၊ placeholder တန်ဖိုးများ
-# CD workflow သည် တကယ့် secret ကို ဤသို့ဖန်တီးသည်-
+# k8s/secret.yaml — TEMPLATE ONLY, placeholder values
+# The CD workflow creates the real secret via:
 # kubectl create secret generic app-secret \
 #   --from-literal=DATABASE_URL="$DATABASE_URL" \
 #   --namespace production \
@@ -130,8 +130,8 @@ metadata:
     app: capstone-app
 type: Opaque
 stringData:
-  # တကယ့် တန်ဖိုးများကို ဤနေရာတွင် မထည့်ပါနှင့်
-  # ဤတန်ဖိုးများကို CD pipeline က အစားထိုးလဲလှယ်လိမ့်မည်
+  # DO NOT PUT REAL VALUES HERE
+  # These are overwritten by the CD pipeline
   DATABASE_URL: "PLACEHOLDER_SET_BY_CD_PIPELINE"
 ```
 
@@ -139,7 +139,7 @@ stringData:
 
 ## Manifest 4: Deployment
 
-ဤသည်မှာ အရေးအကြီးဆုံး manifest ဖြစ်သည်။ ၎င်းက သင့်အပလီကေးရှင်းကို production တွင် မည်သို့လည်ပတ်သည်ကို အတိအကျ သတ်မှတ်ပေးပါသည်။
+ဒါကတော့ အရေးအကြီးဆုံး Manifest ဖြစ်ပါတယ်။ Production မှာ သင့်ရဲ့ Application ဘယ်လို Run မလဲဆိုတာကို အတိအကျ သတ်မှတ်ပေးပါတယ်။
 
 ```yaml
 # k8s/deployment.yaml
@@ -150,35 +150,35 @@ metadata:
   namespace: production
   labels:
     app: capstone-app
-    version: "1"              # CD pipeline မှ Git SHA သို့ အပ်ဒိတ်လုပ်သည်
+    version: "1"              # Updated to the Git SHA by the CD pipeline
   annotations:
-    # Deployment ဖော်ပြချက် (kubectl describe တွင် ပြသသည်)
+    # Deployment description (shows in kubectl describe)
     kubernetes.io/change-cause: "Initial deployment"
-    # Prometheus scraping annotations များ (သင်ခန်းစာ ၁၀ တွင် အသုံးပြုသည်)
+    # Prometheus scraping annotations (used in Lesson 10)
     prometheus.io/scrape: "true"
     prometheus.io/port: "3000"
     prometheus.io/path: "/api/metrics"
 spec:
-  # မြင့်မားသောရရှိနိုင်မှု (high availability) နှင့် downtime လုံးဝမရှိသော rolling updates များအတွက် replicas 3 ခုဖြင့် လည်ပတ်ပါ
+  # Run 3 replicas for high availability and zero-downtime rolling updates
   replicas: 3
 
-  # Label selector: ဤ Deployment သည် မည်သည့် Pods များကို စီမံခန့်ခွဲသနည်း။
+  # Label selector: which Pods does this Deployment manage?
   selector:
     matchLabels:
       app: capstone-app
 
-  # Rolling update မဟာဗျူဟာ: pod များကို တစ်စစီ အစားထိုးပါ၊ ရရှိနိုင်မှု 0 အဖြစ် လုံးဝမရှိစေရ
+  # Rolling update strategy: replace pods gradually, never have 0 available
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      maxSurge: 1        # အပ်ဒိတ်လုပ်နေစဉ်အတွင်း သတ်မှတ်ထားသော အရေအတွက်ထက် အပို pod ၁ ခုကို ခွင့်ပြုပါ
-      maxUnavailable: 0  # အစားထိုးမည့် pod အဆင်သင့်မဖြစ်မချင်း မည်သည့် pod ကိုမျှ မဖျက်ဆီးပါနှင့်
+      maxSurge: 1        # Allow 1 extra pod above desired count during update
+      maxUnavailable: 0  # Never terminate a pod before its replacement is ready
 
-  # pod အသစ်တစ်ခု "ရရှိနိုင်သည် (available)" ဟု မသတ်မှတ်မီ Running အဖြစ် အနည်းဆုံး နေရမည့် စက္ကန့်ပိုင်း
-  # စတင်ပြီးချင်း pod က ပျက်ကျသွားသောအခါ ကြိုတင်မဲမဆိတ်ဘဲ rollout ပြီးဆုံးသွားခြင်းကို ကာကွယ်ပေးသည်
+  # Minimum seconds a new pod must be Running before it's considered "available"
+  # Prevents premature rollout completion when a pod crashes immediately after start
   minReadySeconds: 10
 
-  # အကယ်၍ rollout သည် မိနစ် ၁၀ အတွင်း အောင်မြင်မှုမရှိပါက Failed ဟု မှတ်သားပါ
+  # If a rollout doesn't succeed in 10 minutes, mark it as Failed
   progressDeadlineSeconds: 600
 
   template:
@@ -186,11 +186,11 @@ spec:
       labels:
         app: capstone-app
       annotations:
-        # ConfigMap ပြောင်းလဲသွားသောအခါ pod များကို ပြန်လည်စတင်ပါ (Deployment spec မပြောင်းလဲလျှင်တောင်မှ)
-        # ဤသည်မှာ configmap ၏ hash ဖြစ်သည် — ပြန်လည်စတင်ရန်အတွက် ၎င်းကို အပ်ဒိတ်လုပ်ပါ
-        configmap-hash: "PLACEHOLDER"  # CD pipeline မှ အပ်ဒိတ်လုပ်သည်
+        # Restart pods when the ConfigMap changes (even if the Deployment spec didn't)
+        # This is a hash of the configmap — update it to trigger a restart
+        configmap-hash: "PLACEHOLDER"  # Updated by CD pipeline
     spec:
-      # pod များကို node အမျိုးမျိုးပေါ်တွင် ဖြန့်ကျက်ပါ (node များစွာ ရရှိနိုင်လျှင်)
+      # Spread pods across different nodes (if multiple nodes are available)
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: kubernetes.io/hostname
@@ -199,14 +199,14 @@ spec:
             matchLabels:
               app: capstone-app
 
-      # Termination grace period: လုပ်ဆောင်ဆဲ တောင်းဆိုမှုများကို ပြီးဆုံးစေရန် pod များကို စက္ကန့် ၆၀ အချိန်ပေးပါ
+      # Termination grace period: give pods 60 seconds to finish in-flight requests
       terminationGracePeriodSeconds: 60
 
       containers:
         - name: app
-          # အရေးကြီးသည်- ဤ tag ကို CD pipeline မှ sha-XXXXXXX သို့ အပ်ဒိတ်လုပ်သည်
+          # IMPORTANT: This tag is updated to sha-XXXXXXX by the CD pipeline
           image: ghcr.io/YOUR_GITHUB_USERNAME/capstone-app:sha-PLACEHOLDER
-          imagePullPolicy: Always   # နောက်ဆုံးပေါ် tagged image ကို သေချာစေရန် အမြဲတမ်း ဆွဲယူပါ
+          imagePullPolicy: Always   # Always pull to ensure latest tagged image
 
           ports:
             - name: http
@@ -214,12 +214,12 @@ spec:
               protocol: TCP
 
           # ── Environment Variables ──────────────────────────────────────
-          # ConfigMap မှ လျှို့ဝှက်ချက်မဟုတ်သော config ကို Load လုပ်ပါ
+          # Load non-secret config from ConfigMap
           envFrom:
             - configMapRef:
                 name: app-config
 
-          # လျှို့ဝှက်တန်ဖိုးများကို တစ်ခုချင်းစီ Load လုပ်ပါ (secrets များအတွက် envFrom ထက် ပို၍ ရှင်းလင်းသည်)
+          # Load secret values individually (more explicit than envFrom for secrets)
           env:
             - name: DATABASE_URL
               valueFrom:
@@ -230,28 +230,28 @@ spec:
           # ── Resource Limits and Requests ───────────────────────────────
           resources:
             requests:
-              # ဤ container သို့ အာမခံချက်ပေးထားသော အနိမ့်ဆုံး resources များ
+              # Guaranteed minimum resources allocated to this container
               cpu: "100m"       # 100 millicores = 0.1 CPU cores
               memory: "256Mi"   # 256 MB
             limits:
-              # ဤ container အသုံးပြုနိုင်သည့် အများဆုံး resources များ
+              # Maximum resources this container may use
               cpu: "500m"       # 500 millicores = 0.5 CPU cores
               memory: "512Mi"   # 512 MB
-              # OOMKilled: အကယ်၍ container သည် memory limit ကို ကျော်လွန်သွားပါက K8s က ၎င်းကို ဖျက်ဆီးပစ်သည်
+              # OOMKilled: if the container exceeds memory limit, K8s kills it
 
           # ── Health Probes ──────────────────────────────────────────────
-          # Startup probe: startup probe အောင်မြင်သည်အထိ Kubernetes သည် liveness/readiness စစ်ဆေးမှုများကို စတင်မည်မဟုတ်ပါ။ 
-          # အပလီကေးရှင်းကို စတင်သတ်မှတ်ရန် (initialize လုပ်ရန်) အချိန်ပေးသည်။
+          # Startup probe: Kubernetes won't start liveness/readiness checks
+          # until the startup probe succeeds. Gives the app time to initialize.
           startupProbe:
             httpGet:
               path: /api/health
               port: 3000
-            failureThreshold: 12   # ၁၂ ကြိမ် × စက္ကန့် ၁၀ = အများဆုံး စတင်ချိန် စက္ကန့် ၁၂၀
+            failureThreshold: 12   # 12 × 10s = 120s max startup time
             periodSeconds: 10
             timeoutSeconds: 5
 
-          # Readiness probe: ဤ pod သည် traffic လက်ခံရန် အဆင်သင့်ဖြစ်ပြီလား?
-          # အကယ်၍ readiness မအောင်မြင်ပါက၊ pod ကို Service endpoints များမှ ဖယ်ရှားသည် (traffic မရောက်ပါ)
+          # Readiness probe: Is this pod ready to receive traffic?
+          # If readiness fails, pod is removed from Service endpoints (no traffic)
           readinessProbe:
             httpGet:
               path: /api/health
@@ -259,11 +259,11 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 10
             timeoutSeconds: 5
-            failureThreshold: 3   # ၃ ကြိမ်ဆက်တိုက် မအောင်မြင်ပါက → pod ကို Service မှ ဖယ်ရှားသည်
-            successThreshold: 1   # ၁ ကြိမ်အောင်မြင်ပါက → pod ကို Service သို့ ပြန်ထည့်သည်
+            failureThreshold: 3   # 3 consecutive failures → pod removed from Service
+            successThreshold: 1   # 1 success → pod added back to Service
 
-          # Liveness probe: ဤ pod သည် ယခုထက်ထိ အသက်ရှင်နေသေးသလား?
-          # အကယ်၍ liveness မအောင်မြင်ပါက၊ K8s က pod ကို ဖျက်ဆီးပြီး ပြန်စတင်သည် (CrashLoopBackOff)
+          # Liveness probe: Is this pod still alive?
+          # If liveness fails, K8s kills and restarts the pod (CrashLoopBackOff)
           livenessProbe:
             httpGet:
               path: /api/health
@@ -271,36 +271,36 @@ spec:
             initialDelaySeconds: 30
             periodSeconds: 30
             timeoutSeconds: 10
-            failureThreshold: 3   # ၃ ကြိမ်ဆက်တိုက် မအောင်မြင်ပါက → pod ကို ပြန်လည်စတင်သည်
+            failureThreshold: 3   # 3 consecutive failures → pod restarted
             successThreshold: 1
 
           # ── Security Context ───────────────────────────────────────────
           securityContext:
-            runAsNonRoot: true            # non-root ကို တားမြစ်ကွပ်ကဲပါ (Dockerfile USER နှင့် ကိုက်ညီသည်)
-            runAsUser: 1001               # uid=1001 (Dockerfile မှ nextjs user)
-            runAsGroup: 1001              # gid=1001 (Dockerfile မှ nodejs group)
-            readOnlyRootFilesystem: true  # container filesystem သို့ ရေးသားခြင်းကို တားဆီးပါ
+            runAsNonRoot: true            # Enforce non-root (matches Dockerfile USER)
+            runAsUser: 1001               # uid=1001 (nextjs user from Dockerfile)
+            runAsGroup: 1001              # gid=1001 (nodejs group from Dockerfile)
+            readOnlyRootFilesystem: true  # Prevent writes to container filesystem
             allowPrivilegeEscalation: false
             capabilities:
-              drop: ["ALL"]              # Linux capabilities အားလုံးကို ဖြုတ်ချပါ
+              drop: ["ALL"]              # Drop all Linux capabilities
 
-          # ── ရေးသားနိုင်သော လမ်းညွှန်များအတွက် Volume Mounts ─────────────────────
-          # readOnlyRootFilesystem: true ဖြင့်၊ အောက်ပါတို့အတွက် ရေးသားနိုင်သော tmpfs လိုအပ်သည်:
+          # ── Volume Mounts for writable directories ─────────────────────
+          # With readOnlyRootFilesystem: true, we need writable tmpfs for:
           volumeMounts:
             - name: tmp
-              mountPath: /tmp           # Node.js library များစွာအတွက် လိုအပ်သည်
+              mountPath: /tmp           # Required by many Node.js libraries
             - name: nextjs-cache
-              mountPath: /app/.next/cache  # Next.js cache လမ်းညွှန်
+              mountPath: /app/.next/cache  # Next.js cache directory
 
       # ── Volumes ─────────────────────────────────────────────────────────
       volumes:
         - name: tmp
           emptyDir:
-            medium: Memory      # RAM ဖြင့် လုပ်ဆောင်သည် (disk ထက် ပိုမြန်ပြီး ပိုလုံခြုံသည်)
-            sizeLimit: 100Mi    # tmpfs အရွယ်အစားကို ကန့်သတ်ပါ
+            medium: Memory      # Backed by RAM (faster, more secure than disk)
+            sizeLimit: 100Mi    # Limit tmpfs size
         - name: nextjs-cache
           emptyDir:
-            sizeLimit: 500Mi    # Next.js ISR cache သည် ကြီးလာနိုင်သည်
+            sizeLimit: 500Mi    # Next.js ISR cache can grow large
 ```
 
 ---
@@ -317,17 +317,17 @@ metadata:
   labels:
     app: capstone-app
 spec:
-  # ClusterIP: ဤ service သည် cluster အတွင်း၌ တည်ငြိမ်သော virtual IP တစ်ခု ရရှိသည်။
-  # Pods နှင့် Ingress တို့က ဤ IP ကို အသုံးပြုကြသည်။ pod များ ပြန်စတင်လျှင်ပင် ၎င်းသည် ဘယ်တော့မှ မပြောင်းလဲပါ။
+  # ClusterIP: The service gets a stable virtual IP inside the cluster.
+  # Pods and Ingress use this IP. It never changes, even as pods restart.
   type: ClusterIP
 
   selector:
-    app: capstone-app   # ဤ label ပါသော pods အားလုံးကို ရွေးချယ်သည်
+    app: capstone-app   # Selects all pods with this label
 
   ports:
     - name: http
-      port: 80          # အခြား services/ingress များ ဤ service ကို ချိတ်ဆက်ရာတွင် အသုံးပြုသော Port
-      targetPort: 3000  # container တကယ် နားထောင်နေသော Port
+      port: 80          # Port that other services/ingress use to reach this service
+      targetPort: 3000  # Port that the container actually listens on
       protocol: TCP
 ```
 
@@ -343,27 +343,27 @@ metadata:
   name: capstone-app-ingress
   namespace: production
   annotations:
-    # Traefik ကို ingress controller အဖြစ် အသုံးပြုပါ
+    # Use Traefik as the ingress controller
     kubernetes.io/ingress.class: "traefik"
 
-    # cert-manager: Let's Encryptလက်မှတ်ကို အလိုအလျောက် ထုတ်ပေးသည်
-    # ပထမဦးစွာ 'letsencrypt-staging' ကို အသုံးပြုပါ၊ အလုပ်လုပ်သောအခါ 'letsencrypt-prod' သို့ ပြောင်းပါ
+    # cert-manager: automatically issue a Let's Encrypt certificate
+    # Use 'letsencrypt-staging' first, switch to 'letsencrypt-prod' when working
     cert-manager.io/cluster-issuer: "letsencrypt-prod"
 
-    # Traefik middleware: HTTP ကို HTTPS သို့ လမ်းကြောင်းပြောင်းပါ
+    # Traefik middleware: redirect HTTP to HTTPS
     traefik.ingress.kubernetes.io/router.middlewares: "production-redirect-https@kubernetescrd"
 
-    # လုံခြုံရေး ခေါင်းစီးများ (Security headers)
+    # Security headers
     traefik.ingress.kubernetes.io/router.entrypoints: "websecure"
 
 spec:
   tls:
     - hosts:
-        - app.yourdomain.com   # ← သင့်တကယ့် domain ဖြင့် အစားထိုးပါ
-      secretName: capstone-app-tls  # cert-manager က ဤ Secret ကို ဖန်တီးသည်
+        - app.yourdomain.com   # ← Replace with your actual domain
+      secretName: capstone-app-tls  # cert-manager creates this Secret
 
   rules:
-    - host: app.yourdomain.com   # ← သင့်တကယ့် domain ဖြင့် အစားထိုးပါ
+    - host: app.yourdomain.com   # ← Replace with your actual domain
       http:
         paths:
           - path: /
@@ -384,7 +384,7 @@ metadata:
 spec:
   redirectScheme:
     scheme: https
-    permanent: true   # 301 လမ်းကြောင်းပြောင်းခြင်း (အမြဲတမ်းဖြစ်သည်၊ ဘရောက်ဇာများက cache လုပ်သည်)
+    permanent: true   # 301 redirect (permanent, browsers cache it)
 ```
 
 ---
@@ -392,14 +392,14 @@ spec:
 ## Applying All Manifests
 
 ```bash
-# သင့် local စက်မှ (kubectl ကို သင့် K3s cluster သို့ ချိတ်ဆက်ထားပြီး):
+# From your local machine (with kubectl configured to your K3s cluster):
 
-# မှန်ကန်သော အစဉ်လိုက် အသုံးပြုပါ: namespace ကို အရင်၊ ထို့နောက် dependencies များ
+# Apply in the right order: namespace first, then dependencies
 kubectl apply -f k8s/namespace.yaml
 kubectl apply -f k8s/configmap.yaml
 
-# Secret အတွက်: သင့် local environment မှ တကယ့်တန်ဖိုးကို ထည့်သွင်းပါ
-# (CD pipeline သည် ဤအရာကို သင်ခန်းစာ ၈ တွင် ပြုလုပ်သည်၊ သို့သော် ပထမဦးဆုံး အကြိမ်အတွက် လက်ဖြင့် ပြုလုပ်ပါ)
+# For the secret: inject the real value from your local environment
+# (The CD pipeline does this in Lesson 8, but for initial setup do it manually)
 kubectl create secret generic app-secret \
   --from-literal=DATABASE_URL="postgres://appuser:REAL_PASSWORD@YOUR_DB_HOST:5432/capstone" \
   --namespace production \
@@ -409,7 +409,7 @@ kubectl apply -f k8s/deployment.yaml
 kubectl apply -f k8s/service.yaml
 kubectl apply -f k8s/ingress.yaml
 
-# rollout ကို စောင့်ကြည့်ပါ
+# Watch the rollout
 kubectl -n production rollout status deployment/capstone-app
 # Waiting for deployment "capstone-app" rollout to finish: 0 of 3 updated replicas are available...
 # deployment "capstone-app" successfully rolled out
@@ -420,35 +420,35 @@ kubectl -n production rollout status deployment/capstone-app
 ## Verifying the Deployment
 
 ```bash
-# Pod အားလုံး Running ဖြစ်နေပြီလား?
+# Are all pods Running?
 kubectl -n production get pods
 # NAME                           READY   STATUS    RESTARTS   AGE
 # capstone-app-xxx-aaa           1/1     Running   0          2m
 # capstone-app-xxx-bbb           1/1     Running   0          2m
 # capstone-app-xxx-ccc           1/1     Running   0          2m
 
-# အသေးစိတ် pod အခြေအနေကို စစ်ဆေးပါ (pod များ စတင်မလာပါက Events အပိုင်းကို ကြည့်ပါ)
+# Check detailed pod status (look at Events section if pods aren't starting)
 kubectl -n production describe pod capstone-app-xxx-aaa
 
-# probe တစ်ခုချင်းစီ၏ ကျန်းမာရေးကို စစ်ဆေးပါ
+# Check the health of each probe
 kubectl -n production describe pod capstone-app-xxx-aaa | grep -A 15 Liveness
 
-# လော့ဂ်များကို စစ်ဆေးပါ
+# Check logs
 kubectl -n production logs -l app=capstone-app --tail=50
 
-# Service တွင် endpoints များ ရှိမရှိ စစ်ဆေးပါ
+# Check the Service has endpoints
 kubectl -n production get endpoints capstone-app-service
 # NAME                   ENDPOINTS                                         AGE
 # capstone-app-service   10.42.0.5:3000,10.42.0.6:3000,10.42.0.7:3000   2m
 
-# TLS လက်မှတ် ထုတ်ပေးပြီးပြီလား?
+# Is the TLS certificate issued?
 kubectl -n production get certificate
 # NAME               READY   SECRET              AGE
 # capstone-app-tls   True    capstone-app-tls    2m
 
-# domain မပါဘဲ စမ်းသပ်ရန် Port-forward လုပ်ပါ
+# Port-forward to test without a domain
 kubectl -n production port-forward svc/capstone-app-service 8080:80
-# ထို့နောက် အခြား terminal တစ်ခုတွင်:
+# Then in another terminal:
 curl http://localhost:8080/api/health
 ```
 
@@ -501,21 +501,21 @@ graph LR
     end
 ```
 
-- **Request**: အာမခံချက်အပေးနိုင်ဆုံး အနိမ့်ဆုံး resources များ။ Kubernetes သည် ဤအရာကို scheduling ဆုံးဖြတ်ချက်များအတွက် အသုံးပြုသည်။
-- **Limit**: ခွင့်ပြုထားသော အများဆုံးပမာဏ။ ကျော်လွန်သွားပါက CPU သည် throttled ဖြစ်သွားမည်။ Memory ကျော်လွန်ပါက OOMKill ဖြစ်စေသည်။
-- **requests မပါဘဲ limits ကို ဘယ်တော့မှ မသတ်မှတ်ပါနှင့်** — ၎င်းက ခန့်မှန်း၍မရသော throttling များကို ဖြစ်စေသည်။
-- **conservative (သတိရှိရှိ) ဖြင့် စတင်ပါ** — တကယ့် production metrics များအပေါ်မူတည်၍ limits များကို တိုးမြှင့်နိုင်ပါသည်။
+- **Request**: အာမခံချက်ပေးထားသော အနည်းဆုံး Resources ပမာဏ။ Kubernetes က Schedule လုပ်မယ့် ဆုံးဖြတ်ချက်တွေချတဲ့အခါ ဒါကို အသုံးပြုပါတယ်။
+- **Limit**: ခွင့်ပြုထားသော အများဆုံး Resources ပမာဏ။ ဒီပမာဏထက် ကျော်လွန်သွားရင် CPU ကို Throttling လုပ်ခံရပါမယ်။ Memory ကျော်သွားရင်တော့ OOMKill ဖြစ်သွားပါမယ်။
+- **Request မပါဘဲ Limit ကို ဘယ်တော့မှ မသတ်မှတ်ပါနဲ့** — ဒါက ခန့်မှန်းရခက်တဲ့ Throttling ပြဿနာတွေကို ဖြစ်စေပါတယ်။
+- **Conservative ဖြစ်အောင် အရင်စလုပ်ပါ** — တကယ့် Production Metrics တွေအပေါ်မူတည်ပြီး Limit တွေကို နောက်မှ တိုးမြှင့်နိုင်ပါတယ်။
 
 ---
 
 ## Summary
 
-ယခုအခါတွင် သင့်တွင် production Kubernetes manifests အစုံအလင် ရှိနေပါပြီ:
-- ထိန်းမနိုင်သိမ်းမရဖြစ်နေသော pods များမှ server ကို ကာကွယ်ရန် ResourceQuota နှင့် LimitRange ပါသော **Namespace**
-- လျှို့ဝှက်ချက်မဟုတ်သော configuration များအတွက် **ConfigMap** (Git သို့ commit လုပ်သည်)
-- **Secret template** — တကယ့်တန်ဖိုးများကို CD pipeline မှ ထည့်သွင်းပေးပြီး Git သို့ လုံးဝ commit မလုပ်ပါ
-- replicas 3 ခု၊ rolling update မဟာဗျူဟာ၊ startup/readiness/liveness probes၊ resource limits နှင့် read-only filesystem ပါရှိသော **Deployment**
-- Ingress အတွက် တည်ငြိမ်သော ClusterIP ကို ပေးစွမ်းသည့် **Service**
-- cert-manager TLS နှင့်အတူ Traefik မှတစ်ဆင့် ပြင်ပ HTTPS traffic များကို Service သို့ လမ်းကြောင်းပြောင်းပေးသော **Ingress**
+ယခုဆိုရင် သင်ဟာ Production-ready ဖြစ်တဲ့ Kubernetes Manifests အစုံအလင်ကို ပိုင်ဆိုင်သွားပါပြီ-
+- Runaway pods တွေဆီကနေ Server ကို ကာကွယ်ပေးနိုင်ဖို့ ResourceQuota နဲ့ LimitRange ပါဝင်တဲ့ **Namespace**
+- Non-secret configuration တွေအတွက် **ConfigMap** (Git ထဲမှာ Commit တင်ထားပါတယ်)
+- **Secret template** — တကယ့် Real values တွေကို CD pipeline ကနေ ထည့်သွင်းပေးမှာဖြစ်ပြီး Git ထဲကို ဘယ်တော့မှ Commit မတင်ပါဘူး
+- Replicas 3 ခု၊ Rolling update strategy၊ Startup/readiness/liveness probes၊ Resource limits နဲ့ Read-only filesystem တို့ပါဝင်တဲ့ **Deployment**
+- Ingress အတွက် တည်ငြိမ်တဲ့ ClusterIP ကို ပံ့ပိုးပေးတဲ့ **Service**
+- Traefik နဲ့ Cert-manager TLS ကိုသုံးပြီး External HTTPS Traffic တွေကို Service ဆီသို့ Routing လုပ်ပေးတဲ့ **Ingress**
 
-နောက်သင်ခန်းစာတွင်၊ GitHub Actions CD pipeline မှတစ်ဆင့် ဤ manifest များကို အသုံးချခြင်းနှင့် Deployment image ကို အပ်ဒိတ်လုပ်ခြင်းတို့ကို အလိုအလျောက် (automate) လုပ်ဆောင်သွားပါမည်။
+နောက်လာမယ့် သင်ခန်းစာမှာတော့ ဒီ Manifest တွေကို Apply လုပ်တာနဲ့ Deployment image ကို Update လုပ်တာတွေကို GitHub Actions CD pipeline ကနေတဆင့် ဘယ်လို Automate လုပ်ရမလဲဆိုတာကို လေ့လာရမှာ ဖြစ်ပါတယ်။

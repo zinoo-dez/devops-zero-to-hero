@@ -12,7 +12,15 @@ import { ChevronRight, Clock, BookOpen, Share2 } from "lucide-react";
 import remarkGfm from "remark-gfm";
 
 export async function generateStaticParams() {
-  return getAllLessonParams();
+  const lessonParams = getAllLessonParams();
+  const langs = ["en", "my"];
+  return langs.flatMap((lang) =>
+    lessonParams.map((param) => ({
+      lang,
+      slug: param.slug,
+      lesson: param.lesson,
+    }))
+  );
 }
 
 export async function generateMetadata({

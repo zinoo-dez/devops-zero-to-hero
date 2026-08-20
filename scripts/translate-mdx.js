@@ -21,6 +21,7 @@ CRITICAL RULES:
 4. DO NOT translate URLs or links. 
 5. DO NOT add any extra conversational text (e.g. "Here is the translation:"). Just output the translated markdown.
 6. The tone should be educational and professional, yet easy to understand for tech students.
+7. DO NOT translate technical IT terms (e.g. DevOps, Linux, Command Line, Git, CI/CD, Docker, Kubernetes, Pipeline, Artifact, Volumes, Container, YAML, Terraform, Application, Clean, etc.). Keep them in English. Use natural, conversational Burmese commonly used by developers (Tech-Burmese) rather than formal, literal textbook translations.
 
 Content to translate:
 ${text}`;
