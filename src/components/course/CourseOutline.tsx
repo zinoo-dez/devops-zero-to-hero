@@ -6,9 +6,10 @@ import { cn } from "@/lib/utils";
 
 interface CourseOutlineProps {
   course: Course;
+  lang: string;
 }
 
-export function CourseOutline({ course }: CourseOutlineProps) {
+export function CourseOutline({ course, lang }: CourseOutlineProps) {
   return (
     <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-6 sm:p-8 backdrop-blur-xl space-y-6">
       <div className="flex items-center justify-between">
@@ -23,7 +24,7 @@ export function CourseOutline({ course }: CourseOutlineProps) {
       <div className="space-y-3">
         {course.lessons.map((lesson, idx) => {
           const isAccessible = course.hasFullContent;
-          const href = `/courses/${course.slug}/${lesson.slug}`;
+          const href = `/${lang}/courses/${course.slug}/${lesson.slug}`;
 
           return (
             <div

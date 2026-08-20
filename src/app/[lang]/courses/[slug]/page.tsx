@@ -71,7 +71,7 @@ export default async function CourseDetailPage({
 
   const firstLesson = course.lessons[0];
   const startHref = firstLesson
-    ? `/courses/${course.slug}/${firstLesson.slug}`
+    ? `/${lang}/courses/${course.slug}/${firstLesson.slug}`
     : "#";
 
   return (
@@ -83,7 +83,7 @@ export default async function CourseDetailPage({
           {/* Main Column (8 cols) */}
           <div className="lg:col-span-8 space-y-8">
             <LearningObjectives objectives={course.learningObjectives} />
-            <CourseOutline course={course} />
+            <CourseOutline course={course} lang={lang} />
           </div>
 
           {/* Sidebar Column (4 cols) */}

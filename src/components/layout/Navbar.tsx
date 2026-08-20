@@ -41,9 +41,9 @@ export function Navbar() {
   }, []);
 
   const navLinks = [
-    { href: `/${language}`, label: "Home" },
-    { href: `/${language}/courses`, label: "Courses", icon: BookOpen },
-    { href: `/${language}/roadmap`, label: "Interactive Roadmap", icon: Map },
+    { href: "/", label: "Home" },
+    { href: "/courses", label: "Courses", icon: BookOpen },
+    { href: "/roadmap", label: "Interactive Roadmap", icon: Map },
   ];
 
   return (
