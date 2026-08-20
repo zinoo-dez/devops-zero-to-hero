@@ -30,6 +30,7 @@ import { getAllCourses } from "@/lib/courses";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { ShieldLockIcon } from "@/components/icons/TechIcons";
+import { useLanguage } from "@/lib/i18n/LanguageContext";
 import {
   ReactFlow,
   Background,
@@ -182,7 +183,8 @@ const ICONS_MAP: Record<string, React.ReactNode> = {
 
 export function RoadmapCanvas() {
   const [viewMode, setViewMode] = useState<"pathway" | "canvas">("pathway");
-  const courses = getAllCourses();
+  const { t, language } = useLanguage();
+  const courses = getAllCourses(language);
 
   // Graph Canvas node configurations (safe, no scroll trapping)
   const nodeConfigs = [
@@ -266,8 +268,8 @@ export function RoadmapCanvas() {
       <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-2 sm:p-3 rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-100/80 dark:bg-white/[0.03] backdrop-blur-xl">
         <div className="flex items-center gap-2 text-xs text-muted-foreground px-2">
           <Sparkles className="w-4 h-4 text-blue-500" />
-          <span className="font-semibold text-foreground">13 Progressive Engineering Milestones</span>
-          <span className="hidden sm:inline">• 100% Hands-on Curriculum</span>
+          <span className="font-semibold text-foreground">{t.roadmapCanvas.milestones}</span>
+          <span className="hidden sm:inline">• {t.roadmapCanvas.curriculum}</span>
         </div>
 
         {/* View Toggle Tabs */}
@@ -282,7 +284,7 @@ export function RoadmapCanvas() {
             )}
           >
             <Layers3 className="w-3.5 h-3.5" />
-            Milestone Pathway
+            {t.roadmapCanvas.pathway}
           </button>
           <button
             onClick={() => setViewMode("canvas")}
@@ -294,7 +296,7 @@ export function RoadmapCanvas() {
             )}
           >
             <Network className="w-3.5 h-3.5" />
-            2D Architecture Graph
+            {t.roadmapCanvas.graph}
           </button>
         </div>
       </div>
@@ -337,14 +339,14 @@ export function RoadmapCanvas() {
                         {phase.phaseNumber}
                       </span>
                       <span className="text-xs text-muted-foreground">
-                        {phaseCourses.length} Learning Modules
+                        {phaseCourses.length} {t.roadmapCanvas.learningModules}
                       </span>
                     </div>
                     <h3 className="text-xl sm:text-2xl font-black text-foreground tracking-tight">
-                      {phase.title}
+                      {t.roadmapCanvas.phases[pIdx]?.title || phase.title}
                     </h3>
                     <p className="text-sm text-muted-foreground leading-relaxed max-w-2xl">
-                      {phase.subtitle}
+                      {t.roadmapCanvas.phases[pIdx]?.subtitle || phase.subtitle}
                     </p>
                   </div>
                 </div>
@@ -375,7 +377,7 @@ export function RoadmapCanvas() {
                               </div>
                               <div>
                                 <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider block">
-                                  Step {stepNumber}
+                                  {t.roadmapCanvas.step} {stepNumber}
                                 </span>
                                 <span
                                   className={cn(
@@ -425,14 +427,14 @@ export function RoadmapCanvas() {
                         {/* Card Footer Actions */}
                         <div className="pt-4 border-t border-slate-200 dark:border-white/[0.06] flex items-center justify-between">
                           <span className="text-xs text-muted-foreground">
-                            {course.lessonCount} Practical Lessons
+                            {course.lessonCount} {t.roadmapCanvas.practicalLessons}
                           </span>
 
                           <Link
                             href={`/courses/${course.slug}`}
                             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-blue-600/10 hover:bg-blue-600 text-blue-600 dark:text-blue-400 hover:text-white transition-all group-hover:bg-blue-600 group-hover:text-white"
                           >
-                            Explore
+                            {t.roadmapCanvas.explore}
                             <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
                           </Link>
                         </div>
@@ -453,7 +455,7 @@ export function RoadmapCanvas() {
           <div className="flex items-center gap-2 p-3 rounded-xl bg-blue-500/10 border border-blue-500/20 text-xs text-blue-600 dark:text-blue-300">
             <Info className="w-4 h-4 shrink-0" />
             <span>
-              <strong>Safe Navigation Mode:</strong> Page scrolling is preserved. Use the on-canvas zoom buttons (+ / -) or drag inside the box to pan across the architecture nodes.
+              <strong>{t.roadmapCanvas.safeNavMode}</strong> {t.roadmapCanvas.safeNavDesc}
             </span>
           </div>
 

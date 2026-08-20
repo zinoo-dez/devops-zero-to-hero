@@ -1,0 +1,391 @@
+---
+title: "ထုတ်လုပ်မှုအဆင့် (Production-Grade) Dockerfile များ ရေးသားခြင်း"
+---
+
+# Dockerfiles: ညွှန်ကြားချက်တစ်ခုချင်းစီ၏ အဓိပ္ပာယ် ရှင်းလင်းချက်
+
+`Dockerfile` ဆိုသည်မှာ Docker ရုပ်ပုံ (image) တစ်ခုကို တည်ဆောက်ရန်အတွက် လမ်းညွှန်ချက်စာအုပ် (recipe) တစ်ခု ဖြစ်ပါသည်။ လိုင်းတိုင်းသည် အလွှာအသစ်တစ်ခုကို ပေါင်းထည့်ခြင်း သို့မဟုတ် မက်တာဒေတာ (metadata) ကို ပြုပြင်ခြင်း တစ်ခုခုကို လုပ်ဆောင်ပေးသော ညွှန်ကြားချက်တစ်ခု ဖြစ်ပါသည်။ စတင်လေ့လာသူများအတွက် အခြေခံအကျဆုံး ဥပမာမှစ၍ ထုတ်လုပ်မှုအဆင့် (production-hardened) အထိ Dockerfile တစ်ခုကို အဆင့်ချင်း တက်လှမ်းကြည့်ကြပါစို့။
+
+---
+
+## အဓိကညွှန်ကြားချက်များ (Core Instructions)
+
+### `FROM` — အခြေခံ ရုပ်ပုံ (Base Image)
+
+```dockerfile
+# အခြေခံအကျဆုံး: Debian ပေါ်ရှိ တရားဝင် node
+FROM node:20
+
+# ပိုကောင်းသည်: Alpine အမျိုးအစား (Debian 200MB နှင့် နှိုင်းယှဉ်လျှင် အခြေခံ 5MB သာရှိသည်)
+FROM node:20-alpine
+
+# ထုတ်လုပ်မှု (Production) အတွက် အကောင်းဆုံး: တိကျသော ဗားရှင်းကို သတ်မှတ်ခြင်း
+FROM node:20.14.0-alpine3.20   # major.minor.patch နှင့် OS ဗားရှင်းကို အတိအကျ သတ်မှတ်သည်
+
+# Multi-stage: အဆင့်တစ်ခုချင်းစီအတွက် အခြေခံအမျိုးမျိုးကို အသုံးပြုခြင်း
+FROM node:20-alpine AS builder
+FROM node:20-alpine AS runner
+
+# Scratch: Go/Rust binary များအတွက် အလွတ်ဖြစ်သော image (အတွင်းတွင် မည်သည့်အရာမှ မရှိပါ)
+FROM scratch
+```
+
+<Callout type="warning" title="ထုတ်လုပ်မှု (Production) တွင် :latest ကို လုံးဝမသုံးပါနှင့်">
+`FROM node:latest` ဆိုသည်မှာ ရက်အလိုက် image များ ကွဲပြားသွားနိုင်သည်ကို ဆိုလိုသည်။ ယနေ့သင်တည်ဆောက်လိုက်သော prod image သည် Node 20 ကို အသုံးပြုမည်ဖြစ်သော်လည်း၊ နောက်တစ်ပတ်တွင် တူညီသော Dockerfile သည် Node 22 ကို အသုံးပြုသွားမည်ဖြစ်ကာ (ကုဒ်များကို ပျက်စီးစေနိုင်သည်)။ ထို့ကြောင့် အနည်းဆုံး major ဗားရှင်းဖြင့် အမြဲသတ်မှတ်ပါ: `node:20-alpine`။
+</Callout>
+
+### `WORKDIR` — အလုပ်လုပ်မည့် ဖိုင်တွဲကို သတ်မှတ်ခြင်း
+
+```dockerfile
+# ဖိုင်တွဲ မရှိသေးပါက အသစ်ဖန်တီးပေးသည်
+# နောက်ဆက်တွဲ COPY/RUN/CMD အားလုံးသည် ဤဖိုင်တွဲကို အခြေခံသည်
+WORKDIR /app
+
+# / ကို WORKDIR အဖြစ် လုံးဝမသုံးပါနှင့် — root ဖိုင်စနစ် ရှုပ်ပွသွားပါလိမ့်မည်
+# RUN mkdir နှင့် တွဲ၍ ဘယ်တော့မှ မသုံးပါနှင့် — WORKDIR သည် ၎င်းကို အလိုအလျောက် လုပ်ဆောင်ပေးပြီးသား ဖြစ်သည်
+```
+
+### `COPY` နှင့် `ADD`
+
+```dockerfile
+# COPY: တည်ဆောက်သည့် ပတ်ဝန်းကျင် (သင်၏ ပရောဂျက် ဖိုင်တွဲ) မှ ဖိုင်များကို image ထဲသို့ ကူးယူသည်
+COPY package.json package-lock.json ./    # WORKDIR သို့ ကူးယူသည်
+COPY src/ ./src/                          # ဖိုင်တွဲတစ်ခုလုံးကို ကူးယူသည်
+COPY --chown=node:node . .               # ပိုင်ဆိုင်ခွင့် (ownership) အမှန်ဖြင့် ကူးယူသည်
+
+# ADD: COPY နှင့် တူသော်လည်း အထူးစွမ်းရည်များ ပါရှိသည် (အများအားဖြင့် ရှောင်ပါ)
+ADD https://example.com/file.tar.gz /tmp/  # URL များကို ဒေါင်းလုဒ်လုပ်နိုင်သည် (လုံခြုံရေး အန္တရာယ်ရှိသည်)
+ADD file.tar.gz /tmp/                      # သိမ်းဆည်းထားသော ဖိုင်များကို အလိုအလျောက် ဖြည်ပေးသည်
+
+# စည်းမျဉ်း: ADD ထက် COPY ကို အမြဲဦးစားပေးပါ — ၎င်းသည် ပိုမိုရှင်းလင်းပြီး မှန်းဆရလွယ်ကူသည်
+```
+
+### `RUN` — တည်ဆောက်နေစဉ်အတွင်း အမိန့်များကို လုပ်ဆောင်ခြင်း
+
+```dockerfile
+# RUN တိုင်းသည် အလွှာအသစ်တစ်ခုကို ဖန်တီးသည် — အလွှာအရေအတွက် လျှော့ချရန် အမိန့်များကို ဆက်စပ်ပေးပါ
+# မကောင်းသော ဥပမာ (အလွှာ 3 ခု၊ အလွှာတိုင်းတွင် package list cache ပါရှိသည်):
+RUN apt-get update
+RUN apt-get install -y curl
+RUN rm -rf /var/lib/apt/lists/*
+
+# ကောင်းသော ဥပမာ (အလွှာ 1 ခု၊ အဆင့်တူတူတွင်ပင် cache ကို ရှင်းလင်းထားသည်):
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# Alpine package manager (apk)
+RUN apk add --no-cache curl wget openssl
+
+# လိုင်းများစွာပါသော စာမူများအတွက် heredoc ကို အသုံးပြုပါ (Docker 1.4+)
+RUN <<EOF
+  set -e
+  npm ci --only=production
+  npx prisma generate
+  rm -rf /root/.npm /tmp/*
+EOF
+```
+
+### `ENV` — ပတ်ဝန်းကျင် ကိန်းရှင်များ (Environment Variables) သတ်မှတ်ခြင်း
+
+```dockerfile
+# တည်ဆောက်ချိန်တွင် သတ်မှတ်ပြီး အလုပ်လုပ်ချိန် (runtime) တွင်လည်း အသုံးပြုနိုင်သည်
+ENV NODE_ENV=production
+ENV PORT=3000
+ENV TZ=UTC
+
+# တစ်ကြိမ်တည်းဖြင့် အများအပြား သတ်မှတ်ခြင်း (ပိုမိုထိရောက်သည်)
+ENV NODE_ENV=production \
+    PORT=3000 \
+    LOG_LEVEL=info
+
+# နောက်ဆက်တွဲ RUN ညွှန်ကြားချက်များတွင် ခေါ်ယူအသုံးပြုခြင်း
+RUN echo "Building for $NODE_ENV"
+```
+
+### `ARG` — တည်ဆောက်ချိန် ကိန်းရှင်များ သက်သက် (Build-Time Arguments Only)
+
+```dockerfile
+# တည်ဆောက်နေစဉ်အတွင်းသာ အသုံးပြုနိုင်သည် (အလုပ်လုပ်ချိန်တွင် မဟုတ်ပါ — ENV နှင့် မတူပါ)
+ARG NODE_VERSION=20
+ARG BUILD_DATE
+ARG GIT_COMMIT=unknown
+
+# arg ကို အသုံးပြုခြင်း
+FROM node:${NODE_VERSION}-alpine
+
+# တည်ဆောက်ချိန်တွင် ထည့်သွင်းခြင်း:
+# docker build --build-arg NODE_VERSION=18 .
+
+# တံဆိပ်များ (labels) အတွက် အသုံးဝင်သည်:
+LABEL org.opencontainers.image.revision="${GIT_COMMIT}"
+LABEL org.opencontainers.image.created="${BUILD_DATE}"
+```
+
+### `EXPOSE` — ပေါက်ချိတ်ကို ဖော်ပြခြင်း (Document Port)
+
+```dockerfile
+# စာရွက်စာတမ်း သက်သက်သာဖြစ်သည် — ပေါက်ချိတ်ကို အမှန်တကယ် ဖွင့်ပေးခြင်း မဟုတ်ပါ
+# အမှန်တကယ် ဖွင့်ပေးခြင်းကို docker run -p ဖြင့် လုပ်ဆောင်သည်
+EXPOSE 3000
+EXPOSE 3000/tcp
+EXPOSE 53/udp    # DNS
+```
+
+### `CMD` နှင့် `ENTRYPOINT`
+
+ဤသည်မှာ လူအများဆုံး ရှုပ်ထွေးလေ့ရှိသော ညွှန်ကြားချက် နှစ်ခု ဖြစ်သည်:
+
+```dockerfile
+# CMD: မူလအမိန့် — docker run အကြောင်းအရာများဖြင့် လွယ်ကူစွာ အစားထိုးနိုင်သည်
+CMD ["node", "server.js"]
+# အစားထိုးခြင်း: docker run my-image node other.js
+
+# ENTRYPOINT: လုပ်ဆောင်ချက် — အစားထိုးရန် ပိုခက်ခဲသည် (--entrypoint flag ကို သုံးရမည်)
+ENTRYPOINT ["node"]
+CMD ["server.js"]
+# ကွန်တိန်နာသည် node ကို အမြဲလုပ်ဆောင်မည်ဖြစ်သော်လည်း ဖိုင်ကို ပြောင်းလဲနိုင်သည်:
+# docker run my-image other.js
+
+# Shell ပုံစံ နှင့် Exec ပုံစံ:
+CMD node server.js          # Shell ပုံစံ: /bin/sh -c "node server.js"
+                            # ပြဿနာ: node သည် sh ၏ သားသမီးဖြစ်သည် — အချက်ပြမှုများ (SIGTERM) ရောက်ရှိမည် မဟုတ်ပါ
+CMD ["node", "server.js"]   # Exec ပုံစံ: node ကို PID 1 အဖြစ် တိုက်ရိုက်လုပ်ဆောင်သည်
+                            # အချက်ပြမှုများသည် node သို့ တိုက်ရိုက်ရောက်ရှိသည် — ကောင်းမွန်စွာ ပိတ်သိမ်းခြင်း (graceful shutdown) အလုပ်လုပ်သည်
+```
+
+<Callout type="tip" title="Exec ပုံစံ (JSON Array) ကို အမြဲသုံးပါ">
+`CMD executable arg` အစား `CMD ["executable", "arg"]` ကို အသုံးပြုပါ။ Shell ပုံစံသည် သင်၏အမိန့်ကို `/bin/sh -c` အတွင်း ထည့်သွင်းပေးသောကြောင့် သင်၏ app အစား `sh` သည် PID 1 ဖြစ်လာကာ `docker stop` လုပ်နေစဉ်အတွင်း SIGTERM သည် သင်၏ လုပ်ငန်းစဉ်သို့ မရောက်ရှိဘဲ ဖြစ်သွားစေနိုင်ပါသည်။
+</Callout>
+
+### `USER` — လုပ်ဆောင်မည့် အသုံးပြုသူကို သတ်မှတ်ခြင်း
+
+```dockerfile
+# ထုတ်လုပ်မှု (Production) တွင် root မဟုတ်သော အသုံးပြုသူဖြင့် အမြဲလုပ်ဆောင်ပါ
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+USER appuser
+
+# သို့မဟုတ် ဂဏန်းပါသော UID ကို အသုံးပြုပါ (distroless image များတွင် useradd မပါဘဲတောင် အလုပ်လုပ်သည်)
+USER 1001:1001
+```
+
+### `HEALTHCHECK` — ပါဝင်ပြီးသား ကျန်းမာရေး စောင့်ကြည့်စစ်ဆေးမှု
+
+```dockerfile
+# Docker daemon သည် ဤအရာကို စစ်ဆေးပြီး docker ps တွင် ကျန်းမာရေး အခြေအနေကို အစီရင်ခံသည်
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
+  CMD wget -qO- http://localhost:3000/health || exit 1
+
+# သို့မဟုတ် ဒေတာဘေ့စ် စစ်ဆေးမှုအတွက်:
+HEALTHCHECK --interval=5s --timeout=5s --retries=10 \
+  CMD pg_isready -U postgres || exit 1
+
+# အခြေခံ image မှ ကျန်းမာရေး စစ်ဆေးမှုကို ပိတ်ရန်:
+HEALTHCHECK NONE
+```
+
+---
+
+## ပြီးပြည့်စုံသော ထုတ်လုပ်မှုအဆင့် Dockerfile (Node.js)
+
+```dockerfile
+# Dockerfile — Production-grade Node.js API
+# Multi-stage: deps → builder → runner
+
+# ── အဆင့် ၁: မှီခိုချက် (Dependencies) အားလုံးကို ထည့်သွင်းခြင်း (တည်ဆောက်ရန်အတွက်) ────────────────────
+FROM node:20-alpine AS deps
+
+# native npm modules များအတွက် လိုအပ်သော တည်ဆောက်ရေး ကိရိယာများကို ထည့်သွင်းခြင်း
+RUN apk add --no-cache python3 make g++
+
+WORKDIR /app
+
+# package ဖိုင်များကိုသာ ကူးယူပါ — layer cache ကို အများဆုံး အသုံးချပါ
+COPY package.json package-lock.json ./
+
+# မှီခိုချက် အားလုံးကို ထည့်သွင်းပါ (တည်ဆောက်ရန် devDependencies အပါအဝင်)
+RUN npm ci
+
+# ── အဆင့် ၂: အပလီကေးရှင်းကို တည်ဆောက်ခြင်း ──────────────────────────────────────
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# ယခင်အဆင့်မှ deps ကို ကူးယူပါ
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+
+# Prisma client ကို ဖန်တီးပါ
+RUN npx prisma generate
+
+# Next.js app ကို တည်ဆောက်ပါ
+ENV NEXT_TELEMETRY_DISABLED=1
+RUN npm run build
+
+# ── အဆင့် 3: ထုတ်လုပ်မှု အလုပ်လုပ်ချိန် (အသေးဆုံး) ───────────────────────────────
+FROM node:20-alpine AS runner
+
+# မက်တာဒေတာ (OCI စံနှုန်း တံဆိပ်များ)
+LABEL org.opencontainers.image.title="my-api"
+LABEL org.opencontainers.image.description="Production API"
+LABEL org.opencontainers.image.version="1.0.0"
+LABEL org.opencontainers.image.source="https://github.com/yourorg/api"
+
+WORKDIR /app
+
+# လုံခြုံရေး: ဖိုင်လုပ်ငန်းစဉ် မလုပ်ဆောင်မီ root မဟုတ်သော အသုံးပြုသူကို ဖန်တီးပါ
+RUN addgroup -S appgroup \
+    && adduser -S appuser -G appgroup
+
+# အလုပ်လုပ်ချိန် ပတ်ဝန်းကျင်
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
+    PORT=3000 \
+    TZ=UTC
+
+# အလုပ်လုပ်ချိန်တွင် လိုအပ်သည်များကိုသာ ကူးယူပါ
+COPY --from=builder --chown=appuser:appgroup /app/.next/standalone ./
+COPY --from=builder --chown=appuser:appgroup /app/.next/static ./.next/static
+COPY --from=builder --chown=appuser:appgroup /app/public ./public
+
+# Prisma စကီးမားကို ကူးယူပါ (အလုပ်လုပ်ချိန်အတွက် လိုအပ်သည်)
+COPY --from=builder --chown=appuser:appgroup /app/prisma ./prisma
+COPY --from=builder --chown=appuser:appgroup /app/node_modules/.prisma ./node_modules/.prisma
+
+# root မဟုတ်သော အသုံးပြုသူသို့ ပြောင်းပါ
+USER appuser
+
+EXPOSE 3000
+
+# ကျန်းမာရေး စစ်ဆေးမှု
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+  CMD wget -qO- http://localhost:3000/health || exit 1
+
+# Exec ပုံစံ — PID 1 သည် SIGTERM ကို မှန်ကန်စွာ လက်ခံရရှိသည်
+CMD ["node", "server.js"]
+```
+
+---
+
+## ပြီးပြည့်စုံသော ထုတ်လုပ်မှုအဆင့် Dockerfile (Go Binary)
+
+```dockerfile
+# Go သည် static binary တစ်ခုကို ထုတ်လုပ်သည် — နောက်ဆုံး image သည် scratch နှင့် နီးစပ်နိုင်သည်
+FROM golang:1.22-alpine AS builder
+
+# CGO အတွက် လိုအပ်သော တည်ဆောက်ရေး ကိရိယာများကို ထည့်သွင်းပါ (လိုအပ်ပါက)
+RUN apk add --no-cache git ca-certificates tzdata
+
+WORKDIR /app
+
+# မှီခိုချက်များကို ဒေါင်းလုဒ်လုပ်ပါ (go.mod/go.sum မပြောင်းလဲပါက cache လုပ်ထားသည်)
+COPY go.mod go.sum ./
+RUN go mod download
+
+# ပင်ရင်းကုဒ်ကို ကူးယူပြီး တည်ဆောက်ပါ
+COPY . .
+
+# တည်ဆောက်ရေး အလံများ (Build flags):
+# -ldflags "-w -s" သည် debug အချက်အစာများနှင့် symbol table ကို ဖြုတ်ပစ်သည် (binary ပိုငယ်စေသည်)
+# CGO_ENABLED=0 သည် အမှန်တကယ် static binary တစ်ခုကို ထုတ်လုပ်သည် (shared libs မပါပါ)
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -ldflags="-w -s" \
+    -o /app/server ./cmd/server
+
+# နောက်ဆုံးအဆင့်: distroless (shell မပါ၊ package manager မပါ — တိုက်ခိုက်ခံရနိုင်ခြေ အနည်းဆုံး)
+FROM gcr.io/distroless/static-debian12
+
+COPY --from=builder /app/server /server
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
+
+USER 65532:65532    # distroless image ထဲရှိ nonroot အသုံးပြုသူ
+
+EXPOSE 8080
+ENTRYPOINT ["/server"]
+```
+
+ရလာမည့် image သည် ပုံမှန်အားဖြင့် **5–15 MB** သာ ရှိမည်ဖြစ်ပြီး — ပုံမှန် Go image တစ်ခုအတွက် 400+ MB နှင့် နှိုင်းယှဉ်လျှင် အလွန် သေးငယ်ပါသည်။
+
+---
+
+## `.dockerignore` ဖိုင်
+
+`.gitignore` နှင့် တူသော်လည်း Docker တည်ဆောက်မှုများအတွက် ဖြစ်သည်။ ၎င်းမပါရှိပါက တည်ဆောက်မှု ပတ်ဝန်းကျင် တစ်ခုလုံး (`node_modules`၊ `.git`၊ စမ်းသပ်မှု ဖိုင်များ အပါအဝင်) သည် daemon သို့ ပို့ဆောင်ခြင်း ခံရမည် ဖြစ်သည်:
+
+```
+# .dockerignore
+.git
+.gitignore
+node_modules
+npm-debug.log
+.env
+.env.local
+*.md
+.next
+dist
+out
+coverage
+**/__tests__/**
+**/*.test.ts
+**/*.spec.ts
+Dockerfile*
+docker-compose*
+.github
+```
+
+```bash
+# မတည့်မီ သင်၏ တည်ဆောက်မှု ပတ်ဝန်းကျင်သည် မည်မျှကြီးမားသည်ကို ကြည့်ပါ
+docker build . 2>&1 | head -3
+# Sending build context to Docker daemon  250.4MB  ← ကြီးလွန်းသည်!
+
+# .dockerignore ထည့်သွင်းပြီးနောက်:
+# Sending build context to Docker daemon  1.2MB    ← ပိုကောင်းသွားသည်
+```
+
+---
+
+## တည်ဆောက်ခြင်းနှင့် Tag သတ်မှတ်ခြင်း
+
+```bash
+# အခြေခံ တည်ဆောက်မှု
+docker build -t my-api:v1.0.0 .
+
+# တိကျသော အဆင့်တစ်ခုတည်းကိုသာ တည်ဆောက်ပါ (builder အဆင့်ကို စမ်းသပ်ရန် အသုံးဝင်သည်)
+docker build --target builder -t my-api:builder .
+
+# တည်ဆောက်ချိန် အကြောင်းအရာများ (build args) ဖြင့်
+docker build \
+  --build-arg GIT_COMMIT=$(git rev-parse --short HEAD) \
+  --build-arg BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+  -t my-api:$(git rev-parse --short HEAD) .
+
+# တည်ဆောက်ထားသော image ၏ အလွှာများကို ကြည့်ရှုပါ
+docker history my-api:v1.0.0
+# IMAGE          CREATED        CREATED BY                                      SIZE
+# abc123         2 hours ago    CMD ["node" "server.js"]                        0B
+# def456         2 hours ago    COPY --from=builder /app/.next/standalone ./    18.4MB
+# ...
+
+# နောက်ဆုံး image အရွယ်အစားကို စစ်ဆေးပါ
+docker images my-api
+# REPOSITORY   TAG       SIZE
+# my-api       v1.0.0    89.3MB
+```
+
+---
+
+## အကျဉ်းချုပ်
+
+ထုတ်လုပ်မှုအဆင့် (Production-grade) Dockerfile တစ်ခုတွင်:
+- **အခြေခံ image ဗားရှင်းကို အတိအကျ သတ်မှတ်ထားသည်** — `:latest` ကို လုံးဝ မသုံးပါ
+- **Alpine သို့မဟုတ် distroless ကို အသုံးပြုသည်** — တိုက်ခိုက်ခံရနိုင်ခြေ အနည်းဆုံး ဖြစ်စေရန်
+- **ပင်းရင်းကုဒ် မတိုင်မီ `package.json` ကို ကူးယူသည်** — layer cache အသုံးဝင်မှုကို အများဆုံး ဖြစ်စေရန်
+- **RUN အမိန့်များကို `&&` ဖြင့် ဆက်စပ်ပေးသည်** — အလွှာအရေအတွက်ကို အနည်းဆုံး ဖြစ်စေရန်
+- **Multi-stage တည်ဆောက်မှုများကို အသုံးပြုသည်** — image ကြီးကြီးဖြင့် တည်ဆောက်ပြီး image သေးသေးလေးဖြင့် ဖြန့်ဝေရန်
+- **root မဟုတ်သော အသုံးပြုသူဖြင့် လုပ်ဆောင်သည်** — `CMD` မတိုင်မီ `adduser` + `USER` ညွှန်ကြားချက်ကို သုံးရန်
+- **CMD အတွက် exec ပုံစံကို အသုံးပြုသည်** — `["node", "server.js"]` သည် PID 1 မှ SIGTERM ကို သေချာပေါက် လက်ခံရရှိစေရန်
+- **HEALTHCHECK ပါရှိသည်** — Docker daemon သည် ကွန်တိန်နာ ကျန်းမာရေးကို အလိုအလျောက် စောင့်ကြည့်ရန်
+- **`.dockerignore` ပါရှိသည်** — မလိုအပ်ဘဲ ဖောင်းပွနေသော တည်ဆောက်မှု ပတ်ဝန်းကျင်များကို ရှောင်ရှားရန်
+
+နောက်သင်ခန်းစာတွင်၊ သင်၏ တည်ဆောက်မှုများကို မိနစ်ပိုင်းမှ စက္ကန့်ပိုင်းအတွင်း ပြီးစီးစေရန် Docker ၏ layer caching စနစ်ကို အထူးကျွမ်းကျင်အောင် လေ့လာရမည် ဖြစ်ပါသည်။

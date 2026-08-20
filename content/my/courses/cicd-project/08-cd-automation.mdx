@@ -1,0 +1,447 @@
+---
+title: "GitHub Actions မှတစ်ဆင့် K3s သို့ CD Deployments များကို အလိုအလျောက်လုပ်ဆောင်ခြင်း"
+---
+
+# ပြီးပြည့်စုံသော CD Pipeline
+
+ဤသင်ခန်းစာသည် အရာအားလုံးကို ပုံဖော်ပေးမည့်အပိုင်း ဖြစ်ပါသည်။ CD အလုပ်လုပ်ပုံ အဆင့်ဆင့် (Workflow):
+
+1. `main` သို့ merge တင်ပြီး **CI အောင်မြင်သွားပြီးနောက်** အလုပ်စလုပ်သည်
+2. Git SHA တက်ဂ်ကို အသုံးပြု၍ **Docker image ကို တည်ဆောက်သည်**
+3. **GHCR သို့ ပို့ဆောင်သည် (Push လုပ်သည်)**
+4. နောက်ဆုံးပေါ် ဒေတာဘေ့စ် URL (GitHub Secrets မှ ရယူထားသော) ဖြင့် **Kubernetes Secret ကို အပ်ဒိတ်လုပ်သည်**
+5. ပုံအသစ် (image tag) ကို အသုံးပြုရန် **Deployment ကို အပ်ဒိတ်လုပ်သည်**
+6. rollout ပြီးဆုံးသည်အထိ **စောင့်ဆိုင်းသည်**
+7. deployment မှာ ကျန်းမာရေးကောင်းမွန်ကြောင်း အတည်ပြုရန် **smoke test တစ်ခုကို လုပ်ဆောင်သည်**
+8. smoke test မအောင်မြင်ပါက **အလိုအလျောက် ပုံစံဟောင်းသို့ ပြန်ပြောင်းသည် (Rollback လုပ်သည်)**
+
+---
+
+## ပြီးပြည့်စုံသော CD Workflow
+
+`.github/workflows/cd.yml` ကို ဖန်တီးပါ သို့မဟုတ် အပ်ဒိတ်လုပ်ပါ:
+
+```yaml
+# .github/workflows/cd.yml
+name: CD — Deploy to Production
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+
+# Serialize deployments: only one deploy runs at a time
+# This prevents two concurrent deploys from racing and corrupting state
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false   # Do NOT cancel in-progress deployments
+
+jobs:
+  # ============================================================
+  # Job 1: Build and push the Docker image to GHCR
+  # ============================================================
+  build-and-push:
+    name: 🐳 Build & Push Image
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      image-tag: ${{ steps.meta.outputs.version }}
+      full-image: ghcr.io/${{ github.repository }}:${{ steps.meta.outputs.version }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha,prefix=sha-,format=short
+            type=ref,event=branch
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            APP_VERSION=${{ github.sha }}
+
+  # ============================================================
+  # Job 2: Deploy the new image to the K3s cluster
+  # ============================================================
+  deploy:
+    name: 🚀 Deploy to Production
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    needs: build-and-push   # Wait for the image to be pushed
+    environment:
+      name: production
+      url: https://app.yourdomain.com  # ← Update with your domain
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── Set up kubectl ──────────────────────────────────────────────────
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: "v1.29.0"
+
+      - name: Configure kubectl
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG_BASE64 }}" | base64 -d > ~/.kube/config
+          chmod 600 ~/.kube/config
+          # Verify connection to the cluster
+          kubectl cluster-info
+
+      # ── Update the database secret ──────────────────────────────────────
+      # Always sync the secret before deploying — credentials may have rotated
+      - name: Sync database secret
+        run: |
+          kubectl create secret generic app-secret \
+            --from-literal=DATABASE_URL="${{ secrets.DATABASE_URL }}" \
+            --namespace production \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      # ── Apply configuration manifests ───────────────────────────────────
+      # Apply configmap, service, ingress (these change less frequently)
+      - name: Apply Kubernetes configuration
+        run: |
+          kubectl apply -f k8s/namespace.yaml
+          kubectl apply -f k8s/configmap.yaml
+          kubectl apply -f k8s/service.yaml
+          kubectl apply -f k8s/ingress.yaml
+
+      # ── Update the deployment with the new image ────────────────────────
+      - name: Update deployment image
+        run: |
+          IMAGE="ghcr.io/${{ github.repository }}:${{ needs.build-and-push.outputs.image-tag }}"
+          echo "Deploying image: $IMAGE"
+
+          # Update the image in the Deployment
+          kubectl set image deployment/capstone-app \
+            app="$IMAGE" \
+            --namespace production
+
+          # Annotate the rollout with the Git SHA for traceability
+          kubectl annotate deployment/capstone-app \
+            kubernetes.io/change-cause="GitHub Actions deploy: ${{ github.sha }}" \
+            --namespace production \
+            --overwrite
+
+      # ── Wait for rollout to complete ────────────────────────────────────
+      - name: Wait for rollout
+        run: |
+          echo "Waiting for rolling update to complete..."
+          kubectl rollout status deployment/capstone-app \
+            --namespace production \
+            --timeout=8m
+          
+          # Show current pod status
+          kubectl -n production get pods -l app=capstone-app
+
+      # ── Smoke test: verify the deployment is healthy ────────────────────
+      - name: Run smoke test
+        id: smoke-test
+        run: |
+          echo "Running smoke test against production..."
+          
+          # Wait for the service to be ready (sometimes there's a small delay
+          # after rollout before all pods are in the Service endpoint list)
+          sleep 10
+          
+          # Check the health endpoint (retry 5 times with 10s delay)
+          for i in {1..5}; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              --max-time 10 \
+              https://app.yourdomain.com/api/health)  # ← Update with your domain
+            
+            if [ "$STATUS" = "200" ]; then
+              echo "✅ Smoke test passed (HTTP $STATUS)"
+              
+              # Also verify the health response includes db.status: connected
+              HEALTH=$(curl -s --max-time 10 https://app.yourdomain.com/api/health)
+              DB_STATUS=$(echo "$HEALTH" | jq -r '.db.status')
+              
+              if [ "$DB_STATUS" = "connected" ]; then
+                echo "✅ Database connectivity confirmed"
+                exit 0
+              else
+                echo "❌ Database connectivity check failed: $HEALTH"
+                exit 1
+              fi
+            fi
+            
+            echo "⏳ Attempt $i/5: HTTP $STATUS. Retrying in 10s..."
+            sleep 10
+          done
+          
+          echo "❌ Smoke test failed after 5 attempts"
+          exit 1
+
+      # ── Automatic rollback on smoke test failure ─────────────────────────
+      - name: Rollback on failure
+        if: failure() && steps.smoke-test.outcome == 'failure'
+        run: |
+          echo "💥 Smoke test failed. Rolling back deployment..."
+          
+          kubectl rollout undo deployment/capstone-app \
+            --namespace production
+          
+          kubectl rollout status deployment/capstone-app \
+            --namespace production \
+            --timeout=5m
+          
+          echo "🔄 Rollback complete. Previous version is now serving traffic."
+          echo "Please investigate the failed deployment."
+          
+          # Fail the workflow to notify the team
+          exit 1
+
+      # ── Print deployment summary ─────────────────────────────────────────
+      - name: Print deployment summary
+        if: success()
+        run: |
+          echo "### 🚀 Deployment Successful!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Image | \`${{ needs.build-and-push.outputs.full-image }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Author | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| URL | https://app.yourdomain.com |" >> $GITHUB_STEP_SUMMARY
+          
+          # Print current pod list
+          kubectl -n production get pods -l app=capstone-app --no-headers | \
+            awk '{print $1, $3}' | while read line; do
+              echo "- Pod: $line" >> $GITHUB_STEP_SUMMARY
+            done
+```
+
+---
+
+## Deployment Flow အလုပ်လုပ်ပုံကို တစ်ဆင့်ချင်း နားလည်ခြင်း
+
+```mermaid
+sequenceDiagram
+    participant GH as GitHub Actions
+    participant GHCR as GHCR Registry
+    participant K8S as K3s Kubernetes
+    participant APP as Running App
+
+    Note over GH: Merge to main triggers CD
+
+    GH->>GH: docker build → sha-abc1234
+    GH->>GHCR: docker push ghcr.io/user/app:sha-abc1234
+
+    GH->>K8S: kubectl create secret app-secret (DATABASE_URL)
+    GH->>K8S: kubectl apply -f k8s/ (configmap, service, ingress)
+    GH->>K8S: kubectl set image deployment → sha-abc1234
+
+    Note over K8S: Rolling update begins
+    K8S->>K8S: Create Pod v2 (sha-abc1234)
+    K8S->>GHCR: Pull ghcr.io/user/app:sha-abc1234
+
+    loop Wait for startup probe
+        K8S->>APP: GET /api/health
+        APP-->>K8S: 200 OK
+    end
+
+    K8S->>K8S: Pod v2 Ready → add to Service endpoints
+    K8S->>K8S: Terminate one Pod v1 (sha-old)
+    Note over K8S: Repeat until all 3 replicas are v2
+
+    GH->>GH: kubectl rollout status (wait for completion)
+
+    GH->>APP: curl https://app.domain.com/api/health (smoke test)
+    APP-->>GH: 200 OK + db.status=connected
+
+    GH->>GH: ✅ Deployment complete!
+```
+
+---
+
+## Rollback လုပ်ဆောင်ပေးသည့် စနစ် (Rollback Mechanism)
+
+Deployment တစ်ခု မအောင်မြင်သည့်အခါ (smoke test က 200 မဟုတ်ဘဲ အခြားတန်ဖိုး ပြန်လာသည့်အခါ) pipeline သည် `kubectl rollout undo` ကို အလိုအလျောက် လုပ်ဆောင်ပေးသည်:
+
+```mermaid
+flowchart TD
+    DEPLOY[kubectl set image → sha-bad] 
+    DEPLOY --> WAIT[kubectl rollout status]
+    WAIT --> SMOKE[Smoke test: curl /api/health]
+    SMOKE -->|200 OK| SUCCESS[✅ Deployment complete]
+    SMOKE -->|Fails after 5 attempts| ROLLBACK[kubectl rollout undo]
+    ROLLBACK --> PREV[Previous image sha-good\nback in production]
+    ROLLBACK --> NOTIFY[❌ Workflow fails\nGitHub notifies team]
+```
+
+Kubernetes သည် rollout မှတ်တမ်းများကို သိမ်းဆည်းထားပေးသည်:
+```bash
+# View rollout history
+kubectl -n production rollout history deployment/capstone-app
+# REVISION  CHANGE-CAUSE
+# 1         GitHub Actions deploy: abc123...
+# 2         GitHub Actions deploy: def456...
+# 3         GitHub Actions deploy: bad789...
+
+# Rollback manually to a specific revision
+kubectl -n production rollout undo deployment/capstone-app --to-revision=2
+
+# Check current rollout status
+kubectl -n production rollout status deployment/capstone-app
+```
+
+---
+
+## GitHub Environments ကို သတ်မှတ်ခြင်း (Setting Up GitHub Environments)
+
+CD workflow ထဲတွင် သတိပြုမိမည့်အချက်မှာ:
+```yaml
+environment:
+  name: production
+  url: https://app.yourdomain.com
+```
+
+GitHub Environments က လုံခြုံရေးအတွက် နောက်ထပ် အကာအကွယ်အလွှာတစ်ခုကို ထပ်ပေါင်းထည့်ပေးသည်:
+
+1. **Repository → Settings → Environments → New environment** သို့ သွားပါ
+2. Name: `production` ဟု ပေးပါ
+3. **Required reviewers** ကို ဖွင့်ပါ — deployment မစတင်မီ တစ်စုံတစ်ဦးက အတည်ပြုပေးရပါမည်
+4. **Deployment branches** ကို ဖွင့်ပါ — `main` မှသာ production သို့ deploy လုပ်နိုင်ပါမည်
+5. Environment secrets များကို ထည့်ပါ: `DATABASE_URL` (repository-level secret ထက် ဦးစားပေး အစားထိုးပါမည်)
+
+Reviewers များကို ဖွင့်ထားခြင်းဖြင့် build အဆင့်ပြီးသွားသောအခါ deploy job သည် ခေတ္တရပ်တန့်နေမည်ဖြစ်ပြီး လူကိုယ်တိုင် GitHub ပေါ်တွင် "Approve deployment" ကို နှိပ်မှသာ ဆက်လက်လုပ်ဆောင်ပါမည်။
+
+---
+
+## Secrets ကို ကိုးကားချက် (Secrets Reference)
+
+ဤ secrets များကို GitHub တွင် သတ်မှတ်ထားရပါမည် (Repository Settings → Secrets → Actions):
+
+| Secret Name | Value | ဘယ်နေရာမှာ သုံးသလဲ |
+|------------|-------|-----------|
+| `GITHUB_TOKEN` | Auto-injected by GitHub | GHCR login, attestation |
+| `KUBECONFIG_BASE64` | `cat ~/.kube/config \| base64` | kubectl cluster connection |
+| `DATABASE_URL` | `postgres://user:pass@host:5432/db` | Kubernetes Secret sync |
+| `SSH_PRIVATE_KEY` | Contents of `~/.ssh/deploy_key` | (Alternative SSH approach) |
+| `SSH_HOST` | VPS IP address | (Alternative SSH approach) |
+
+---
+
+## Deployments များကို အချိန်နှင့်တပြေးညီ စောင့်ကြည့်ခြင်း (Monitoring Deployments in Real Time)
+
+CD workflow အလုပ်လုပ်နေစဉ်အတွင်း rolling update ကို တိုက်ရိုက် ကြည့်ရှုနိုင်ပါသည်:
+
+```bash
+# Watch pods update in real time
+kubectl -n production get pods -w
+# NAME                          READY   STATUS        RESTARTS   AGE
+# capstone-app-aaa              1/1     Running       0          5m
+# capstone-app-bbb              1/1     Running       0          5m
+# capstone-app-ccc              1/1     Running       0          5m
+# capstone-app-new-xxx          0/1     Init:0/1      0          5s  ← new pod starting
+# capstone-app-new-xxx          0/1     Running       0          10s
+# capstone-app-new-xxx          1/1     Running       0          20s ← ready!
+# capstone-app-aaa              1/1     Terminating   0          5m  ← old pod dies
+
+# Watch the rollout completion
+kubectl -n production rollout status deployment/capstone-app -w
+# Waiting for deployment "capstone-app" rollout to finish: 1 out of 3 new replicas have been updated...
+# Waiting for deployment "capstone-app" rollout to finish: 2 out of 3 new replicas have been updated...
+# Waiting for deployment "capstone-app" rollout to finish: 1 old replicas are pending termination...
+# deployment "capstone-app" successfully rolled out ✅
+```
+
+---
+
+## မအောင်မြင်သော Deployment တစ်ခုကို စစ်ဆေးဖယ်ရှားခြင်း (Debugging a Failed Deployment)
+
+CD workflow မအောင်မြင်ပါက၊ ဤကဲ့သို့ စနစ်တကျ စစ်ဆေးဖယ်ရှားနိုင်ပါသည်:
+
+```bash
+# 1. Check why pods aren't starting
+kubectl -n production describe pod -l app=capstone-app | tail -30
+# Look for Events section — it shows exactly what went wrong
+
+# 2. Check container logs
+kubectl -n production logs -l app=capstone-app --previous --tail=100
+# --previous: logs from the previously terminated container instance
+
+# 3. Check if the image exists in GHCR
+docker manifest inspect ghcr.io/USER/capstone-app:sha-FAILED
+
+# 4. Check if the Secret has the right DATABASE_URL
+kubectl -n production get secret app-secret -o jsonpath='{.data.DATABASE_URL}' | base64 -d
+# Should show your actual database URL (not PLACEHOLDER)
+
+# 5. Check if the database is reachable from the cluster
+kubectl -n production run debug --image=postgres:16-alpine --restart=Never --rm -it -- \
+  psql "postgres://appuser:apppass@YOUR_DB_HOST:5432/capstone" -c "SELECT 1"
+
+# 6. Check Traefik logs
+kubectl -n traefik logs -l app.kubernetes.io/name=traefik --tail=50
+```
+
+---
+
+## Zero-Downtime အတည်ပြုခြင်း (Zero-Downtime Verification)
+
+သင့်၏ rolling update တွင် downtime လုံးဝမရှိကြောင်း သက်သေပြရန် deployment လုပ်ဆောင်နေစဉ်အတွင်း load test ကို လုပ်ဆောင်နိုင်ပါသည်:
+
+```bash
+# Install hey (HTTP load generator)
+brew install hey
+
+# In one terminal: start the load test
+hey -z 5m -c 10 https://app.yourdomain.com/api/health
+
+# In another terminal: trigger a deployment
+# (push a commit to main)
+
+# After the test:
+# All requests should return 200.
+# Zero 5xx errors means zero-downtime ✅
+```
+
+---
+
+# အနှစ်ချုပ် (Summary)
+
+ယခုအခါတွင် သင်သည် အောက်ပါတို့ပါဝင်သော ပြီးပြည့်စုံပြီး အလိုအလျောက်လုပ်ဆောင်ပေးသော CD pipeline တစ်ခုကို ပိုင်ဆိုင်ပြီ ဖြစ်ပါသည်:
+- တစ်ခုနှင့်တစ်ခု အပြိုင်မဖြစ်စေရန် **deployments များကို စဉ်ဆက်မပြတ် (serialize) လုပ်ပေးခြင်း**
+- SHA-tagged Docker image ကို တည်ဆောက်ပြီး GHCR သို့ **တည်ဆောက်ကာ ပို့ဆောင်ပေးခြင်း**
+- deploy မလုပ်မီ GitHub Secrets မှနေ၍ **Kubernetes secrets များကို ဆက်သွယ်ပေးခြင်း (sync လုပ်ခြင်း)**
+- manifests အားလုံးကို `kubectl apply` ဖြင့် **အသုံးပြုခြင်း** (idempotent ဖြစ်၍ အကြိမ်များစွာ လုပ်ဆောင်ရန် စိတ်ချရသည်)
+- Deployment ၏ downtime မရှိသော rolling update ကို **လုပ်ဆောင်ပေးခြင်း**
+- rollout ပြီးဆုံးသည်အထိ စောင့်ဆိုင်းပြီး smoke test ကို **လုပ်ဆောင်ပေးခြင်း**
+- smoke test မအောင်မြင်ပါက ယခင်ဗားရှင်းသို့ **အလိုအလျောက် ပြန်လည်ပြောင်းလဲပေးခြင်း (rollback လုပ်ခြင်း)**
+- GitHub Actions run စာမျက်နှာသို့ deployment အနှစ်ချုပ်ကို **ထုတ်ပေးခြင်း**
+
+နောက်သင်ခန်းစာတွင် သင်၏ custom domain ကို သတ်မှတ်ခြင်း၊ DNS မှတ်တမ်းများကို တည်ဆောက်ခြင်းနှင့် အလိုအလျောက် စီမံခန့်ခွဲပေးသော Let's Encrypt certificate ဖြင့် သင့်အပလီကေးရှင်းကို HTTPS မှတစ်ဆင့် ဝင်ရောက်အသုံးပြုနိုင်ခြင်း ရှိမရှိ အတည်ပြုခြင်းတို့ကို လေ့လာရမည် ဖြစ်ပါသည်။

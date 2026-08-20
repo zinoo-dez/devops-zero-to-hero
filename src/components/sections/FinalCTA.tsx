@@ -4,8 +4,11 @@ import React from "react";
 import Link from "next/link";
 import { Terminal, Map, ArrowRight, Sparkles } from "lucide-react";
 import { motion } from "framer-motion";
+import { useLanguage } from "@/lib/i18n/LanguageContext";
 
 export function FinalCTA() {
+  const { t, language } = useLanguage();
+
   return (
     <section className="py-20 lg:py-28 relative">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -24,35 +27,35 @@ export function FinalCTA() {
           <div className="relative z-10 max-w-3xl mx-auto space-y-6">
             <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider bg-blue-500/20 text-blue-300 border border-blue-500/40">
               <Sparkles className="w-3.5 h-3.5" />
-              Free Access Forever
+              {t.cta.badge}
             </div>
 
             <h2 className="text-3xl sm:text-4xl md:text-5xl font-black tracking-tight text-foreground leading-tight">
-              Ready to Become a Confident <br className="hidden sm:inline" />
+              {t.cta.titlePart1} <br className="hidden sm:inline" />
               <span className="bg-gradient-to-r from-slate-900 via-blue-700 to-indigo-600 dark:from-white dark:via-blue-200 dark:to-indigo-400 bg-clip-text text-transparent">
-                DevOps Hero?
+                {t.cta.titlePart2}
               </span>
             </h2>
 
             <p className="text-base sm:text-lg text-muted-foreground max-w-2xl mx-auto leading-relaxed">
-              Start with Lesson 1 of Linux Command Line right now. No setup required, no credit card, no sign-in friction.
+              {t.cta.subtitle}
             </p>
 
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
               <Link
-                href="/courses/linux-command-line/01-why-linux-matters"
+                href={`/${language}/courses/linux-command-line/01-why-linux-matters`}
                 className="w-full sm:w-auto inline-flex items-center justify-center gap-2.5 px-8 py-4 rounded-2xl text-sm font-bold uppercase tracking-wider bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-xl shadow-blue-500/30 hover:scale-[1.02] active:scale-[0.98] transition-all"
               >
                 <Terminal className="w-4 h-4" />
-                Start Course 01: Linux CLI
+                {t.cta.button1}
                 <ArrowRight className="w-4 h-4" />
               </Link>
 
               <Link
-                href="/courses"
+                href={`/${language}/courses`}
                 className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-8 py-4 rounded-2xl text-sm font-bold tracking-wide bg-slate-200 dark:bg-white/10 hover:bg-slate-300 dark:hover:bg-white/15 text-foreground dark:text-white border border-slate-300 dark:border-white/15 hover:border-blue-500/30 dark:hover:border-white/25 transition-all"
               >
-                Browse All 13 Courses
+                {t.cta.button2}
               </Link>
             </div>
           </div>

@@ -3,6 +3,7 @@ import path from "path";
 import { COURSES } from "./courses";
 
 const CONTENT_PATH = path.join(process.cwd(), "content", "courses");
+const MY_CONTENT_PATH = path.join(process.cwd(), "content", "my", "courses");
 
 export interface LessonContent {
   slug: string;
@@ -17,10 +18,19 @@ export interface LessonContent {
  */
 export function getLessonContent(
   courseSlug: string,
-  lessonSlug: string
+  lessonSlug: string,
+  lang?: string
 ): string | null {
   try {
-    const filePath = path.join(CONTENT_PATH, courseSlug, `${lessonSlug}.mdx`);
+    let filePath = path.join(CONTENT_PATH, courseSlug, `${lessonSlug}.mdx`);
+    
+    if (lang === "my") {
+      const myFilePath = path.join(MY_CONTENT_PATH, courseSlug, `${lessonSlug}.mdx`);
+      if (fs.existsSync(myFilePath)) {
+        filePath = myFilePath;
+      }
+    }
+
     if (!fs.existsSync(filePath)) {
       return null;
     }

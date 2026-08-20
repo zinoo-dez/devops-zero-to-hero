@@ -4,6 +4,7 @@ import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ThemeToggle } from "./ThemeToggle";
+import { LanguageToggle } from "./LanguageToggle";
 import {
   Menu,
   X,
@@ -19,9 +20,11 @@ import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { SearchModal } from "@/components/ui/SearchModal";
 import { GitHubIcon } from "@/components/icons/TechIcons";
+import { useLanguage } from "@/lib/i18n/LanguageContext";
 
 export function Navbar() {
   const pathname = usePathname();
+  const { language } = useLanguage();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
 
@@ -47,7 +50,7 @@ export function Navbar() {
     <header className="sticky top-0 z-40 w-full border-b border-slate-200 bg-white dark:bg-[#09090d] dark:border-white/[0.08] transition-colors">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         {/* Brand Logo */}
-        <Link href="/" className="flex items-center gap-3 group">
+        <Link href={`/${language}`} className="flex items-center gap-3 group">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-cyan-500 p-0.5 shadow-lg shadow-blue-500/20 group-hover:scale-105 transition-transform">
             <div className="w-full h-full bg-[#0d0d14] rounded-[10px] flex items-center justify-center">
               <Terminal className="w-5 h-5 text-blue-400 group-hover:text-white transition-colors" />
@@ -63,12 +66,13 @@ export function Navbar() {
         {/* Desktop Navigation Links */}
         <nav className="hidden md:flex items-center gap-1 lg:gap-2">
           {navLinks.map((link) => {
+            const localizedHref = link.href === "/" ? `/${language}` : `/${language}${link.href}`;
             const isActive =
-              link.href === "/" ? pathname === "/" : pathname.startsWith(link.href);
+              link.href === "/" ? pathname === `/${language}` : pathname.startsWith(localizedHref);
             return (
               <Link
                 key={link.href}
-                href={link.href}
+                href={localizedHref}
                 className={cn(
                   "px-3.5 py-1.5 rounded-xl text-sm font-medium transition-all duration-200 flex items-center gap-2",
                   isActive
@@ -118,6 +122,7 @@ export function Navbar() {
             <GitHubIcon className="w-4 h-4 text-blue-500" />
           </a>
 
+          <LanguageToggle />
           <ThemeToggle />
 
           {/* Mobile hamburger button */}
@@ -158,12 +163,13 @@ export function Navbar() {
             </button>
 
             {navLinks.map((link) => {
+              const localizedHref = link.href === "/" ? `/${language}` : `/${language}${link.href}`;
               const isActive =
-                link.href === "/" ? pathname === "/" : pathname.startsWith(link.href);
+                link.href === "/" ? pathname === `/${language}` : pathname.startsWith(localizedHref);
               return (
                 <Link
                   key={link.href}
-                  href={link.href}
+                  href={localizedHref}
                   onClick={() => setMobileMenuOpen(false)}
                   className={cn(
                     "flex items-center justify-between px-4 py-3 rounded-xl text-base font-semibold transition-all",

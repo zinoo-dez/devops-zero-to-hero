@@ -1,0 +1,432 @@
+---
+title: "Automated Quality Gates & Security Scans"
+---
+
+# Testing as a Quality Gate
+
+စေ့စပ်သေချာသော အလိုအလျောက် စမ်းသပ်မှုများ (automated tests) မပါဝင်သော CI ပိုက်လိုင်းတစ်ခုသည် continuous delivery (စဉ်ဆက်မပြတ် ပို့ဆောင်ခြင်း) မဟုတ်ပါ — continuous hope (မျှော်လင့်ချက်သက်သက်) သာ ဖြစ်ပါသည်။ စမ်းသပ်မှုအဆင့်တိုင်းသည် မကောင်းသော ކုဒ်များ နောက်တစ်ဆင့်သို့ မရောက်အောင် တားဆီးပေးသည့် အလိုအလျောက် အစောင့်အကြပ် (automated gatekeeper) တစ်ခုအနေဖြင့် လုပ်ဆောင်သည်။ အကယ်၍ အစောင့်အကြပ်တစ်ခုခု မအောင်မြင်ပါက ပိုက်လိုင်းရပ်တန့်သွားမည်ဖြစ်ပြီး Developer ထံသို့ ချက်ချင်း အကြောင်းကြားမည်ဖြစ်သည်။
+
+```mermaid
+flowchart LR
+    PR["📦 Pull Request\nopened"] --> LINT["🧹 Lint\n& Format\n~5s"]
+    LINT --> UNIT["🧪 Unit Tests\n+ Coverage\n~30s"]
+    UNIT --> INT["🔗 Integration\nTests\n~2min"]
+    INT --> SAST["🔍 SAST\n(CodeQL)\n~3min"]
+    SAST --> SCA["📦 SCA\n(Snyk/Trivy)\n~1min"]
+    SCA --> CONT["🐳 Container\nScan\n~2min"]
+    CONT --> MERGE["✅ Safe to\nMerge"]
+
+    style LINT fill:#1e3a5f
+    style UNIT fill:#1e3a5f
+    style INT fill:#1e3a5f
+    style SAST fill:#4a1e40
+    style SCA fill:#4a1e40
+    style CONT fill:#4a1e40
+```
+
+စုစုပေါင်း အစောင့်အကြပ် ကြာချိန်: ~၁၀ မိနစ်။ မအောင်မြင်မှု တစ်ခုခုရှိပါက ပိုက်လိုင်းရပ်သွားမည်ဖြစ်ပြီး ပေါင်းစည်းခြင်း (merge) ကို တားဆီးမည်ဖြစ်သည်။
+
+---
+
+## The Testing Pyramid: Balance Speed and Coverage
+
+```mermaid
+flowchart TD
+    subgraph PYRAMID["Testing Pyramid — more at bottom, fewer at top"]
+        E2E["🔺 End-to-End (E2E)\n~5–20 tests\nMinutes\nRun on staging only\nCypress, Playwright, Selenium"]
+        INT["Integration Tests\n~50–200 tests\n30s–2min\nTest real DB, real APIs\nRun in CI with service containers"]
+        UNIT["██████████████████████████\nUnit Tests\n~500–2000 tests\n< 5 seconds total\nFast, isolated, deterministic\nMock all external dependencies"]
+    end
+    UNIT --> INT --> E2E
+```
+
+### Unit Tests: The Foundation
+
+```javascript
+// Example: unit testing a pure function (no DB, no network)
+// src/utils/pricing.test.ts
+import { calculateDiscount } from './pricing';
+
+describe('calculateDiscount', () => {
+  it('applies 10% for orders over $100', () => {
+    expect(calculateDiscount(150, 'REGULAR')).toBe(135);
+  });
+
+  it('applies 20% for premium users', () => {
+    expect(calculateDiscount(100, 'PREMIUM')).toBe(80);
+  });
+
+  it('returns full price for orders under $100', () => {
+    expect(calculateDiscount(50, 'REGULAR')).toBe(50);
+  });
+});
+```
+
+```yaml
+# In CI
+- name: Unit tests with coverage
+  run: |
+    npm run test:unit -- \
+      --coverage \
+      --coverageThreshold='{"global":{"lines":80,"functions":80,"branches":70}}'
+    # Pipeline fails if coverage drops below thresholds
+```
+
+### Integration Tests: Real Dependencies, Ephemeral
+
+Integration tests သည် အစိတ်အပိုင်းများ အတူတကွ အလုပ်လုပ်ပုံကို စစ်ဆေးသည် — သို့သော် မျှဝေသုံးစွဲနေသော staging ဒေတာဘေ့စ်များကို မသုံးဘဲ CI run အတွက် သီးသန့်ထုတ်လုပ်ထားသော **ephemeral test databases (ခဏတာ စမ်းသပ်ဒေတာဘေ့စ်များ)** ကို အသုံးပြုသင့်သည်-
+
+```yaml
+# GitHub Actions with service containers for integration tests
+test-integration:
+  services:
+    postgres:
+      image: postgres:16-alpine
+      env:
+        POSTGRES_USER: testuser
+        POSTGRES_PASSWORD: testpass
+        POSTGRES_DB: testdb
+      options: >-
+        --health-cmd "pg_isready -U testuser -d testdb"
+        --health-interval 5s
+        --health-retries 10
+
+    redis:
+      image: redis:7-alpine
+      options: >-
+        --health-cmd "redis-cli ping"
+        --health-interval 5s
+        --health-retries 5
+
+  steps:
+    - name: Run integration tests
+      run: npm run test:integration
+      env:
+        DATABASE_URL: postgres://testuser:testpass@localhost:5432/testdb
+        REDIS_URL: redis://localhost:6379
+        NODE_ENV: test
+```
+
+### End-to-End Tests: Only on Staging
+
+E2E tests သည် ကုန်ကျစရိတ်များပြီး ဘရောက်ဇာကို ဖွင့်ကာ အသုံးပြုသူ အစစ်အမှန်ကဲ့သို့ သရုပ်ဖော်သည်။ ၎င်းတို့ကို PR တိုင်းတွင် မဟုတ်ဘဲ deploy လုပ်ပြီးနောက် staging တွင်သာ လုပ်ဆောင်ပါ-
+
+```yaml
+# Only run after staging deploy, not on every PR
+e2e-tests:
+  needs: deploy-staging
+  runs-on: ubuntu-latest
+  steps:
+    - name: Install Playwright browsers
+      run: npx playwright install --with-deps chromium
+
+    - name: Run E2E tests
+      run: npx playwright test
+      env:
+        BASE_URL: https://staging.yourapp.com
+        
+    - name: Upload test report
+      uses: actions/upload-artifact@v4
+      if: always()     # Upload even on failure
+      with:
+        name: playwright-report
+        path: playwright-report/
+```
+
+---
+
+## Flaky Tests: The Enemy of CI/CD
+
+Flaky test ဆိုသည်မှာ ကုဒ်ပြောင်းလဲမှု တစ်စုံတစ်ရာ မရှိဘဲ တစ်ခါတရံ အကြောင်းပြချက်မရှိဘဲ ကျရှုံးတတ်သော စမ်းသပ်မှုမျိုး ဖြစ်သည်။ Flaky tests များသည် CI အပေါ် အသင်းသားများ၏ ယုံကြည်မှုကို ပျက်ပြားစေသည်-
+
+```
+Day 1:  Pipeline fails → Developer checks code → Nothing wrong → Re-runs pipeline → Passes
+Day 2:  Same. Developer ignores failures and force-merges.
+Day 3:  A REAL failure is ignored because everyone assumes it's flaky.
+Day 4:  Bug reaches production.
+```
+
+**ဖြေရှင်းချက်**: Flaky tests များကို ပျက်စီးနေသော စမ်းသပ်မှုများအဖြစ် သတ်မှတ်ပါ။
+
+```yaml
+# Detection: run tests 3 times and report intermittent failures
+- name: Detect flaky tests
+  run: npx jest --runInBand --testRetries=3 --reporters=default,jest-flaky-reporter
+  continue-on-error: true   # Don't fail the build on flakiness (just report)
+
+# Quarantine: temporarily disable a known flaky test
+# In your test file:
+it.skip('flaky test name', () => {   // ← Skip until fixed
+  // TODO: Fix flakiness — tracked in issue #456
+```
+
+**စည်းမျဉ်းများ**:
+1. စမ်းသပ်မှုတစ်ခုသည် ရاندတမ်းကျရှုံးပါက — ၎င်းကို ချက်ချင်း quarantine လုပ်ပါ (ကျော်သွားပါ၊ ပြဿနာတစ်ခုအနေဖြင့် မှတ်တမ်းတင်ပါ)
+2. လက်ရှိ စပရင်း (sprint) အတွင်းတွင် ပြုပြင်ပြီး ပြန်ဖွင့်ပါ — quarantine ကို အမြဲတမ်းဖြစ်မသွားစေပါနှင့်
+3. CI ပိုက်လိုင်းသည် တိကျသေချာရမည် (deterministic): မအောင်မြင်ခြင်း = ကုဒ်ပျက်စီးနေခြင်း ဖြစ်သည်၊ "ထပ်ကြိုးစားပါ" ဟူသည် မဟုတ်ပါ
+
+---
+
+## Code Quality Gates
+
+လုပ်ဆောင်ချက် မှန်ကန်ရုံသာမက တည်ဆောက်ပုံဆိုင်ရာ အရည်အသွေးကိုပါ တင်းတင်းကျပ်ကျပ် သတ်မှတ်ပါ-
+
+```yaml
+quality-gates:
+  steps:
+    # Lint: enforce code style and catch common errors
+    - name: ESLint
+      run: npx eslint src/ --max-warnings=0   # Zero warnings allowed
+
+    - name: TypeScript type check
+      run: npx tsc --noEmit               # No type errors allowed
+
+    - name: Prettier format check
+      run: npx prettier --check src/      # Formatting must match standard
+
+    # Code coverage threshold
+    - name: Check coverage
+      run: |
+        COVERAGE=$(npm run test:unit -- --coverage --json 2>/dev/null | 
+          python3 -c "import json,sys; d=json.load(sys.stdin); 
+          print(d['coverageMap']['total']['lines']['pct'])")
+        echo "Coverage: $COVERAGE%"
+        python3 -c "exit(0 if float('$COVERAGE') >= 80 else 1)" \
+          || (echo "❌ Coverage below 80%" && exit 1)
+
+    # Complexity check: prevent unmaintainable code
+    - name: Check cyclomatic complexity
+      run: npx plato -r -d complexity-report src/ && \
+           node -e "
+             const r=require('./complexity-report/report.json');
+             const maxComplexity=r.summary.average.maintainability;
+             if(maxComplexity < 70) process.exit(1);"
+```
+
+---
+
+## Shifting Security Left: DevSecOps Pipeline
+
+လုံခြုံရေး စစ်ဆေးမှုများကို သုံးလတစ်ကြိမ် စစ်ဆေးခြင်းမျိုးမဟုတ်ဘဲ CI run တိုင်းတွင် ပေါင်းစပ်ထည့်သွင်းထားရမည်-
+
+### SAST: Static Application Security Testing
+
+ကုဒ်ကို မလည်ပတ်စေဘဲ အားနည်းချက် ပုံစံများကို (SQL injection, XSS၊ ကုဒ်အတွင်း တထစ်ချရေးထားသော လျှို့ဝှက်ချက်များ) ရရင်းမြစ် ကုဒ် (source code) မှ စစ်ဆေးသည်-
+
+```yaml
+- name: CodeQL Analysis (SAST)
+  uses: github/codeql-action/init@v3
+  with:
+    languages: javascript, typescript
+    queries: security-and-quality   # Extended security query set
+
+- name: Perform CodeQL Analysis
+  uses: github/codeql-action/analyze@v3
+  with:
+    category: "/language:javascript"
+```
+
+### SCA: Software Composition Analysis
+
+သင်၏ အက်ပ်သည် ပြင်ပစာကြည့်တိုက်များ (third-party libraries) ၈၀ ရာခိုင်နှုန်း ပါဝင်နေသည်။ SCA သည် ၎င်းတို့တွင် သိရှိပြီးသား CVE များ ရှိမရှိ စစ်ဆေးသည်-
+
+```yaml
+# Dependabot: automatic PRs when dependencies have CVEs
+# .github/dependabot.yml
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule: { interval: weekly }
+    labels: [dependencies, security]
+    open-pull-requests-limit: 10
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-patch"]  # Ignore patch updates in auto-PRs
+
+# Snyk: detailed CVE reports in PRs
+- name: Snyk SCA scan
+  uses: snyk/actions/node@master
+  with:
+    args: --severity-threshold=high --fail-on=upgradable
+  env:
+    SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+# npm built-in audit
+- name: npm audit
+  run: npm audit --audit-level=high   # Fail on HIGH or CRITICAL
+```
+
+### Secrets Detection
+
+API သော့များ၊ ဒေတာဘေ့စ် စကားဝှက်များ၊ ကိုယ်ပိုင်သော့များကို မတော်တဆ commit တင်မိခြင်းမှ ကာကွယ်ပါ-
+
+```yaml
+# TruffleHog: detect secrets in git history
+- name: TruffleHog secrets scan
+  uses: trufflesecurity/trufflehog@main
+  with:
+    path: ./
+    base: ${{ github.event.repository.default_branch }}
+    head: HEAD
+    extra_args: --only-verified --json
+
+# GitLeaks: fast and highly configurable
+- name: Gitleaks
+  uses: gitleaks/gitleaks-action@v2
+  env:
+    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+
+# Detect-secrets: run locally before commit
+# Install: pip install detect-secrets
+# Initialize baseline: detect-secrets scan > .secrets.baseline
+# Check for new secrets: detect-secrets scan | detect-secrets audit -
+```
+
+### Container Vulnerability Scanning
+
+```yaml
+# Trivy: scan the built image
+- name: Scan container image
+  uses: aquasecurity/trivy-action@master
+  with:
+    image-ref: ghcr.io/${{ github.repository }}:${{ github.sha }}
+    format: sarif              # Integrates with GitHub Security tab
+    output: trivy-results.sarif
+    severity: CRITICAL,HIGH
+    exit-code: 1               # Fail pipeline on HIGH or CRITICAL
+
+- name: Upload scan results to GitHub Security
+  uses: github/codeql-action/upload-sarif@v3
+  if: always()
+  with:
+    sarif_file: trivy-results.sarif
+
+# IaC scanning: check Dockerfiles and Kubernetes manifests
+- name: Scan Dockerfiles and manifests
+  uses: aquasecurity/trivy-action@master
+  with:
+    scan-type: config
+    scan-ref: .
+    exit-code: 1
+    severity: CRITICAL,HIGH
+```
+
+---
+
+## Severity-Based Gate Policy
+
+အားနည်းချက် အားလုံးကို တူညီစွာ ဆက်ဆံခြင်းဖြင့် developer တို့၏ အရှိန်အဟုန်ကို မထိခိုက်စေပါနှင့်။ အဆင့်လိုက် విధాన ကို အသုံးပြုပါ-
+
+| အန္တရာယ်အဆင့် (Severity) | မူဝါဒ (Policy) | လုပ်ဆောင်ချက် (Action) |
+|---------|--------|--------|
+| **CRITICAL** | ပိုက်လိုင်းကို ချက်ချင်း ရပ်တန့်မည် | ချက်ချင်းပြင်ပါ၊ ခြွင်းချက်မရှိ |
+| **HIGH** | ပိုက်လိုင်းကို ရပ်တန့်မည် | မပေါင်းစည်းမီ ပြင်ပါ (လျော်ကြေးပေးသည့် ထိန်းချုပ်မှု မှတ်တမ်းတင်ထားပါက ၇ ရက်အတွင်း) |
+| **MEDIUM** | သတိပေးချက် သက်သက် | backlog တွင် ထည့်ပါ၊ ရက်ပေါင်း ၃၀ အတွင်း ပြင်ပါ |
+| **LOW** | အချက်အလက်မျှသာ | ရွေးချယ်နိုင်သည် — သတ်မှတ်ထားသော ပြုပြင်ထိန်းသိမ်းမှုတွင် ဖြေရှင်းပါ |
+
+```bash
+# Apply tiered policy
+trivy image \
+  --exit-code 1 \
+  --severity CRITICAL,HIGH \      # Block on these
+  --ignore-unfixed \              # Don't block on CVEs with no fix yet
+  my-api:latest
+
+# Generate a report for MEDIUM/LOW (informational only)
+trivy image \
+  --exit-code 0 \                 # Don't fail
+  --severity MEDIUM,LOW \
+  --format json \
+  --output medium-low-report.json \
+  my-api:latest
+```
+
+---
+
+## Full Quality Gate Configuration: GitHub Actions
+
+```yaml
+# .github/workflows/quality.yml
+name: Quality Gates
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ── Gate 1: Fast feedback (< 1 minute) ────────────────────────────
+  fast-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20", cache: "npm" }
+      - run: npm ci
+      - run: npx eslint src/ --max-warnings=0
+      - run: npx tsc --noEmit
+      - run: npx prettier --check src/
+
+  # ── Gate 2: Tests + coverage (< 5 minutes) ─────────────────────────
+  test:
+    needs: fast-checks
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env: { POSTGRES_USER: test, POSTGRES_PASSWORD: test, POSTGRES_DB: test }
+        options: --health-cmd "pg_isready -U test" --health-interval 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20", cache: "npm" }
+      - run: npm ci
+      - run: npm run test:unit -- --coverage
+      - run: npm run test:integration
+        env: { DATABASE_URL: postgres://test:test@localhost:5432/test }
+      - uses: codecov/codecov-action@v4
+        with: { threshold: 80 }
+
+  # ── Gate 3: Security (< 5 minutes) ────────────────────────────────
+  security:
+    needs: fast-checks
+    runs-on: ubuntu-latest
+    permissions: { contents: read, security-events: write }
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci
+      - run: npm audit --audit-level=high
+      - uses: github/codeql-action/init@v3
+        with: { languages: javascript }
+      - uses: github/codeql-action/analyze@v3
+      - uses: gitleaks/gitleaks-action@v2
+        env: { GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} }
+
+  # ── Gate 4: Container scan (< 3 minutes) ──────────────────────────
+  container-scan:
+    needs: [test, security]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/build-push-action@v5
+        with: { context: ., push: false, tags: myapp:scan, load: true }
+      - uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: myapp:scan
+          severity: CRITICAL,HIGH
+          exit-code: 1
+```
+
+---
+
+## Summary
+
+အလိုအလျောက် အရည်အသွေး အစောင့်အကြပ်များ (automated quality gates) သည် လုံခြုံစိတ်ချရသော CI/CD ၏ အခြေခံအုတ်မြစ် ဖြစ်ပါသည်-
+- **Unit tests** (မြန်ဆန်သည်၊ သီးသန့်ဖြစ်သည်၊ mock လုပ်ထားသည်) → **Integration tests** (အစစ်အမှန် ephemeral DB) → **E2E tests** (staging တွင်သာ)
+- **Flaky tests များကို ချက်ချင်း quarantine လုပ်ရမည်** — တိကျသေချာမှု (determinism) သည် ညှိနှိုင်း၍မရပါ
+- **SAST** (CodeQL): ရရင်းမြစ်ကုဒ် ပုံစံများ၊ **SCA** (Dependabot/Snyk): မှီခိုမှု CVE များ၊ **Secrets** (TruffleHog/Gitleaks): commit တင်ထားသော လျှို့ဝှက်အချက်အလက်များ၊ **Container** (Trivy): OS/runtime CVE များ
+- အဆင့်လိုက် အန္တရာယ်အဆင့်ကို အသုံးပြုပါ: CRITICAL + HIGH သည် ပိုက်လိုင်းကို တားဆီးသည်၊ MEDIUM + LOW သည် သတိပေးချက်များ ဖြစ်သည်
+- အမြန်တုံ့ပြန်မှုရရှိရန် အစောင့်အကြပ်များကို ဖွဲ့စည်းပါ: lint+typecheck ပထမ (~၁ မိနစ်)၊ ထို့နောက် tests (~၅ မိနစ်)၊ ထို့နောက် security (~၅ မိနစ်)၊ ထို့နောက် container scan (~၃ မိနစ်)
+
+နောက်သင်ခန်းစာတွင်၊ သင်သည် deployment strategies (ဖြန့်ကျက်ခြင်း မဟာဗျူဟာများ) ကို သင်ယူရမည်ဖြစ်သည် — ၎င်းတို့သည် downtime လုံးဝမရှိဘဲ ဗားရှင်းအသစ်များကို ထုတ်လွှတ်နိုင်ရန်နှင့် ချက်ချင်းပြန်ပြောင်းနိုင်သော စွမ်းရည်ကို ပေးစွမ်းသည့် နည်းပညာများ ဖြစ်ကြသည်။

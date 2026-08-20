@@ -6,8 +6,10 @@ import { GradientText } from "@/components/ui/GradientText";
 import { FloatingIcons } from "@/components/animations/FloatingIcons";
 import { ArrowRight, Sparkles, Map, Terminal, CheckCircle2 } from "lucide-react";
 import { motion } from "framer-motion";
+import { useLanguage } from "@/lib/i18n/LanguageContext";
 
 export function HeroSection() {
+  const { t, language } = useLanguage();
   return (
     <section className="relative min-h-[90vh] flex items-center justify-center overflow-hidden py-16 lg:py-24 bg-mesh bg-dot-grid">
       {/* Glow gradient backdrops (60-20 White-Dark-Blue) */}
@@ -25,40 +27,39 @@ export function HeroSection() {
             {/* Top Pill */}
             <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider bg-blue-500/10 text-blue-400 border border-blue-500/25 backdrop-blur-md shadow-sm">
               <Sparkles className="w-3.5 h-3.5 animate-pulse text-blue-400" />
-              100% Free • Beginner to Production DevOps
+              {t.hero.pill}
             </div>
 
             {/* Headline with 60% White dominant & Red Highlight */}
             <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-[68px] font-black tracking-tight text-foreground leading-[1.08]">
-              From Zero CLI to <br />
+              {t.hero.titlePart1} <br />
               <GradientText gradient="from-slate-900 via-blue-700 to-blue-600 dark:from-white dark:via-blue-200 dark:to-blue-500">
-                Production DevOps
+                {t.hero.titlePart2}
               </GradientText>
             </h1>
 
             {/* Subtitle */}
             <p className="text-base sm:text-lg md:text-xl text-muted-foreground max-w-2xl mx-auto lg:mx-0 leading-relaxed font-normal">
-              Learn Linux, Git, GitHub Actions, CI/CD, Docker, and Kubernetes step-by-step.
-              Designed with rich interactive diagrams for complete beginners.
+              {t.hero.subtitle}
             </p>
 
             {/* CTAs */}
             <div className="flex flex-col sm:flex-row items-center justify-center lg:justify-start gap-4 pt-2">
               <Link
-                href="/courses/linux-command-line/01-why-linux-matters"
+                href={`/${language}/courses/linux-command-line/01-why-linux-matters`}
                 className="w-full sm:w-auto inline-flex items-center justify-center gap-2.5 px-7 py-4 rounded-2xl text-sm font-bold uppercase tracking-wider bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-xl shadow-blue-500/25 hover:shadow-blue-500/40 hover:scale-[1.02] active:scale-[0.98] transition-all"
               >
                 <Terminal className="w-4 h-4" />
-                Start Learning Now
+                {t.hero.ctaStart}
                 <ArrowRight className="w-4 h-4" />
               </Link>
 
               <Link
-                href="/roadmap"
+                href={`/${language}/roadmap`}
                 className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-7 py-4 rounded-2xl text-sm font-bold tracking-wide bg-slate-200 dark:bg-white/5 hover:bg-slate-300 dark:hover:bg-white/10 text-foreground border border-slate-300 dark:border-white/10 hover:border-blue-500/30 transition-all"
               >
                 <Map className="w-4 h-4 text-blue-400" />
-                View Interactive Roadmap
+                {t.hero.ctaRoadmap}
               </Link>
             </div>
 
@@ -66,15 +67,15 @@ export function HeroSection() {
             <div className="pt-6 grid grid-cols-1 sm:grid-cols-3 gap-3 border-t border-slate-200 dark:border-white/[0.08] text-xs font-medium text-muted-foreground">
               <div className="flex items-center justify-center lg:justify-start gap-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>Beginner-First Language</span>
+                <span>{t.hero.feature1}</span>
               </div>
               <div className="flex items-center justify-center lg:justify-start gap-2">
                 <CheckCircle2 className="w-4 h-4 text-blue-400 shrink-0" />
-                <span>Interactive Diagrams</span>
+                <span>{t.hero.feature2}</span>
               </div>
               <div className="flex items-center justify-center lg:justify-start gap-2">
                 <CheckCircle2 className="w-4 h-4 text-indigo-400 shrink-0" />
-                <span>Real Capstone CI/CD</span>
+                <span>{t.hero.feature3}</span>
               </div>
             </div>
           </motion.div>

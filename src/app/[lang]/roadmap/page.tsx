@@ -2,44 +2,48 @@ import React from "react";
 import type { Metadata } from "next";
 import { RoadmapCanvas } from "@/components/roadmap/RoadmapCanvas";
 import { SectionHeader } from "@/components/ui/SectionHeader";
-import { Map, Compass, Sparkles, CheckCircle2, ArrowRight } from "lucide-react";
-import Link from "next/link";
+import { translations } from "@/lib/i18n/translations";
 
-export const metadata: Metadata = {
-  title: "Interactive DevOps Roadmap | DevOps Zero to Hero",
-  description:
-    "Explore the visual 13-step interactive roadmap from Linux Command Line to Terraform, Prometheus, DevSecOps, and ArgoCD GitOps.",
-  openGraph: {
-    title: "Interactive DevOps Roadmap | DevOps Zero to Hero",
-    description:
-      "Explore the visual 13-step interactive roadmap from Linux Command Line to Terraform, Prometheus, DevSecOps, and ArgoCD GitOps.",
-    images: [
-      {
-        url: "/og-image.png",
-        width: 1200,
-        height: 675,
-        alt: "Interactive DevOps Roadmap",
-      },
-    ],
-  },
-  twitter: {
-    card: "summary_large_image",
-    title: "Interactive DevOps Roadmap | DevOps Zero to Hero",
-    description:
-      "Explore the visual 13-step interactive roadmap from Linux Command Line to Terraform, Prometheus, DevSecOps, and ArgoCD GitOps.",
-    images: ["/og-image.png"],
-  },
-};
+export async function generateMetadata({ params }: { params: Promise<{ lang: string }> }): Promise<Metadata> {
+  const { lang } = await params;
+  const t = translations[lang as keyof typeof translations]?.roadmapPage || translations.en.roadmapPage;
 
-export default function RoadmapPage() {
+  return {
+    title: t.metaTitle,
+    description: t.metaDesc,
+    openGraph: {
+      title: t.metaTitle,
+      description: t.metaDesc,
+      images: [
+        {
+          url: "/og-image.png",
+          width: 1200,
+          height: 675,
+          alt: "Interactive DevOps Roadmap",
+        },
+      ],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: t.metaTitle,
+      description: t.metaDesc,
+      images: ["/og-image.png"],
+    },
+  };
+}
+
+export default async function RoadmapPage({ params }: { params: Promise<{ lang: string }> }) {
+  const { lang } = await params;
+  const t = translations[lang as keyof typeof translations]?.roadmapPage || translations.en.roadmapPage;
+
   return (
     <div className="py-12 sm:py-16 lg:py-20">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <SectionHeader
-          badge="Learning Architecture"
-          title="Interactive DevOps"
-          highlight="Mastery Track"
-          subtitle="A structured 13-step progression from your first Linux command to Terraform IaC, Observability, and GitOps delivery. Follow each milestone or switch to the 2D graph view."
+          badge={t.badge}
+          title={t.title}
+          highlight={t.highlight}
+          subtitle={t.subtitle}
         />
 
         <RoadmapCanvas />
@@ -51,10 +55,10 @@ export default function RoadmapPage() {
               01
             </span>
             <h4 className="text-sm font-bold text-foreground mb-1.5">
-              Foundations & Containers
+              {t.step1Title}
             </h4>
             <p className="text-xs text-muted-foreground leading-relaxed">
-              Linux CLI, Git, GitHub, Docker & Compose. Build confidence with terminal workflows and local multi-service stacks.
+              {t.step1Desc}
             </p>
           </div>
 
@@ -63,10 +67,10 @@ export default function RoadmapPage() {
               02
             </span>
             <h4 className="text-sm font-bold text-foreground mb-1.5">
-              CI/CD & Cloud IaC
+              {t.step2Title}
             </h4>
             <p className="text-xs text-muted-foreground leading-relaxed">
-              GitHub Actions, CI/CD Pipeline Concepts & Terraform. Automate test pipelines and declare cloud infrastructure as code.
+              {t.step2Desc}
             </p>
           </div>
 
@@ -75,10 +79,10 @@ export default function RoadmapPage() {
               03
             </span>
             <h4 className="text-sm font-bold text-foreground mb-1.5">
-              Kubernetes & Observability
+              {t.step3Title}
             </h4>
             <p className="text-xs text-muted-foreground leading-relaxed">
-              K8s, K3s, Prometheus & Grafana. Deploy self-healing container clusters and build real-time monitoring dashboards.
+              {t.step3Desc}
             </p>
           </div>
 
@@ -87,10 +91,10 @@ export default function RoadmapPage() {
               04
             </span>
             <h4 className="text-sm font-bold text-foreground mb-1.5">
-              DevSecOps & GitOps
+              {t.step4Title}
             </h4>
             <p className="text-xs text-muted-foreground leading-relaxed">
-              Trivy vulnerability scanning, ArgoCD GitOps, Canary progressive rollouts, and the full end-to-end Capstone project.
+              {t.step4Desc}
             </p>
           </div>
         </div>

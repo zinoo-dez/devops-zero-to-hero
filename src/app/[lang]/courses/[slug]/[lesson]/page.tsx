@@ -56,16 +56,16 @@ export async function generateMetadata({
 export default async function LessonPage({
   params,
 }: {
-  params: Promise<{ slug: string; lesson: string }>;
+  params: Promise<{ lang: string; slug: string; lesson: string }>;
 }) {
-  const { slug, lesson: lessonSlug } = await params;
-  const result = getLessonBySlug(slug, lessonSlug);
+  const { lang, slug, lesson: lessonSlug } = await params;
+  const result = getLessonBySlug(slug, lessonSlug, lang);
 
   if (!result) {
     notFound();
   }
 
-  const rawMdx = getLessonContent(slug, lessonSlug);
+  const rawMdx = getLessonContent(slug, lessonSlug, lang);
 
   return (
     <div className="flex flex-col lg:flex-row min-h-screen">
@@ -73,18 +73,19 @@ export default async function LessonPage({
       <LessonSidebar
         course={result.course}
         currentLessonSlug={result.lesson.slug}
+        lang={lang}
       />
 
       {/* Main Reading Area */}
       <div className="flex-1 max-w-4xl mx-auto px-4 sm:px-8 lg:px-12 py-10 lg:py-14 w-full">
         {/* Breadcrumb Navigation */}
         <nav className="flex items-center gap-2 text-xs text-muted-foreground mb-6">
-          <Link href="/courses" className="hover:text-foreground transition-colors">
+          <Link href={`/${lang}/courses`} className="hover:text-foreground transition-colors">
             Courses
           </Link>
           <ChevronRight className="w-3.5 h-3.5" />
           <Link
-            href={`/courses/${result.course.slug}`}
+            href={`/${lang}/courses/${result.course.slug}`}
             className="hover:text-foreground transition-colors truncate max-w-[150px] sm:max-w-none"
           >
             {result.course.title}
@@ -143,6 +144,7 @@ export default async function LessonPage({
           prevLesson={result.prevLesson}
           nextLesson={result.nextLesson}
           courseTitle={result.course.title}
+          lang={lang}
         />
       </div>
     </div>

@@ -1,0 +1,353 @@
+---
+title: "CI/CD Pipeline အဆင့်များ- Build, Test, Release, Deploy"
+---
+
+# CI/CD Pipeline ဆိုတာဘာလဲ။
+
+CI/CD pipeline ဆိုတာ သင့်ရဲ့ source code ကို Git commit လုပ်လိုက်တာနဲ့ လူကိုယ်တိုင် လုပ်ဆောင်စရာမလိုဘဲ production ဆီသို့ ဘေးကင်းလုံခြုံစွာ ပေးပို့ပေးတဲ့ အလိုအလျောက် တပ်ဆင်ထုတ်လုပ်ရေးလိုင်း (automated assembly line) တစ်ခု ဖြစ်ပါတယ်။ pipeline တိုင်းမှာ အဆင့်များစွာ (stages) ပါဝင်ပြီး အဆင့်တစ်ခုချင်းစီဟာ နောက်အဆင့်မစမီ မဖြစ်မနေ အောင်မြင်ကျော်လွှားရမယ့် အရည်အသွေးစစ်ဆေးရေးဂိတ် (quality gate) ဖြစ်ပါတယ်။
+
+```mermaid
+flowchart LR
+    GIT["📦 git push\nor PR merge"]
+
+    subgraph CI["Continuous Integration"]
+        BUILD["1. Build\n- Compile code\n- Build Docker image\n- Cache layers"]
+        TEST["2. Test\n- Unit tests\n- Integration tests\n- Code coverage check"]
+        SCAN["3. Scan\n- SAST / SCA\n- Container vulnerability\n- Secrets detection"]
+        PACKAGE["4. Package\n- Tag image with git SHA\n- Push to registry"]
+    end
+
+    subgraph CD["Continuous Delivery / Deployment"]
+        STAGING["5. Deploy Staging\n- Apply new image\n- Run smoke tests\n- Notify QA"]
+        APPROVAL{"6. Manual Gate\n(optional)\nQA sign-off"}
+        PROD["7. Deploy Production\n- Canary / Blue-Green\n- Monitor error rate\n- Auto-rollback if needed"]
+    end
+
+    GIT --> BUILD --> TEST --> SCAN --> PACKAGE --> STAGING --> APPROVAL --> PROD
+
+    style CI fill:#1e3a5f,stroke:#3b82f6
+    style CD fill:#1e4020,stroke:#22c55e
+```
+
+---
+
+## အဆင့် ၁- Build
+
+Build အဆင့်ဟာ သင့်ရဲ့ source code ကို compile လုပ်ပြီး artifact တစ်ခု (ခေတ်မီ application တွေအတွက် အများအားဖြင့် Docker image) ကို ထုတ်လုပ်ပေးပါတယ်။
+
+**ရည်ရွယ်ချက်များ**- Code များကို သန့်ရှင်းစွာ compile ဖြစ်မဖြစ် စစ်ဆေးရန်နှင့် အပြောင်းအလဲမရှိ ခိုင်မာသည့် (deterministic, immutable) artifact တစ်ခုကို ထုတ်လုပ်ရန်။
+
+```yaml
+# GitHub Actions example
+build:
+  runs-on: ubuntu-latest
+  steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Login to GHCR
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Build and push
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        target: runner           # Production stage only
+        push: true
+        tags: ghcr.io/${{ github.repository }}:${{ github.sha }}
+        cache-from: type=gha     # Reuse layers from previous builds
+        cache-to: type=gha,mode=max
+```
+
+**အဓိကမူဝါဒ**- တစ်ကြိမ်သာ Build လုပ်ပြီး နေရာတိုင်းမှာ ထို artifact အတိအကျကိုပဲ deploy လုပ်ပါ။ Staging မှာ စမ်းသပ်မှုများ အောင်မြင်ခဲ့ပြီး Git SHA နဲ့ tag တပ်ထားတဲ့ Docker image ဟာ Production မှာ deploy လုပ်မယ့် image နဲ့ **ထပ်တူညီ** ဖြစ်ရပါမယ် — ထပ်မံ rebuild လုပ်စရာမလိုပါ။
+
+---
+
+## အဆင့် ၂- Test
+
+Test အဆင့်ဟာ CI ရဲ့ အဓိကပင်မ ဖြစ်ပါတယ်။ ဒါဟာ Testing Pyramid ရဲ့ အဆင့်များစွာမှာ code မှန်ကန်မှုကို စစ်ဆေးပေးပါတယ်-
+
+```mermaid
+flowchart TD
+    subgraph PYRAMID["Testing Pyramid"]
+        E2E["🔺 E2E Tests\nFew — run on staging\nSlow (minutes)\nSimulate real user journeys\nCypress, Playwright"]
+        INT["Integration Tests\nModerate — run against test DB\nMedium (30s–2min)\nTest component interactions"]
+        UNIT["██████████████████████\nUnit Tests\nMany — run everywhere\nFast (< 5 seconds total)\nTest individual functions in isolation"]
+    end
+    UNIT --> INT --> E2E
+```
+
+```yaml
+test:
+  runs-on: ubuntu-latest
+  services:
+    # Spin up a real Postgres for integration tests
+    postgres:
+      image: postgres:16-alpine
+      env:
+        POSTGRES_USER: testuser
+        POSTGRES_PASSWORD: testpass
+        POSTGRES_DB: testdb
+      options: >-
+        --health-cmd "pg_isready -U testuser"
+        --health-interval 5s
+        --health-retries 10
+
+  steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-node@v4
+      with: { node-version: "20" }
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Unit tests
+      run: npm run test:unit -- --coverage
+      
+    - name: Integration tests
+      run: npm run test:integration
+      env:
+        DATABASE_URL: postgres://testuser:testpass@localhost:5432/testdb
+
+    - name: Upload coverage report
+      uses: codecov/codecov-action@v4
+      with:
+        fail_ci_if_error: true
+        threshold: 80   # Fail if coverage drops below 80%
+```
+
+**မမှန်မကန်ဖြစ်နေသော test များ (Flaky tests) သည် ပျက်စီးနေသော test များဖြစ်သည်**- ကျပန်းပုံစံဖြင့် ကျရှုံးနေသည့် test တစ်ခုဟာ developer တွေရဲ့ ယုံကြည်မှုကို ပျက်စီးစေပါတယ်။ ယင်းကို တွေ့ရှိပါက ချက်ချင်း သီးခြားခွဲထုတ်ပါ (ခေတ္တ ကျော်ထားပါ)၊ ပြင်ဆင်ပြီးမှ ပြန်လည်ဖွင့်ပါ။ CI pipeline တစ်ခုဟာ ရလဒ် အမြဲတန်းသေချာမှု ရှိရပါမယ် (deterministic ဖြစ်ရမည်) — ကျရှုံးမှုတစ်ခုဟာ "နောက်တစ်ကြိမ် ပြန်ကြိုးစားရန် (try again)" ကို မဆိုလိုဘဲ code ပျက်စီးနေခြင်းကိုသာ အမြဲတမ်း အဓိပ္ပါယ်ရရပါမယ်။
+
+---
+
+## အဆင့် ၃- Security Scanning (Shift Left)
+
+Security စစ်ဆေးမှုများကို သုံးလတစ်ကြိမ် စစ်ဆေးခြင်းမျိုး မဟုတ်ဘဲ CI အတွင်းမှာတင် စတင်ပြုလုပ်ဆောင်ရွက်ပါတယ်။ ဒါကို "Shift Left" လို့ ခေါ်ပါတယ် — ပြင်ဆင်စရိတ် သက်သာသည့် စောစီးစွာ အချိန်မှာတင် လုံခြုံရေး ဟာကွက်များ (vulnerabilities) ကို စောစီးစွာ စကင်ဖတ်စစ်ဆေးခြင်း ဖြစ်ပါတယ်။
+
+```yaml
+security:
+  runs-on: ubuntu-latest
+  steps:
+    - uses: actions/checkout@v4
+
+    # SAST: scan source code for vulnerability patterns
+    - name: Run CodeQL (SAST)
+      uses: github/codeql-action/analyze@v3
+      with:
+        languages: javascript, typescript
+
+    # SCA: scan dependencies for known CVEs
+    - name: Audit npm dependencies
+      run: npm audit --audit-level=high   # Fail on HIGH and CRITICAL CVEs
+
+    # Secrets detection: catch accidentally committed API keys
+    - name: Scan for secrets
+      uses: trufflesecurity/trufflehog@main
+      with:
+        path: ./
+        base: ${{ github.event.repository.default_branch }}
+        head: HEAD
+        extra_args: --only-verified
+
+    # Container scanning: scan the built image
+    - name: Scan Docker image
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ghcr.io/${{ github.repository }}:${{ github.sha }}
+        severity: CRITICAL,HIGH
+        exit-code: 1    # Break the pipeline on HIGH/CRITICAL CVEs
+
+    # IaC scanning: check Kubernetes manifests, Dockerfiles
+    - name: Scan IaC
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: config
+        scan-ref: .
+        exit-code: 1
+```
+
+---
+
+## အဆင့် ၄- Package နှင့် Publish Artifact
+
+Image ဟာ စမ်းသပ်မှုများနှင့် စကင်ဖတ်မှုများ အားလုံးကို အောင်မြင်ပြီးပါက ယင်းကို Tag များတပ်ပြီး container registry သို့ Tag အမျိုးမျိုးဖြင့် ထုတ်ဝေ (publish) ပါတယ်-
+
+```bash
+# Tagging strategy:
+GIT_SHA=$(git rev-parse --short HEAD)
+VERSION=$(git describe --tags --always)   # e.g., v1.2.3
+
+# Tag with both SHA (immutable, for deployment systems)
+# and version (human-readable, for releases)
+docker tag myapp:build ghcr.io/yourorg/myapp:${GIT_SHA}
+docker tag myapp:build ghcr.io/yourorg/myapp:${VERSION}
+docker tag myapp:build ghcr.io/yourorg/myapp:latest
+
+docker push ghcr.io/yourorg/myapp:${GIT_SHA}
+docker push ghcr.io/yourorg/myapp:${VERSION}
+docker push ghcr.io/yourorg/myapp:latest
+```
+
+---
+
+## အဆင့် ၅- Staging သို့ Deploy ပြုလုပ်ခြင်း
+
+Staging ဆိုတာ အသုံးပြုသူ အစစ်အမှန်တွေရဲ့ traffic မရောက်ရှိနိုင်တဲ့ Production နဲ့ တူညီတဲ့ ပတ်ဝန်းကျင် (environment) တစ်ခု ဖြစ်ပါတယ်။ အဆိုပါနေရာမှာ သက်ဆိုင်ရာ stack တစ်ခုလုံးအပေါ် Integration နှင့် E2E test များကို စမ်းသပ်မောင်းနှင်ပါတယ်-
+
+```yaml
+deploy-staging:
+  needs: [build, test, security]   # All gates must pass first
+  runs-on: ubuntu-latest
+  environment: staging
+
+  steps:
+    - name: Deploy to staging server
+      uses: appleboy/ssh-action@master
+      with:
+        host: ${{ secrets.STAGING_HOST }}
+        username: deploy
+        key: ${{ secrets.STAGING_SSH_KEY }}
+        script: |
+          IMAGE=ghcr.io/${{ github.repository }}:${{ github.sha }}
+          
+          docker pull $IMAGE
+          
+          IMAGE=$IMAGE docker compose \
+            --env-file /home/deploy/.env.staging \
+            -f docker-compose.yml -f docker-compose.staging.yml \
+            up -d --no-deps api
+
+          # Smoke test: verify the deployment is healthy
+          sleep 10
+          curl -f http://localhost:3000/api/health || exit 1
+
+    - name: Run E2E tests against staging
+      run: npm run test:e2e
+      env:
+        BASE_URL: https://staging.yourapp.com
+```
+
+---
+
+## အဆင့် ၆- Manual Approval Gate
+
+စည်းမျဉ်းများ စိစစ်မှုများပြားသည့် ပတ်ဝန်းကျင်များ သို့မဟုတ် စွန့်စားရမှုများသော deployment များအတွက် Staging နှင့် Production ကြားတွင် လူကိုယ်တိုင် အတည်ပြုရသည့် အဆင့် (human approval step) တစ်ခုကို ထည့်သွင်းပါ-
+
+```yaml
+# GitHub Actions: environments with required reviewers
+deploy-production:
+  needs: deploy-staging
+  runs-on: ubuntu-latest
+  environment:
+    name: production       # ← Configure "Required reviewers" in GitHub repo settings
+    url: https://yourapp.com
+
+  steps:
+    - name: Deploy to production
+      # ... only runs after a human approves in the GitHub UI
+```
+
+ဒါဟာ Production deployment မစတင်မီ သတ်မှတ်ထားသော စစ်ဆေးသူများ (reviewers) က "Approve" ကို နှိပ်နိုင်ရန် GitHub UI အသိပေးချက်တစ်ခု ပေးပို့ပါလိမ့်မည် — အလိုအလျောက်လုပ်ဆောင်မှုကို မနှောင့်နှေးစေဘဲ စစ်ဆေးမှုမှတ်တမ်း (audit trail) နှင့် လူကိုယ်တိုင် စိစစ်အတည်ပြုမှုကို ရရှိစေပါတယ်။
+
+---
+
+## အဆင့် ၇- Production Deployment
+
+နောက်ဆုံးအဆင့်မှာ အလိုအလျောက်ကျန်းမာရေး စစ်ဆေးမှု (health verification) နှင့် နောက်ပြန်ဆုတ်နိုင်သည့် စွမ်းရည် (rollback capability) တို့ဖြင့် Production သို့ deploy လုပ်ဆောင်ပါတယ်-
+
+```yaml
+deploy-production:
+  steps:
+    - name: Deploy
+      uses: appleboy/ssh-action@master
+      with:
+        script: |
+          set -e
+          IMAGE=ghcr.io/${{ github.repository }}:${{ github.sha }}
+          
+          # Pull new image while old version is still serving traffic
+          docker pull $IMAGE
+          
+          # Restart only the api service (not db/cache — no downtime there)
+          IMAGE=$IMAGE docker compose \
+            --env-file /home/deploy/.env.production \
+            -f docker-compose.yml -f docker-compose.prod.yml \
+            up -d --no-deps api
+          
+          # Verify production is healthy
+          sleep 15
+          curl -f https://api.yourapp.com/health || {
+            echo "❌ Deployment failed health check — rolling back"
+            
+            # Rollback: redeploy previous image tag
+            PREV_IMAGE=ghcr.io/${{ github.repository }}:${{ env.PREVIOUS_SHA }}
+            IMAGE=$PREV_IMAGE docker compose \
+              --env-file /home/deploy/.env.production \
+              -f docker-compose.yml -f docker-compose.prod.yml \
+              up -d --no-deps api
+            
+            exit 1
+          }
+          
+          echo "✅ Production deployment successful"
+
+    - name: Notify Slack
+      if: always()
+      uses: slackapi/slack-github-action@v1.26.0
+      with:
+        payload: |
+          {
+            "text": "${{ job.status == 'success' && '✅' || '❌' }} Production deploy: ${{ github.sha }}",
+            "channel": "#deployments"
+          }
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
+```
+
+---
+
+## Continuous Integration, Continuous Delivery နှင့် Continuous Deployment တို့၏ ကွာခြားချက်
+
+| သဘောတရား | အဓိပ္ပါယ် | လူကိုယ်တိုင် ဆောင်ရွက်ရမှု |
+|------|---------|------------------|
+| **CI** (Continuous Integration) | Commit တိုင်းသည် အလိုအလျောက် build + test များကို စတင်စေသည် | Push လုပ်ပြီးပါက လူကိုယ်တိုင် ဆောင်ရွက်ရန် မလိုပါ |
+| **CD** (Continuous Delivery) | အောင်မြင်သော build တိုင်းသည် deploy လုပ်ရန် အသင့်ဖြစ်သည်၊ deploy ကို လူကိုယ်တိုင် စတင်ရသည် | 1-click deploy |
+| **CD** (Continuous Deployment) | အောင်မြင်သော build တိုင်းသည် Production သို့ အလိုအလျောက် deploy ဖြစ်သည် | လုံးဝမလို - ရာနှုန်းပြည့် အလိုအလျောက်ဖြစ်သည် |
+
+ရင့်ကျက်မှုရှိသော ကုမ္ပဏီအများစုသည် Continuous Delivery ကို ကျင့်သုံးကြသည် — Staging အထိ ရာနှုန်းပြည့် အလိုအလျောက် အလုပ်လုပ်သော pipeline များဖြစ်ပြီး၊ Production သို့ တစ်ချက်နှိပ်ရုံဖြင့် သို့မဟုတ် အလိုအလျောက် deploy ပြုလုပ်ကြသည်။ Continuous Deployment (Production အထိ ရာနှုန်းပြည့် အလိုအလျောက်ဖြစ်ခြင်း) သည် အထူးကောင်းမွန်သော test coverage နှင့် monitoring တို့ လိုအပ်ပါသည်။
+
+---
+
+## DORA Metrics- Pipeline ၏ ထိရောက်မှုကို တိုင်းတာခြင်း
+
+Google မှ DevOps Research and Assessment (DORA) အဖွဲ့သည် စွမ်းဆောင်ရည်မြင့်မားသော အင်ဂျင်နီယာအဖွဲ့များကို ခွဲခြားပေးနိုင်သည့် တိုင်းတာမှု ၄ ခုကို ဖော်ထုတ်ခဲ့သည်-
+
+| တိုင်းတာမှု | ထိပ်တန်းစွမ်းဆောင်ရည်ရှိသူ | နိမ့်ပါးသောစွမ်းဆောင်ရည်ရှိသူ |
+|--------|----------------|---------------|
+| **Deployment Frequency (Deployment အကြိမ်ရေ)** | တစ်ရက်လျှင် အကြိမ်ပေါင်းများစွာ | တစ်လလျှင် တစ်ကြိမ် သို့မဟုတ် ထို့ထက်နည်း |
+| **Lead Time for Changes (ပြောင်းလဲမှုအတွက် ကြာမြင့်ချိန်)** | ၁ နာရီအောက် | ၁ လမှ ၆ လ |
+| **Mean Time to Recovery (မူလအခြေအနေပြန်ရောက်ရန် ပျမ်းမျှကြာချိန်)** | ၁ နာရီအောက် | ၁ ပတ်မှ ၁ လ |
+| **Change Failure Rate (ပြောင်းလဲမှု ကျရှုံးမှုနှုန်း)** | ၀–၁၅% | ၄၆–၆၀% |
+
+ကောင်းမွန်စွာ အကောင်အထည်ဖော်ထားသော CI/CD pipeline တစ်ခုသည် အဆိုပါ တိုင်းတာမှု ၄ ခုစလုံးကို တိုက်ရိုက် တိုးတက်စေပါသည်။
+
+---
+
+## အနှစ်ချုပ်
+
+Production အဆင့်မီ CI/CD pipeline တစ်ခုတွင် အဆင့် ၇ ဆင့် ရှိပါသည်-
+1. **Build**: compile လုပ်ခြင်း + Docker image တည်ဆောက်ခြင်း၊ git SHA tag ဖြင့် registry သို့ push လုပ်ခြင်း
+2. **Test**: unit → integration → coverage သတ်မှတ်ချက် (80%+)
+3. **Scan**: SAST (CodeQL), SCA (npm audit), secrets (TruffleHog), container (Trivy), IaC (Trivy config)
+4. **Package**: SHA + SemVer + latest တို့ဖြင့် multi-tag တပ်ခြင်း
+5. **Deploy to Staging**: full stack deploy + smoke test + E2E test ပြုလုပ်ခြင်း
+6. **Manual Gate** (စိတ်ကြိုက်): GitHub တွင် သတ်မှတ်ထားသော စစ်ဆေးသူ၏ အတည်ပြုချက် ရယူခြင်း
+7. **Production Deploy**: new image ကို ကြိုတင် pull လုပ်ခြင်း၊ service ကို ပြန်လည်စတင်ခြင်း၊ health စစ်ဆေးခြင်း၊ မအောင်မြင်ပါက အလိုအလျောက် rollback လုပ်ခြင်း
+
+နောက်သင်ခန်းစာတွင် အဆင့် ၄ မှ မပြောင်းလဲနိုင်သော ထွက်ရှိချက်များ (immutable outputs) ဖြစ်သည့် artifact များကို pipeline တစ်လျှောက်လုံးတွင် မည်သို့ စီမံခန့်ခွဲပုံ၊ version တပ်ပုံနှင့် လုံခြုံရေးယူပုံတို့ကို လေ့လာသွားမည် ဖြစ်သည်။

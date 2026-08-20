@@ -1,0 +1,468 @@
+---
+title: "အလိုအလျောက် CI ပိုက်လိုင်းကို ပြင်ဆင်ခြင်း (Lint, Test, Security)"
+---
+
+# အစစ်အမှန် CI ပိုက်လိုင်းတစ်ခု တည်ဆောက်ခြင်း
+
+Continuous Integration (စဉ်ဆက်မပြတ် ပေါင်းစပ်ခြင်း) ဆိုသည်မှာ "စမ်းသပ်ချက်အချို့ကို ដំណើរការခြင်း" သက်သက် မဟုတ်ပါ။ Production အဆင့်မီ CI ပိုက်လိုင်းဆိုသည်မှာ သင်၏ အလိုအလျောက် အရည်အသွေးစစ်ဆေးရေးဂိတ် (Quality gate) ဖြစ်ပါသည်။ ၎င်းသည် ပါဝင်ကူညီသူတိုင်းနှင့် commit တိုင်းတွင် တစ်သမတ်တည်းဖြစ်မှုကို သေချာစေသည်။ အလုပ်မလုပ်တော့သော (Broken ဖြစ်နေသော) မည်သည့်အရာမှ `main` သို့ merge မဖြစ်သွားစေပါ။
+
+ဤသင်ခန်းစာတွင် သင်သည် အောက်ပါတို့ကို လုပ်ဆောင်ပေးမည့် GitHub Actions CI workflow တစ်ခုကို တည်ဆောက်မည်ဖြစ်သည်-
+1. ESLint ဖြင့် **ကုဒ်စတိုင်ကို စစ်ဆေးခြင်း** — review မလုပ်မီ anti-patterns များကို ဖမ်းယူပေးသည်
+2. TypeScript ဖြင့် **အမျိုးအစားများကို အတည်ပြုခြင်း** — linter မမြင်နိုင်သော အမှားများကို ဖမ်းယူပေးသည်
+3. Vitest ဖြင့် **ယူနစ်စမ်းသပ်မှုများကို ដំណើរការခြင်း** — ပုံမှန်အတိုင်း ပြန်လည်ပျက်စီးမှုများကို အလိုအလျောက် ဖမ်းယူပေးသည်
+4. Trivy ဖြင့် **လုံခြုံရေး အားနည်းချက်များကို စကန်ဖတ်ခြင်း** — production သို့ မရောက်ရှိမီ CVE များကို ဖမ်းယူပေးသည်
+5. **အလုပ်များကို အပြိုင်လုပ်ဆောင်ခြင်း (Parallel)** — နာရီလက်တံအချိန်ကို အနည်းဆုံးဖြစ်စေရန် စစ်ဆေးမှုလေးခုစလုံးသည် တစ်ပြိုင်နက်တည်း ដំណើរការသည်
+
+---
+
+## GitHub Actions အလုပ်လုပ်ပုံ (အကျဉ်းချုပ်)
+
+```mermaid
+flowchart TD
+    PUSH[git push / PR opened] -->|triggers| WF[Workflow YAML\n.github/workflows/ci.yml]
+    WF --> R1[Runner VM\nubuntu-22.04]
+    R1 --> J1[Job: lint]
+    R1 --> J2[Job: type-check]
+    R1 --> J3[Job: test]
+    R1 --> J4[Job: security-scan]
+    J1 & J2 & J3 & J4 -->|all must pass| MR[Merge allowed ✅]
+    J1 & J2 & J3 & J4 -->|any fails| BLOCK[Merge blocked ❌]
+```
+
+**job** တစ်ခုစီသည် သီးခြား VM (runner) တစ်ခုပေါ်တွင် ដំណើរការသည်။ `needs:` ဖြင့် အထူးသတ်မှတ်ထားခြင်း မရှိပါက တူညီသော workflow ထဲရှိ job များသည် မူလအားဖြင့် **အပြိုင် (in parallel)** ដំណើរការကြသည်။
+
+**step** ဆိုသည်မှာ shell အမိန့်ပေးချက်တစ်ခု (သို့) ပြန်လည်အသုံးပြုနိုင်သော action တစ်ခု (`uses:`) ဖြစ်သည်။
+
+---
+
+## ပြီးပြည့်စုံသော CI Workflow
+
+`.github/workflows/ci.yml` ကို ဖန်တီးပါ-
+
+```yaml
+# .github/workflows/ci.yml
+# Triggered on every push and pull request that targets the main branch.
+# All four jobs run in parallel to minimize total pipeline duration.
+
+name: CI Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    # Also run on PRs targeting release branches
+    paths-ignore:
+      - "**.md"          # Don't run CI for documentation changes
+      - "docs/**"        # Don't run CI for changes in docs/ folder
+      - ".gitignore"     # Don't run CI for gitignore changes
+
+# Cancel in-progress runs for the same branch when a new push arrives.
+# Prevents wasted minutes on outdated runs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  # ============================================================
+  # Job 1: ESLint — Code Style & Best Practices
+  # ============================================================
+  lint:
+    name: 🔍 ESLint
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"  # Cache ~/.npm to speed up npm ci
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint
+
+  # ============================================================
+  # Job 2: TypeScript Type Check — Type Safety
+  # ============================================================
+  type-check:
+    name: 🏷️ TypeScript
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run TypeScript type checker
+        run: npm run type-check
+        # Equivalent to: npx tsc --noEmit
+        # --noEmit: check types only, don't emit .js files
+
+  # ============================================================
+  # Job 3: Vitest — Unit Tests with Coverage
+  # ============================================================
+  test:
+    name: 🧪 Unit Tests
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests with coverage
+        run: npm run test -- --coverage
+        env:
+          # Tests mock the DB, but some modules import DATABASE_URL at module load time
+          DATABASE_URL: "postgres://test:test@localhost:5432/test"
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()  # Upload even if tests fail — helps debug
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 7
+
+  # ============================================================
+  # Job 4: Trivy — Container Security Scanning
+  # ============================================================
+  security-scan:
+    name: 🔒 Security Scan
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    # This job needs write permission to upload SARIF to GitHub Security tab
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image for scanning
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false          # Don't push — we're only scanning
+          load: true           # Load into local Docker daemon for Trivy
+          tags: capstone-app:scan
+          # Use cache to speed up builds
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "capstone-app:scan"
+          format: "sarif"
+          output: "trivy-results.sarif"
+          severity: "CRITICAL,HIGH"
+          # Exit with error if CRITICAL or HIGH CVEs are found
+          exit-code: "1"
+          ignore-unfixed: true  # Ignore CVEs with no available fix yet
+
+      - name: Upload Trivy SARIF to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()  # Upload even on failure (to see what Trivy found)
+        with:
+          sarif_file: "trivy-results.sarif"
+          category: "trivy-container-scan"
+```
+
+---
+
+## Job တစ်ခုချင်းစီကို အသေးစိတ် နားလည်ခြင်း
+
+### Job 1: ESLint
+
+ESLint သည် တသမတ်တည်းဖြစ်သော ကုဒ်စတိုင်ကို ထိန်းသိမ်းပေးပြီး TypeScript မစစ်ဆေးနိုင်သော သာမန်အမှားများကို ဖမ်းယူပေးသည်။ သင်၏ `next.config.ts` တွင် တည်ဆောက်မှု (build) အတွင်း `eslint` ကို ထည့်သွင်းပြီးသားဖြစ်သော်လည်း သီးခြား CI job တစ်ခုအနေဖြင့် ដំណើរការခြင်းက ပိုမိုမြန်ဆန်သော တုံ့ပြန်မှုကို ရရှိစေသည်။
+
+```bash
+# What runs in the CI job
+npm run lint
+# Equivalent to: next lint
+```
+
+Next.js မှ မူလအားဖြင့် သတ်မှတ်ပေးထားသော သာမန် ESLint စည်းမျဉ်းများ-
+- `no-unused-vars` — အသုံးမပြုတော့သော dead code များကို ဖမ်းယူသည်
+- `react-hooks/rules-of-hooks` — hooks များကို အပေါ်ဆုံးအဆင့်တွင်သာ ခေါ်ဆိုရမည်
+- `react-hooks/exhaustive-deps` — useEffect dependency arrays များ အပြည့်အစုံ ပါဝင်ရမည်
+- `@next/next/no-img-element` — စွမ်းဆောင်ရည်ကောင်းမွန်စေရန် `<img>` အစား `<Image>` ကို အသုံးပြုပါ
+
+သင့်ရဲ့ ESLint config အပြည့်အစုံကို ကြည့်ရန်-
+```bash
+cat .eslintrc.json
+# { "extends": ["next/core-web-vitals", "next/typescript"] }
+```
+
+### Job 2: TypeScript Type Check
+
+`tsc --noEmit` သည် `.js` ဖိုင်များကို မထုတ်လုပ်ဘဲ ကုဒ်ဘေ့စ် တစ်ခုလုံးရှိ TypeScript အမျိုးအစား (types) အားလုံးကို အတည်ပြုပေးသည်။ ဤအရာက အောက်ပါတို့ကို ဖမ်းယူပေးသည်-
+- လုပ်ဆောင်ချက်များ (functions) ထது မှားယွင်းသော argument အမျိုးအစားများကို ပေးပို့မိခြင်း
+- အရာဝတ္ထု (object) တစ်ခုတွင် မရှိသော property များကို ဝင်ရောက်သုံးစွဲမိခြင်း
+- ကိုင်တွယ်ဖြေရှင်းမထားသော null/undefined တန်ဖိုးများ
+- ကိုက်ညီမှုမရှိသော return အမျိုးအစားများ
+
+```bash
+npm run type-check
+# Equivalent to: npx tsc --noEmit
+
+# Example output (failure):
+# app/api/items/route.ts:25:15 - error TS2345:
+#   Argument of type 'string | undefined' is not assignable to parameter
+#   of type 'string'.
+```
+
+### Job 3: Vitest Tests
+
+Vitest သည် Vite-native ဖြစ်သော test runner တစ်ခုဖြစ်ပြီး — TypeScript ပရောဂျက်များအတွက် Jest ထက် 10-100 ဆ ပိုမိုမြန်ဆန်သည်။ အဘယ်ကြောင့်ဆိုသော် ၎င်းသည် Babel အစား transpilation အတွက် esbuild ကို အသုံးပြုသောကြောင့် ဖြစ်သည်။
+
+```bash
+npm run test -- --coverage
+```
+
+`--coverage` flag သည် ကာဗာရေဂျာ အစီရင်ခံစာ (coverage report) ကို ထုတ်ပေးသည်။ `vitest.config.ts` တွင် အတိုင်းအတာ သတ်မှတ်ချက်များ (thresholds) ကို ဖွဲ့စည်းပါ-
+
+```typescript
+// vitest.config.ts (add coverage configuration)
+export default defineConfig({
+  test: {
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "json", "html"],
+      thresholds: {
+        branches: 70,
+        functions: 70,
+        lines: 70,
+        statements: 70,
+      },
+      exclude: [
+        "node_modules/**",
+        ".next/**",
+        "vitest.setup.ts",
+        "vitest.config.ts",
+      ],
+    },
+  },
+});
+```
+
+<Callout type="tip" title="လက်တွေ့ကျသော ကာဗာရေဂျာ ပစ်မှတ်များဖြင့် စတင်ပါ">
+ပထမနေ့မှာပင် ကာဗာရေဂျာ ပစ်မှတ်များကို 100% သတ်မှတ်မထားပါနှင့် — ၎င်းသည် မည်သည့်အဓိပ္ပာယ်ရှိသော စမ်းသပ်မှုကိုမျှ မလုပ်ဘဲ အောင်မြင်သွားသော စမ်းသပ်ချက်များကို ရေးသားခြင်းဆီသို့ ဦးတည်သွားစေနိုင်ပါသည်။ 70% ဖြင့် စတင်ပြီး ကုဒ်ဘေ့စ် ရင့်ကျက်လာသည်နှင့်အမျှ တိုးမြှင့်သွားပါ။
+</Callout>
+
+### Job 4: Trivy Security Scan
+
+Trivy သည် ဒေတာဘေ့စ်မျိုးစုံမှ လူသိများသော CVE များ (Common Vulnerabilities and Exposures) အတွက် သင့်၏ Docker ရုပ်ပုံ (image) ကို စကန်ဖတ်သည်-
+- **NVD** — NIST အမျိုးသား အားနည်းချက် ဒေတာဘေ့စ် (NIST National Vulnerability Database)
+- **GitHub Advisory Database** — GitHub ၏ အရင်းအမြစ်ဖွင့် အကြံပေး ဒေတာဘေ့စ်
+- **OS-specific databases** — Alpine Linux ၏ လုံခြုံရေး ဒေတာဘေ့စ်၊ Debian စသည်တို့
+
+`--ignore-unfixed` flag သည် အရေးကြီးသည်- ၎င်းသည် ပြင်ဆင်ရန် မရှိသေးသော အားနည်းချက်များကို ကျော်သွားစေသည်။ ဤ flag ကို မသုံးပါက၊ မည်သည့် ပက်ကေ့ဂျ်ကိုမျှ အဆင့်မြှင့်တင်၍ မပြင်ဆင်နိုင်သော အားနည်းချက်များအတွက် သတိပေးချက်များကို သင်ရရှိမည် ဖြစ်သည်။
+
+```bash
+# Run Trivy locally before pushing
+trivy image --severity CRITICAL,HIGH capstone-app:local
+
+# Example clean output:
+# capstone-app:local (alpine 3.19.0)
+# ===================================
+# Total: 0 (CRITICAL: 0, HIGH: 0)
+```
+
+---
+
+## မြန်ဆန်မှုအတွက် Caching အသုံးပြုခြင်း
+
+Caching မပါပါက CI job တိုင်းသည် `npm ci` ကို အစကစတင် ដំណើរការမည်ဖြစ်ပြီး — npm registry မှ ပက်ကေ့ဂျ် ၂၀၀ ကျော်ကို အကြိမ်တိုင်း ဒေါင်းလုဒ်လုပ်နေရမည် ဖြစ်သည်။ `setup-node` action ထဲတွင် `cache: "npm"` ကို အသုံးပြုခြင်းဖြင့် လုပ်ဆောင်ချက်များကြားတွင် `~/.npm` ကမ္ဘာလုံးဆိုင်ရာ ကက်ရှ်ကို ပြန်လည်ရယူပေးသည်။
+
+```mermaid
+flowchart LR
+    subgraph nocache["Without cache"]
+        NC1[npm ci] -->|2-4 minutes| NC2[All deps downloaded]
+    end
+
+    subgraph withcache["With cache: 'npm'"]
+        WC1[Restore ~/.npm cache] --> WC2[npm ci]
+        WC2 -->|20-30 seconds| WC3[Cache HIT: deps from cache]
+    end
+```
+
+လုံခြုံရေးစကန်ဖတ်ခြင်း job တွင် Docker layer caching အတွက် GitHub Actions Cache (`type=gha`) ကို အသုံးပြုထားသည်-
+```yaml
+cache-from: type=gha    # Read from GitHub Actions cache
+cache-to: type=gha,mode=max  # Write all layers to cache
+```
+
+ဆိုလိုသည်မှာ Docker တည်ဆောက်မှုအလွှာများကို ကက်ရှ်လုပ်ထားမည်ဖြစ်သည်။ ဒုတိယအကြိမ် ដំណើរការသည့်အခါ ပြောင်းလဲသွားသော အလွှာများ (ဥပမာ- သင်၏ ဆော့ဖ်ဝဲရင်းမြစ်ကုဒ်) ကိုသာ ပြန်လည်တည်ဆောက်မည်ဖြစ်သည်။
+
+---
+
+## `concurrency` ဘလောက်- အချိန်အလဟဿ မဖြစ်စေခြင်း
+
+```yaml
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+```
+
+ဤသည်မှာ တက်ကြွသော ရိုပိုဇယ်တြီ (repositories) များအတွက် အရေးအကြီးဆုံး စွမ်းဆောင်ရည် အကောင်းဆုံးဖြစ်စေခြင်း (performance optimization) များထဲမှ တစ်ခုဖြစ်သည်။
+
+**အခြေအနေ:** ဆော့ဖ်ဝဲရေးသားသူတစ်ဦးသည် feature branch တစ်ခုသို့ commit ၃ ခုကို အမြန်တင်လိုက်သည်။ `concurrency` မပါပါက GitHub သည် သီးခြား CI ដំណើរការမှု ၃ ခုကို စတင်မည်ဖြစ်ပြီး — ကွန်ပျူတာ အချိန်မိနစ်များကို ၃ ဆ ပိုမိုစားသုံးမည်ဖြစ်သည်။ `concurrency` ပါရှိပါက ဒုတိယမြောက် push ရောက်လာသည့်အခေတ္တတွင် ပထမ CI ដំណើរការမှုကို ဖျက်သိမ်းလိုက်မည်ဖြစ်သည်။ တတိယမြောက် push က ဒုတိယမြောက်ကို ဖျက်သိမ်းမည်။ နောက်ဆုံးပေါ် ដំណើរការမှုအတွက်သာ သင်ပေးချေရမည် ဖြစ်သည်။
+
+---
+
+## CI ရလဒ်များကို ကြည့်ရှုခြင်း
+
+GitHub သို့ push တင်ပြီး pull request တစ်ခု ဖွင့်လှစ်ပြီးနောက်:
+
+1. **PR Checks**: GitHub သည် PR စာမျက်နှာတွင် job တစ်ခုချင်းစီအတွက် အခြေအနေကို (✅ သို့မဟုတ် ❌) တိုက်ရိုက်ပြသပေးသည်
+2. **Job Logs**: အဆင့်ချင်း အသေးစိတ် အထွက်ကို ကြည့်ရန် မည်သည့် job ကိုမဆို နှိပ်ပါ
+3. **Security Tab**: Trivy SARIF ရလဒ်များသည် ရိုပိုဇယ်တြီ၏ Security → Code scanning alerts တွင် ပေါ်လာမည်
+4. **Artifacts**: ကာဗာရေဂျာ အစီရင်ခံစာကို workflow ដំណើរការသည့် စာမျက်နှာမှ ဒေါင်းလုဒ်လုပ်နိုင်သည်
+
+```mermaid
+flowchart TD
+    PR_PAGE["PR Page\n✅ lint · ✅ type-check · ✅ test · ✅ security-scan"]
+    PR_PAGE --> MERGE[Merge button enabled]
+    PR_PAGE --> CHECKS[Click any check → Job logs]
+    PR_PAGE --> SECURITY[Security tab → Trivy alerts]
+    PR_PAGE --> ARTIFACTS[Actions tab → Download coverage]
+```
+
+---
+
+## Branch Protection Rules: ပိုက်လိုင်းကို တင်းကြပ်စွာ အကောင်အထည်ဖော်ခြင်း
+
+ဆော့ဖ်ဝဲရေးသားသူများသည် `main` သို့ တိုက်ရိုက် push တင်ခြင်းဖြင့် ကျော်လွှားသွားနိုင်မည်ဆိုပါက CI workflow သည် အသုံးမဝင်တော့ပါ။ ၎င်းကို တင်းကြပ်ပါ-
+
+1. **Repository → Settings → Branches → Add branch protection rule** သို့ သွားပါ
+2. Branch အမည် ပုံစံ: `main`
+3. ဖွင့်ရန်:
+   - ✅ **Require a pull request before merging**
+   - ✅ **Require status checks to pass before merging**
+     - ထည့်ရန်: `lint`, `type-check`, `test`, `security-scan`
+   - ✅ **Require branches to be up to date before merging**
+   - ✅ **Do not allow bypassing the above settings**
+
+ဤဖွဲ့စည်းမှုပုံစံပြီးနောက် — ရိုပိုဇယ်တြီ စီမံခန့်ခွဲသူများပင်လျှင် — မည်သူမျှ အလုပ်မလုပ်တော့သော PR တစ်ခုကို `main` သို့ merge လုပ်၍မရတော့ပါ။
+
+---
+
+## အချိန်ကြာလာသည်နှင့်အမျှ နောက်ထပ် စစ်ဆေးမှုများ ထည့်သွင်းခြင်း
+
+ဤ CI ပိုက်လိုင်းသည် အခြေခံအုတ်မြစ်တစ်ခု ဖြစ်သည်။ သင်၏ ပရောဂျက် ကြီးထွားလာသည်နှင့်အမျှ အောက်ပါတို့ကို ထည့်သွင်းလာမည် ဖြစ်သည်-
+
+```yaml
+# Additional checks to add later
+
+# Dependency audit
+- name: npm audit
+  run: npm audit --audit-level=high
+
+# Check for outdated dependencies
+- name: Check for outdated packages
+  run: npm outdated || true  # Warning only, don't fail
+
+# Bundle size analysis
+- name: Analyze bundle size
+  run: |
+    npm run build
+    du -sh .next/
+
+# Integration tests (separate job with a real database)
+integration-test:
+  services:
+    postgres:
+      image: postgres:16-alpine
+      env:
+        POSTGRES_USER: test
+        POSTGRES_PASSWORD: test
+        POSTGRES_DB: testdb
+      ports:
+        - 5432:5432
+      options: --health-cmd pg_isready --health-interval 5s --health-retries 5
+  steps:
+    - run: npm run test:integration
+      env:
+        DATABASE_URL: postgres://test:test@localhost:5432/testdb
+```
+
+---
+
+## သာမန် CI ချို့ယွင်းချက်များကို ဖြေရှင်းခြင်း
+
+### "ESLint found errors"
+```bash
+# Run locally first
+npm run lint
+npm run lint -- --fix  # Auto-fix some issues
+```
+
+### "TypeScript errors found"
+```bash
+# Run locally
+npm run type-check
+# The exact error and line number are in the output
+```
+
+### "Tests failed"
+```bash
+# Run locally with the same env vars CI uses
+DATABASE_URL="postgres://test:test@localhost:5432/test" npm test
+```
+
+### "Trivy found CRITICAL CVEs"
+```bash
+# Check which package has the CVE
+trivy image --severity CRITICAL capstone-app:local
+
+# Update the vulnerable package
+npm update package-name
+# Or update the base image
+# Change: FROM node:20-alpine
+# To:     FROM node:20-alpine (docker pull will get the latest patch)
+```
+
+---
+
+## အနှစ်ချုပ်
+
+ယခုအခါတွင် သင့်တွင် အောက်ပါတို့ကို လုပ်ဆောင်ပေးမည့် GitHub Actions CI ပိုက်လိုင်းတစ်ခု ရှိနေပြီဖြစ်သည်-
+- PR တိုင်းတွင် အရည်အသွေးစစ်ဆေးမှု **လေးခု** (ESLint, TypeScript, Vitest, Trivy) ကို အပြိုင် ដំណើរการပေးသည်
+- commit အသစ်များ push တင်လိုက်သည့်အခါ **မလိုအပ်တော့သော ដំណើរការမှုများကို** အလိုအလျောက် ဖျက်သိမ်းပေးသည် (CI မိနစ်များကို သက်သာစေသည်)
+- ပိုမိုမြန်ဆန်သော တည်ဆောက်မှုများအတွက် **npm dependencies** နှင့် Docker layersများကို ကက်ရှ်လုပ်ပေးသည်
+- မြင်သာစေရန်အတွက် ကာဗာရေဂျာ အစီရင်ခံစာများနှင့် **Trivy SARIF** ကို GitHub သို့ **တင်ვი်းပေးသည်**
+- ပျက်စီးနေသော merge များကို တားဆီးရန် **branch protection rules ဖြင့် တင်းကြပ်နိုင်သည်**
+
+နောက်သင်ခန်းစာတွင်၊ Git SHA ကို တဂ် (tag) အဖြစ်အသုံးပြု၍ Docker ရုပ်ပုံကို တည်ဆောက်ကာ GitHub Container Registry သို့ တင်ပေးမည့် CD workflow တစ်ခုကို ထည့်သွင်းမည် ဖြစ်သည်။

@@ -1,16 +1,20 @@
+"use client";
 import React from "react";
 import Link from "next/link";
 import { Terminal, Heart, Sparkles, BookOpen, Map, Zap } from "lucide-react";
 import { GitHubIcon, FacebookIcon } from "@/components/icons/TechIcons";
+import { useLanguage } from "@/lib/i18n/LanguageContext";
 
 export function Footer() {
+  const { t, language } = useLanguage();
+
   return (
     <footer className="w-full border-t border-slate-200 bg-slate-50 dark:bg-[#07070a] dark:border-white/[0.08] pt-16 pb-12 transition-colors">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-10 pb-12 border-b border-white/[0.08]">
           {/* Brand Col */}
           <div className="md:col-span-1 space-y-4">
-            <Link href="/" className="flex items-center gap-3">
+            <Link href={`/${language}`} className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 p-0.5 shadow-lg shadow-blue-500/20">
                 <div className="w-full h-full bg-[#0d0d14] rounded-[10px] flex items-center justify-center">
                   <Terminal className="w-4 h-4 text-blue-400" />
@@ -21,46 +25,46 @@ export function Footer() {
               </span>
             </Link>
             <p className="text-sm text-muted-foreground leading-relaxed">
-              From your first Linux terminal command to production Kubernetes clusters. 100% free, beginner-first, visual engineering curriculum.
+              {t.footer.brandDesc}
             </p>
           </div>
 
           {/* Quick Links */}
           <div className="space-y-4">
             <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">
-              Learning Tracks
+              {t.footer.tracksTitle}
             </h4>
             <ul className="space-y-2.5 text-sm">
               <li>
                 <Link
-                  href="/courses/linux-command-line"
+                  href={`/${language}/courses/linux-command-line`}
                   className="text-muted-foreground hover:text-blue-400 transition-colors flex items-center gap-1.5"
                 >
-                  <Terminal className="w-3.5 h-3.5 text-blue-400" /> Linux Command Line
+                  <Terminal className="w-3.5 h-3.5 text-blue-400" /> {t.footer.track1}
                 </Link>
               </li>
               <li>
                 <Link
-                  href="/courses/terraform-iac"
+                  href={`/${language}/courses/terraform-iac`}
                   className="text-muted-foreground hover:text-blue-400 transition-colors flex items-center gap-1.5"
                 >
-                  <BookOpen className="w-3.5 h-3.5 text-blue-400" /> Terraform IaC
+                  <BookOpen className="w-3.5 h-3.5 text-blue-400" /> {t.footer.track2}
                 </Link>
               </li>
               <li>
                 <Link
-                  href="/courses/monitoring-observability"
+                  href={`/${language}/courses/monitoring-observability`}
                   className="text-muted-foreground hover:text-blue-400 transition-colors flex items-center gap-1.5"
                 >
-                  <Sparkles className="w-3.5 h-3.5 text-blue-400" /> Observability & Prometheus
+                  <Sparkles className="w-3.5 h-3.5 text-blue-400" /> {t.footer.track3}
                 </Link>
               </li>
               <li>
                 <Link
-                  href="/courses/gitops-argocd"
+                  href={`/${language}/courses/gitops-argocd`}
                   className="text-muted-foreground hover:text-blue-400 transition-colors flex items-center gap-1.5"
                 >
-                  <Zap className="w-3.5 h-3.5 text-blue-400" /> ArgoCD & GitOps
+                  <Zap className="w-3.5 h-3.5 text-blue-400" /> {t.footer.track4}
                 </Link>
               </li>
             </ul>
@@ -69,31 +73,31 @@ export function Footer() {
           {/* Platform */}
           <div className="space-y-4">
             <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">
-              Platform
+              {t.footer.platformTitle}
             </h4>
             <ul className="space-y-2.5 text-sm">
               <li>
                 <Link
-                  href="/courses"
+                  href={`/${language}/courses`}
                   className="text-muted-foreground hover:text-blue-400 transition-colors"
                 >
-                  All 13 Courses
+                  {t.footer.platform1}
                 </Link>
               </li>
               <li>
                 <Link
-                  href="/roadmap"
+                  href={`/${language}/roadmap`}
                   className="text-muted-foreground hover:text-blue-400 transition-colors flex items-center gap-1.5"
                 >
-                  <Map className="w-3.5 h-3.5 text-blue-400" /> Visual 13-Step Roadmap
+                  <Map className="w-3.5 h-3.5 text-blue-400" /> {t.footer.platform2}
                 </Link>
               </li>
               <li>
                 <Link
-                  href="/courses/cicd-project"
+                  href={`/${language}/courses/cicd-project`}
                   className="text-muted-foreground hover:text-blue-400 transition-colors"
                 >
-                  Capstone CI/CD Project
+                  {t.footer.platform3}
                 </Link>
               </li>
             </ul>
@@ -102,7 +106,7 @@ export function Footer() {
           {/* Community & Open Source */}
           <div className="space-y-4">
             <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">
-              Community & Open Source
+              {t.footer.communityTitle}
             </h4>
             <ul className="space-y-2 text-xs text-muted-foreground">
               <li>
@@ -113,7 +117,7 @@ export function Footer() {
                   className="hover:text-blue-400 transition-colors flex items-center gap-1.5"
                 >
                   <GitHubIcon className="w-3.5 h-3.5" />
-                  GitHub Repository & Discussions
+                  {t.footer.community1}
                 </a>
               </li>
               <li>
@@ -124,7 +128,7 @@ export function Footer() {
                   className="hover:text-blue-400 transition-colors flex items-center gap-1.5"
                 >
                   <Sparkles className="w-3.5 h-3.5 text-blue-400" />
-                  Contribute a Lesson / Fix
+                  {t.footer.community2}
                 </a>
               </li>
               <li>
@@ -135,7 +139,7 @@ export function Footer() {
                   className="hover:text-blue-400 transition-colors flex items-center gap-1.5"
                 >
                   <BookOpen className="w-3.5 h-3.5 text-blue-400" />
-                  Community Release Notes
+                  {t.footer.community3}
                 </a>
               </li>
             </ul>
@@ -165,11 +169,11 @@ export function Footer() {
         {/* Bottom bar */}
         <div className="pt-8 flex flex-col md:flex-row items-center justify-between gap-4 text-xs text-muted-foreground">
           <div>
-            © {new Date().getFullYear()} DevOps Zero to Hero. Built for aspiring cloud & DevOps engineers.
+            © {new Date().getFullYear()} {t.footer.copyright}
           </div>
           <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
             <div className="flex items-center gap-1">
-              <span>Designed & Created by</span>
+              <span>{t.footer.designedBy}</span>
               <a
                 href="https://www.facebook.com/lu.gyi.416515"
                 target="_blank"
@@ -181,7 +185,7 @@ export function Footer() {
             </div>
             <span className="hidden sm:inline text-muted-foreground/40">•</span>
             <div className="flex items-center gap-1">
-              Made with <Heart className="w-3.5 h-3.5 text-blue-500 fill-blue-500 mx-0.5" /> for the community
+              {t.footer.madeWith} <Heart className="w-3.5 h-3.5 text-blue-500 fill-blue-500 mx-0.5" /> {t.footer.forCommunity}
             </div>
           </div>
         </div>

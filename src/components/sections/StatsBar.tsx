@@ -1,12 +1,15 @@
+"use client";
 import React from "react";
 import { StatCard } from "@/components/ui/StatCard";
+import { useLanguage } from "@/lib/i18n/LanguageContext";
 
 export function StatsBar() {
+  const { t } = useLanguage();
   const stats = [
-    { number: "13", label: "Mastery Courses", sublabel: "Linux to GitOps & IaC" },
-    { number: "110+", label: "Hands-on Lessons", sublabel: "Zero fluff, high impact" },
-    { number: "100%", label: "Free & Open Source", sublabel: "No paywalls or subscriptions" },
-    { number: "1", label: "Production Capstone", sublabel: "Real-world end-to-end pipeline" },
+    { number: "13", label: t.stats.courses, sublabel: "Linux to GitOps & IaC" },
+    { number: "110+", label: t.stats.lessons, sublabel: "Zero fluff, high impact" },
+    { number: "100%", label: t.stats.free, sublabel: "No paywalls or subscriptions" },
+    { number: "1", label: t.stats.capstone, sublabel: "Real-world end-to-end pipeline" },
   ];
 
   return (

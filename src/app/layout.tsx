@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/layout/ThemeProvider";
+import { LanguageProvider } from "@/lib/i18n/LanguageContext";
 import { Navbar } from "@/components/layout/Navbar";
 import { Footer } from "@/components/layout/Footer";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -86,22 +87,24 @@ export default function RootLayout({
         <a href="#main-content" className="skip-to-content">
           Skip to main content
         </a>
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="dark"
-          enableSystem
-          disableTransitionOnChange
-        >
-          <TooltipProvider>
-            <div className="relative flex min-h-screen flex-col">
-              <Navbar />
-              <main id="main-content" className="flex-1">
-                {children}
-              </main>
-              <Footer />
-            </div>
-          </TooltipProvider>
-        </ThemeProvider>
+        <LanguageProvider>
+          <ThemeProvider
+            attribute="class"
+            defaultTheme="dark"
+            enableSystem
+            disableTransitionOnChange
+          >
+            <TooltipProvider>
+              <div className="relative flex min-h-screen flex-col">
+                <Navbar />
+                <main id="main-content" className="flex-1">
+                  {children}
+                </main>
+                <Footer />
+              </div>
+            </TooltipProvider>
+          </ThemeProvider>
+        </LanguageProvider>
       </body>
     </html>
   );

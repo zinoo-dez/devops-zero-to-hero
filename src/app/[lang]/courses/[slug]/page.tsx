@@ -56,10 +56,10 @@ export async function generateMetadata({
 export default async function CourseDetailPage({
   params,
 }: {
-  params: Promise<{ slug: string }>;
+  params: Promise<{ slug: string; lang: string }>;
 }) {
-  const { slug } = await params;
-  const course = getCourseBySlug(slug);
+  const { slug, lang } = await params;
+  const course = getCourseBySlug(slug, lang);
 
   if (!course) {
     notFound();

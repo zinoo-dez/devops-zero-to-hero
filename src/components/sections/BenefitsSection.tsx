@@ -12,49 +12,45 @@ import {
   ShieldCheck,
   Sparkles,
 } from "lucide-react";
+import { useLanguage } from "@/lib/i18n/LanguageContext";
 
 export function BenefitsSection() {
+  const { t } = useLanguage();
   const benefits = [
     {
       icon: Terminal,
-      title: "From Absolute Zero to Fluency",
-      description:
-        "Every concept is taught in plain English with relatable analogies (like video game checkpoints and factory lines). No gatekeeping.",
+      title: t.benefits.items[0].title,
+      description: t.benefits.items[0].description,
       gradient: "from-emerald-500 to-teal-600",
     },
     {
       icon: Layers,
-      title: "Interactive Flow Diagrams",
-      description:
-        "Understand Docker architectures, Kubernetes component relationships, and GitHub Actions pipelines visually with React Flow & Mermaid.",
+      title: t.benefits.items[1].title,
+      description: t.benefits.items[1].description,
       gradient: "from-indigo-500 to-violet-600",
     },
     {
       icon: Cpu,
-      title: "Real Terminal Commands with Context",
-      description:
-        "Don't just memorize commands. Learn when, why, and how to use every command when debugging real staging and production servers.",
+      title: t.benefits.items[2].title,
+      description: t.benefits.items[2].description,
       gradient: "from-blue-500 to-cyan-600",
     },
     {
       icon: ShieldCheck,
-      title: "Common Mistakes & Pitfalls Included",
-      description:
-        "Every lesson has dedicated 'Common Pitfalls' callouts so you don't spend hours debugging cryptic error messages or permission denied traps.",
+      title: t.benefits.items[3].title,
+      description: t.benefits.items[3].description,
       gradient: "from-cyan-500 to-orange-600",
     },
     {
       icon: Compass,
-      title: "End-to-End Capstone Deployment",
-      description:
-        "Complete a real GitOps deployment pipeline: Git Push → GitHub Actions → Docker Build → GHCR → K3s Kubernetes cluster rollout.",
+      title: t.benefits.items[4].title,
+      description: t.benefits.items[4].description,
       gradient: "from-purple-500 to-pink-600",
     },
     {
       icon: Sparkles,
-      title: "100% Free & Open For Everyone",
-      description:
-        "No paywalls, pay-per-module tricks, or subscription models. Complete high-quality DevOps education accessible to all developers.",
+      title: t.benefits.items[5].title,
+      description: t.benefits.items[5].description,
       gradient: "from-indigo-500 to-indigo-600",
     },
   ];
@@ -63,10 +59,10 @@ export function BenefitsSection() {
     <section className="py-20 lg:py-28 relative">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <SectionHeader
-          badge="Why DevOps Zero to Hero"
-          title="Engineered specifically for"
-          highlight="Beginner Confidence"
-          subtitle="Stop drowning in confusing cloud documentation. Learn by building mental models that actually stick."
+          badge={t.benefits.badge}
+          title={t.benefits.titlePart1}
+          highlight={t.benefits.titlePart2}
+          subtitle={t.benefits.subtitle}
         />
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

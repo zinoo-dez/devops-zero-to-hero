@@ -631,3 +631,37 @@
     @apply font-sans;
   }
 }
+
+/* Myanmar Typography Adjustments */
+/* Decrease font sizes slightly and increase line heights for Myanmar script */
+html.lang-my {
+  --text-6xl: 3.1rem;
+  --text-6xl--line-height: 1.5;
+  
+  --text-5xl: 2.5rem;
+  --text-5xl--line-height: 1.5;
+  
+  --text-4xl: 2rem;
+  --text-4xl--line-height: 1.5;
+  
+  --text-3xl: 1.65rem;
+  --text-3xl--line-height: 1.55;
+  
+  --text-2xl: 1.35rem;
+  --text-2xl--line-height: 1.55;
+  
+  --text-xl: 1.15rem;
+  --text-xl--line-height: 1.6;
+  
+  --text-lg: 1rem;
+  --text-lg--line-height: 1.6;
+}
+
+html.lang-my h1, 
+html.lang-my h2, 
+html.lang-my h3, 
+html.lang-my h4, 
+html.lang-my h5, 
+html.lang-my h6 {
+  line-height: 1.6;
+}

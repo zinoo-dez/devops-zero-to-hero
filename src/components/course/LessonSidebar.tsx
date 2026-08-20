@@ -10,11 +10,13 @@ import { useProgress } from "@/hooks/useProgress";
 interface LessonSidebarProps {
   course: Course;
   currentLessonSlug: string;
+  lang: string;
 }
 
 export function LessonSidebar({
   course,
   currentLessonSlug,
+  lang,
 }: LessonSidebarProps) {
   const { markComplete, isComplete, getCompletedCount, resetProgress } =
     useProgress();
@@ -34,7 +36,7 @@ export function LessonSidebar({
       {/* Course Top Title & Back link */}
       <div className="p-5 border-b border-slate-200 dark:border-white/8 space-y-3">
         <Link
-          href={`/courses/${course.slug}`}
+          href={`/${lang}/courses/${course.slug}`}
           className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors group"
         >
           <ChevronLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" />
@@ -87,7 +89,7 @@ export function LessonSidebar({
           return (
             <Link
               key={lesson.slug}
-              href={`/courses/${course.slug}/${lesson.slug}`}
+              href={`/${lang}/courses/${course.slug}/${lesson.slug}`}
               className={cn(
                 "flex items-start gap-3 p-3 rounded-xl text-xs transition-all group",
                 isActive

@@ -1,0 +1,195 @@
+---
+title: "Why Docker Compose?"
+---
+
+# ပြဿနာ- ကွန်တိန်နာများကို လက်ဖြင့်စီမံခန့်ခွဲခြင်း
+
+Docker သင်တန်းတွင် သင်သည် `docker run` ကို အသုံးပြု၍ တစ်ခုချင်းစီပါသော ကွန်တိန်နာများကို လုပ်ဆောင်ခဲ့သည်။ ၎င်းသည် သီးသန့်တည်ရှိနေသော ကွန်တိန်နာတစ်ခုတည်းအတွက် အလွန်ကောင်းမွန်စွာ အလုပ်လုပ်ပါသည်။ သို့သော် တကယ့်ထုတ်လုပ်မှုပတ်ဝန်းကျင် (production) ရှိ အပလီကေးရှင်းများသည် ကွန်တိန်နာတစ်ခုတည်း ရှိသည်ဟူ၍ လုံးဝမရှိပါ — ၎င်းတို့သည် အတူတကွ ပူးပေါင်းဆောင်ရွက်ကြသော ဝန်ဆောင်မှုများ (**system**) တစ်ခုဖြစ်သည်။
+
+ပုံမှန်သုံးလွှာပါသော (three-tier) ဝဘ်အပလီကေးရှင်းတစ်ခုသည် ဤကဲ့သို့ဖြစ်သည်-
+
+```mermaid
+flowchart LR
+    USER["👤 User\nbrowser"] -->|"HTTP :3000"| API["Node.js API\ncontainer"]
+    API -->|"SQL :5432"| DB[("PostgreSQL\ncontainer")]
+    API -->|"Redis :6379"| CACHE["Redis\ncontainer"]
+    DB --> VOL_DB[("postgres-data\nnamed volume")]
+    CACHE --> VOL_CACHE[("redis-data\nnamed volume")]
+```
+
+ဤအစုအဝေး (stack) ကို `docker run` အမိန့်ပေးချက်များ သက်သက်ဖြင့် လက်ဖြင့်လုပ်ဆောင်ရန်မှာ-
+
+```bash
+# အဆင့် ၁ - ကွန်တိန်နာများ အချင်းချင်း ဆက်သွယ်နိုင်ရန် မျှဝေသုံးစွဲမည့် ကွန်ရက်တစ်ခု ဖန်တီးပါ
+docker network create myapp-net
+
+# အဆင့် ၂ - PostgreSQL ကို စတင်ပါ (volume, network နှင့် ပတ်ဝန်းကျင်ဆိုင်ရာ משתנים (env var) အားလုံးကို မမေ့ပါနဲ့...)
+docker run -d \
+  --name myapp-db \
+  --network myapp-net \
+  -e POSTGRES_USER=appuser \
+  -e POSTGRES_PASSWORD=supersecret \
+  -e POSTGRES_DB=myapp \
+  -v postgres-data:/var/lib/postgresql/data \
+  postgres:16-alpine
+
+# အဆင့် ၃ - Redis ကို စတင်ပါ
+docker run -d \
+  --name myapp-cache \
+  --network myapp-net \
+  redis:7-alpine
+
+# အဆင့် ၄ - သင့် API ပုံရိပ် (image) ကို ဦးစွာ တည်ဆောက်ပါ
+docker build -t myapp-api .
+
+# အဆင့် ၅ - API ကို စတင်ပါ — Postgres အလုပ်စလုပ်ပြီးစီးကြောင်း ဆုတောင်းပါ
+docker run -d \
+  --name myapp-api \
+  --network myapp-net \
+  -p 3000:3000 \
+  -e DATABASE_URL=postgres://appuser:supersecret@myapp-db:5432/myapp \
+  -e REDIS_URL=redis://myapp-cache:6379 \
+  myapp-api
+
+# စုစုပေါင်း - အမိန့်ပေးချက် ၅ ခု၊ flags ၁၅ ခုကျော်၊ တိကျသော အစဉ်လိုက်လုပ်ဆောင်ရန် လိုအပ်ပြီး အမှားရှာဖွေပြင်ဆင်မှု (error handling) လုံးဝ မရှိပါ
+```
+
+**ဤနည်းလမ်း၏ ပြဿနာများ:**
+- ပရိုဂရမ်မာအသစ်တစ်ဦး ဝင်လာသည် → README ကိုဖတ်သည်၊ flag တစ်ခုလွတ်သွားသည်၊ သန်းခေါင်ယံအချိန်တွင် နားမလည်နိုင်သော အမှားတစ်ခုနှင့် ကြုံရသည်
+- ကွန်တိန်နာအမည်ကို ပြောင်းလိုက်သည် → နောက်ဆက်တွဲ ရည်ညွှန်းချက် (reference) အားလုံးကို လက်ဖြင့် လိုက်ပြင်ရမည်
+- API စတင်ချိန်တွင် Postgres သည် အပြည့်အဝ အလုပ်မစတင်ရသေးပါက → စတင်ချိန်တွင် `ECONNREFUSED` ဖြစ်မည်
+- `--restart` flag များ မပါရှိပါ → ကွန်တိန်နာများသည် ကွန်ပျူတာပြန်စချိန်တွင် သေသွားပြီး သေမြဲသေနေမည်
+- ပတ်ဝန်းကျင်မျိုးစုံ (dev, staging, prod) အကြား တသမတ်တည်း စီမံခန့်ခွဲရန် မဖြစ်နိုင်ပါ
+
+---
+
+## Docker Compose: ဖြေရှင်းချက်
+
+Docker Compose သည် သင့်၏ **အပလီကေးရှင်း အစုအဝေးတစ်ခုလုံး** (ဝန်ဆောင်မှုများ၊ ကွန်ရက်များ၊ ဗလုံမ်များ၊ ပတ်ဝန်းကျင်ဆိုင်ရာ משתניםများနှင့် မှီခိုမှု dependencies များ အားလုံး) ကို YAML ဖိုင်တစ်ခုတည်းတွင် ဖော်ပြရန် ခွင့်ပြုပေးသည်။ ထို့နောက် အမိန့်ပေးချက် တစ်ခုတည်းဖြင့် အားလုံးကို စီမံခန့်ခွဲနိုင်သည်-
+
+```bash
+# အားလုံးကို စတင်ပါ (images တည်ဆောက်သည်၊ network ဖန်တီးသည်၊ ကွန်တိန်နာများစတင်သည်၊ logs များကို ပြသသည်)
+docker compose up
+
+# အားလုံးကို နောက်ခံတွင် စတင်ပါ (detached)
+docker compose up -d
+
+# ကွန်တိန်နာများကို ရပ်ပြီး ဖယ်ရှားပါ (volumes များကို ထိန်းသိမ်းထားသည် — ဒေတာလုံခြုံသည်)
+docker compose down
+
+# volumes များအပါအဝင် အားလုံးကို ရပ်ပြီး ဖယ်ရှားပါ (⚠️ ဒေတာများ ဆုံးရှုံးနိုင်သည်)
+docker compose down --volumes
+```
+
+အထက်ပါ သုံးလွှာပါ အစုအဝေးသည် ဤသို့ ဖြစ်လာသည်-
+
+```yaml
+# docker-compose.yml
+services:
+  api:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgres://appuser:supersecret@db:5432/myapp
+      REDIS_URL: redis://cache:6379
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: appuser
+      POSTGRES_PASSWORD: supersecret
+      POSTGRES_DB: myapp
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U appuser"]
+      interval: 5s
+      retries: 10
+
+  cache:
+    image: redis:7-alpine
+
+volumes:
+  postgres-data:
+```
+
+**သင် ရရှိမည့် အကျိုးကျေးဇူးများ:**
+- ဗားရှင်းထိန်းချုပ်မှု (version control) ထဲသို့ ထည့်သွင်းထားသော **ဖိုင်တစ်ခုတည်း** — အသင်းသားအားလုံးသည် တူညီသော stack ကို လုပ်ဆောင်ကြသည်
+- **အမည်ဖြင့် ဝန်ဆောင်မှုများကို ရှာဖွေခြင်း** — `api` သည် `db` ဟူသော ဟို့စ်အမည်ဖြင့် ဒေတာဘေ့စ်ကို အလိုအလျောက် ချိတ်ဆက်နိုင်သည်
+- **မှီခိုမှု အစဉ်လိုက်လုပ်ဆောင်ခြင်း** — `db` သည် ၎င်း၏ ကျန်းမာရေးစစ်ဆေးမှု (health check) အောင်မြင်မှသာ `api` စတင်မည်
+- **နေရာတိုင်းတွင် တူညီစွာ အလုပ်လုပ်ခြင်း** — developer လက်ပ်တော့၊ CI၊ staging ဆာဗာ၊ production VPS
+
+---
+
+## Compose မည်သို့ အလုပ်လုပ်သနည်း
+
+```mermaid
+flowchart TD
+    subgraph HOST["Your Machine / Server"]
+        COMPOSE_CMD["docker compose up"]
+        COMPOSE_CMD --> PARSE["Parse docker-compose.yml\n+ override files"]
+        PARSE --> NETWORK["Create network:\nmyapp_default\n(if not exists)"]
+        PARSE --> VOLUMES["Create named volumes:\npostgres-data\n(if not exists)"]
+        NETWORK & VOLUMES --> PULL["Pull / build images"]
+        PULL --> ORDER["Resolve dependency order:\ndb → cache → api"]
+        ORDER --> START["Start containers\nin dependency order"]
+        START --> HEALTH["Wait for healthchecks\nbefore dependent services"]
+    end
+```
+
+Compose သည် သင့် YAML ဖိုင်ကို ဖတ်ရှုပြီး၊ `depends_on` မှတစ်ဆင့် မှီခိုမှုဇယား (dependency graph) ကို တွက်ချက်ကာ၊ ကွန်ရက်နှင့် ဗလုံမ်များကို ဖန်တီးပေးသည် (ထပ်မံလုပ်ဆောင်လျှင်လည်း ပြဿနာမရှိပါ - idempotent)၊ ထို့နောက် မှန်ကန်သော အစဉ်လိုက်အတိုင်း ကွန်တိန်နာများကို စတင်ပေးပြီး ကျန်းမာရေးစစ်ဆေးမှုများ ပြီးစီးသည်အထိ စောင့်ဆိုင်းပေးသည်။
+
+---
+
+## `docker compose` နှင့် `docker-compose`
+
+```bash
+# ဟောင်း (Compose v1 — Python binary, အသုံးမပြုတော့ပါ)
+docker-compose up   # တိုချောင်း (hyphen) ပါသည်
+
+# အသစ် (Compose v2 — Go plugin, Docker CLI တွင် ပါဝင်ပြီးသား)
+docker compose up   # ကွာဟချက် (space) ပါသည်
+```
+
+Docker Engine 20.10+ အစပြု၍ Compose v2 သည် လက်ရှိ စံနှုန်းဖြစ်လာသည်။ `docker compose` (space ဖြင့်) ကိုသာ အမြဲတမ်း အသုံးပြုပါ။ တိုချောင်းပါသော ဗားရှင်း (`docker-compose`) သည် ဆက်လက် မထိန်းသိမ်းတော့သည့် ရှေးဟောင်း Python binary ဖြစ်သည်။
+
+```bash
+# သင့်တွင် Compose v2 ရှိမရှိ စစ်ဆေးပါ
+docker compose version
+# Docker Compose version v2.27.0
+```
+
+---
+
+## Docker Compose မဟုတ်သည်များ
+
+Compose သည် ဆော့ဖ်ဝဲရေးသားခြင်း (development) နှင့် ဆာဗာတစ်ခုတည်းတွင် တင်ခြင်း (single-server production deployments) တို့အတွက် အလွန်ကောင်းမွန်သည်။ သို့သော် ၎င်းတွင် ဗိသုကာဆိုင်ရာ ကန့်သတ်ချက်များ ရှိသည်-
+
+| စွမ်းဆောင်ရည် | Docker Compose | Kubernetes |
+|-----------|---------------|------------|
+| **ဆာဗာများစွာ (Multi-server)** | ❌ ဟို့စ်တစ်ခုတည်းသာ | ✅ ဆာဗာအုပ်စု (Cluster) |
+| **အလိုအလျောက် ပမာဏတိုးမြှင့်ခြင်း (Auto-scaling)** | ❌ လက်ဖြင့်သာ | ✅ CPU/memory အလိုက် HPA |
+| **နုဒ်များစွာ ချိတ်ဆက်၍ ကိုယ်တိုင်ပြုပြင်ခြင်း** | ❌ နုဒ်တစ်ခုတည်း ပြန်စခြင်းသာ | ✅ နုဒ်များအကြား Pod များကို ပြန်လည်စီစဉ်ပေးခြင်း |
+| **လုပ်ဆောင်ဆဲအချိန်တွင် ရပ်တန့်မှုမရှိဘဲ အပ်ဒိတ်လုပ်ခြင်း** | ⚠️ အချိန်ခဏ ရပ်တန့်နိုင်သည် | ✅ ရပ်တန့်မှု လုံးဝမရှိကြောင်း အာမခံသည် |
+| **နုဒ်များအကြား ဝန်ကိုခွဲဝေပေးခြင်း (Load balancing)** | ❌ | ✅ |
+| **သင်ယူရလွယ်ကူခြင်း** | ✅ လွယ်ကူသည် (၁ ရက်အောက်) | ✅ ခက်ခဲသည် (သီတင်းပတ်များစွာ) |
+| **သင့်လျော်သည်မှာ** | Dev + သေးငယ်သော prod | အတိုင်းအတာကြီးမားသော Production |
+
+စတုပ်အပ်တစ်ခု၏ ဘက်အန်းကို လက်ခံဆောင်ရွက်ပေးနေသော VPS တစ်ခုအတွက်ဆိုလျှင် Docker Compose သည် မှန်ကန်သော ရွေးချယ်မှုဖြစ်သည်။ သင့်အနေဖြင့် ဆာဗာများစွာ၊ အလိုအလျောက် ပမာဏတိုးမြှင့်ခြင်း သို့မဟုတ် ကြီးမားသော အတိုင်းအတာဖြင့် ရပ်တန့်မှုမရှိဘဲ လုပ်ဆောင်လိုသည့်အခါမှသာ K3s သို့မဟုတ် Kubernetes သို့ ပြောင်းရွှေ့သင့်သည်။
+
+---
+
+## အကျဉ်းချုပ်
+
+- တကယ့် အပလီကေးရှင်းများသည် အချင်းချင်း ဆက်သွယ်ရန်၊ မှန်ကန်သော အစဉ်လိုက် စတင်ရန်နှင့် ယုံကြည်စိတ်ချရစွာ ပြန်လည်စတင်ရန် လိုအပ်သော ကွန်တိန်နာများစွာ (API၊ ဒေတာဘေ့စ်၊ ကက်ရှ်) လိုအပ်သည်
+- ဤအရာများကို `docker run` အမိန့်ပေးချက် သက်သက်ဖြင့် စီမံခန့်ခွဲခြင်းသည် အမှားအယွင်းများ ဖြစ်လွယ်ခြင်း၊ မျှဝေရန် ခက်ခဲခြင်းနှင့် တူညီစွာ ပြန်လုပ်ရန် မဖြစ်နိုင်ခြင်းတို့ ဖြစ်စေသည်
+- `docker-compose.yml` သည် အစုအဝေးတစ်ခုလုံး — ဝန်ဆောင်မှုများ၊ ကွန်ရက်များ၊ ဗလုံမ်များနှင့် မှီခိုမှုများကို ဗားရှင်းထိန်းချုပ်မှုထဲသို့ ထည့်သွင်းထားသော ဖိုင်တစ်ခုတည်းတွင် ဖော်ပြပေးသည်
+- `docker compose up -d` သည် အားလုံးကို စတင်ပေးပြီး၊ `docker compose down` သည် အားလုံးကို သန့်ရှင်းစွာ ရပ်တန့်ပေးသည်
+- `docker compose` (v2, space ဖြင့်) ကိုသာ အမြဲသုံးပါ — ရှေးဟောင်း `docker-compose` (တိုချောင်းပါ) ကို အသုံးမပြုတော့ပါ
+- Compose သည် ဆော့ဖ်ဝဲရေးသားခြင်းနှင့် ဆာဗာတစ်ခုတည်းသုံး production အတွက် အကောင်းဆုံးဖြစ်ပြီး၊ Kubernetes သည် ဆာဗာများစွာသုံး အတိုင်းအတာကြီးမားမှုကို ကိုင်တွယ်ပေးသည်
+
+နောက်သင်ခန်းစာတွင်၊ `docker-compose.yml` ဖိုင်၏ အပိုင်းတစ်ခုချင်းစီကို အသေးစိတ် ဆွေးနွေးသွားမည် ဖြစ်သည်။

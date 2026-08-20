@@ -9,12 +9,14 @@ interface LessonNavProps {
   courseTitle?: string;
   prevLesson?: LessonMeta;
   nextLesson?: LessonMeta;
+  lang: string;
 }
 
 export function LessonNav({
   courseSlug,
   prevLesson,
   nextLesson,
+  lang,
 }: LessonNavProps) {
   return (
     <div className="mt-16 space-y-8">
@@ -23,7 +25,7 @@ export function LessonNav({
         {/* Prev Button */}
         {prevLesson ? (
           <Link
-            href={`/courses/${courseSlug}/${prevLesson.slug}`}
+            href={`/${lang}/courses/${courseSlug}/${prevLesson.slug}`}
             className="w-full sm:w-auto group flex items-center gap-3 p-4 rounded-xl border border-slate-200 dark:border-white/[0.08] bg-white dark:bg-white/[0.02] hover:bg-slate-50 dark:hover:bg-white/[0.05] hover:border-slate-300 dark:hover:border-white/20 transition-all text-left"
           >
             <ChevronLeft className="w-5 h-5 text-blue-600 dark:text-blue-400 group-hover:-translate-x-1 transition-transform shrink-0" />
@@ -43,7 +45,7 @@ export function LessonNav({
         {/* Next Button */}
         {nextLesson ? (
           <Link
-            href={`/courses/${courseSlug}/${nextLesson.slug}`}
+            href={`/${lang}/courses/${courseSlug}/${nextLesson.slug}`}
             className="w-full sm:w-auto group flex items-center justify-between gap-3 p-4 rounded-xl border border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-950/20 hover:bg-blue-100 dark:hover:bg-blue-950/40 hover:border-blue-300 dark:hover:border-blue-500/50 transition-all text-right sm:ml-auto"
           >
             <div>
@@ -58,7 +60,7 @@ export function LessonNav({
           </Link>
         ) : (
           <Link
-            href="/courses"
+            href={`/${lang}/courses`}
             className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl text-sm font-bold bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/25 hover:from-blue-500 hover:to-indigo-500 transition-all"
           >
             <CheckCircle className="w-4 h-4" />
