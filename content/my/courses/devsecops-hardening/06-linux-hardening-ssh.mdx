@@ -1,0 +1,162 @@
+---
+title: "Linux Server Hardening, Firewalls & Non-Root Containers"
+duration: "35 min"
+order: 6
+---
+
+# Linux Server Hardening & Non-Root Containers
+
+Config တွေ မှားယွင်းနေတဲ့ Server တစ်ခုတည်းကြောင့် တခုလုံးသော cloud environment တစ်ခုလုံးကို ထိခိုက်နစ်နာသွားစေနိုင်ပါတယ်။ ဒီ lesson မှာတော့ Linux production hosts တွေအတွက် အဓိകကျတဲ့ hardening steps တွေနဲ့ Container execution security ကို ကျွမ်းကျင်အောင် လေ့လာရမှာ ဖြစ်ပါတယ်။
+
+```mermaid
+flowchart TD
+    subgraph HostHardening["Host Server Hardening"]
+        SSH["1. SSH Key-Only Auth
+(Disable Root & Passwords)"]
+        UFW["2. UFW Firewall
+(Default Deny All Inbound)"]
+        Patches["3. Unattended Upgrades
+(Auto-patch OS Security CVEs)"]
+    end
+
+    subgraph ContainerHardening["Container Isolation"]
+        NonRoot["4. Non-Root User (UID 10001)"]
+        ReadOnly["5. Read-Only Root Filesystem"]
+        CapDrop["6. Drop All Linux Capabilities (cap_drop: ALL)"]
+    end
+```
+
+---
+
+## 1. Hardening the Linux Host & SSH
+
+SSH daemon configuration ကို `/etc/ssh/sshd_config` မှာ ဒီလို Edit လုပ်ပါ:
+
+```text
+# Disable password authentication completely (SSH Keys only!)
+PasswordAuthentication no
+ChallengeResponseAuthentication no
+
+# Disable direct root login
+PermitRootLogin no
+
+# Enforce protocol 2 and limit failed attempts
+Protocol 2
+MaxAuthTries 3
+ClientAliveInterval 300
+ClientAliveCountMax 2
+
+# Whitelist allowed users
+AllowUsers devopsadmin
+```
+
+SSH ကို Restart ပြန်လုပ်ပါ:
+```bash
+sudo systemctl restart sshd
+```
+
+---
+
+## 2. Firewall Protection with UFW (Uncomplicated Firewall)
+
+**Default Deny** ingress policy ကို သတ်မှတ်ပါ:
+
+```bash
+# 1. Set default policies
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+
+# 2. Allow only required ports
+sudo ufw allow 22/tcp   # SSH
+sudo ufw allow 80/tcp   # HTTP
+sudo ufw allow 443/tcp  # HTTPS
+
+# 3. Enable firewall
+sudo ufw enable
+
+# 4. Check status
+$ sudo ufw status verbose
+Status: active
+Logging: on (low)
+Default: deny (incoming), allow (outgoing), disabled (routed)
+To                         Action      From
+--                         ------      ----
+22/tcp                     ALLOW IN    Anywhere
+80/tcp                     ALLOW IN    Anywhere
+443/tcp                    ALLOW IN    Anywhere
+```
+
+---
+
+## 3. The Golden Rule of Container Security: Never Run as Root!
+
+Default အားဖြင့် Container တွေဟာ `root` (UID 0) နဲ့ Run ပါတယ်။ ဒါကြောင့် attacker တစ်ယောက်က သင့်ရဲ့ Node.js သို့မဟုတ် Python Application မှာ vulnerability တစ်ခုကို တွေ့သွားခဲ့ရင် Container ထဲမှာ root privileges တွေ ရသွားမှာဖြစ်ပြီး **container escape attacks** တွေကို ပိုပြီး လုပ်ဆောင်ရ လွယ်ကူသွားစေပါတယ်။
+
+### Bad Dockerfile (Runs as Root):
+```dockerfile
+# ❌ VULNERABLE
+FROM node:20-alpine
+WORKDIR /app
+COPY . .
+CMD ["node", "server.js"] # Running as root!
+```
+
+### Hardened Production Dockerfile:
+```dockerfile
+# ✅ SECURE & HARDENED
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --only=production
+COPY . .
+
+FROM node:20-alpine
+WORKDIR /app
+
+# Create a dedicated, unprivileged system group and user
+RUN addgroup -g 10001 -S appgroup &&     adduser -u 10001 -S appuser -G appgroup
+
+COPY --from=builder --chown=appuser:appgroup /app /app
+
+# Switch to unprivileged user!
+USER 10001:10001
+
+EXPOSE 3000
+CMD ["node", "server.js"]
+```
+
+---
+
+## 4. Kubernetes SecurityContext Hardening
+
+သင့်ရဲ့ Kubernetes pod manifests တွေမှာ read-only root filesystems တွေ သုံးဖို့နဲ့ kernel capabilities တွေကို ဖြုတ်ပစ်ဖို့ ဒီလို Configure လုပ်ပါ:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: secure-web-api
+spec:
+  template:
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+      containers:
+        - name: web
+          image: my-app:v1.0.0
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - mountPath: /tmp # Only /tmp is writable
+              name: temp-volume
+      volumes:
+        - name: temp-volume
+          emptyDir: {}
+```

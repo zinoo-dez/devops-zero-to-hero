@@ -1,0 +1,347 @@
+---
+title: "Triggers & Events: When Workflows Run"
+---
+
+# မှန်ကန်သော Triggers များကို ရွေးချယ်ခြင်း
+
+`on:` block က သင့်ရဲ့ workflow ဘယ်အချိန် Run မလဲဆိုတာကို သတ်မှတ်ပေးပါတယ်။ Trigger ကို မှားယonRequest သုံးမိရင် CI minutes တွေ ကုန်ဆုံးစေပြီး feedback ပေးမှုကို နှေးကွေးစေပါတယ်။ မှန်ကန်တဲ့ triggers များကို သုံးခြင်းအားဖြင့် မြန်ဆန်ပြီး ပစ်မှတ်ထားတဲ့ automation တွေကို ရရှိစေမှာပါ။
+
+---
+
+## Push Events
+
+```yaml
+on:
+  push:
+    # Run on specific branches only
+    branches:
+      - main
+      - develop
+      - 'release/**'     # Glob: any branch starting with release/
+      - '!feature/**'    # Negation: exclude feature branches
+    
+    # Only trigger if these file paths changed
+    paths:
+      - 'src/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'Dockerfile'
+    
+    # Exclude paths (don't trigger if ONLY these changed)
+    paths-ignore:
+      - '**.md'          # Skip if only markdown docs changed
+      - 'docs/**'        # Skip if only docs/ changed
+      - '.github/CODEOWNERS'
+    
+    # Trigger on version tags (e.g., v1.2.3)
+    tags:
+      - 'v*.*.*'         # Matches v1.2.3, v10.0.0-beta.1, etc.
+      - 'v[0-9]+.[0-9]+.[0-9]+'  # Strict semantic version
+```
+
+### `paths` Filters က ဘာကြောင့် ပိုက်ဆံ (CI minutes) သက်သာစေတာလဲ
+
+Path filters မပါဘူးဆိုရင် `README.md` ထဲက စာလုံးပေါင်းမှားတာကို fix လုပ်ပြီး push တာနဲ့ သင့်ရဲ့ 10 မိနစ်စာ CI pipeline တစ်ခုလုံး Run သွားပါလိမ့်မယ်။ Path filters သုံးထားမယ်ဆိုရင် documentation သက်သက်ကို ပြင်တာတွေက လုံးဝလျစ်လျူရှုခံရမှာ ဖြစ်ပါတယ်-
+
+```yaml
+# Real example: only run backend tests if backend code changed
+on:
+  push:
+    paths:
+      - 'apps/api/**'         # Run if API code changed
+      - 'packages/shared/**'  # Run if shared lib changed (affects API)
+      - 'package.json'        # Run if deps changed
+      # NOT triggered by: apps/web/**, docs/**, *.md
+```
+
+---
+
+## Pull Request Events
+
+```yaml
+on:
+  pull_request:
+    # Which branches PRs must target to trigger this workflow
+    branches:
+      - main
+      - 'release/**'
+    
+    # PR activity types that trigger the workflow
+    types:
+      - opened           # PR opened
+      - synchronize      # New commits pushed to PR branch
+      - reopened         # Closed PR reopened
+      - ready_for_review # Converted from draft to ready
+      # Other types: closed, labeled, unlabeled, assigned, unassigned, review_requested
+    
+    # Same path filters as push
+    paths:
+      - 'src/**'
+```
+
+### PR-Specific Context
+
+```yaml
+steps:
+  - name: Comment on PR with test results
+    if: github.event_name == 'pull_request'
+    uses: actions/github-script@v7
+    with:
+      script: |
+        github.rest.issues.createComment({
+          issue_number: context.issue.number,   // PR number
+          owner: context.repo.owner,
+          repo: context.repo.repo,
+          body: '✅ All tests passed! Coverage: 87.3%'
+        })
+
+  # Target branch (what the PR merges into)
+  - run: echo "Merging into: ${{ github.base_ref }}"  # e.g., main
+
+  # Source branch (the feature branch)
+  - run: echo "From branch: ${{ github.head_ref }}"   # e.g., feature/login
+```
+
+---
+
+## Scheduled Triggers (Cron)
+
+```yaml
+on:
+  schedule:
+    # Nightly security scan at 2:00 AM UTC
+    - cron: '0 2 * * *'
+
+    # Weekly dependency audit every Monday at 9 AM UTC
+    - cron: '0 9 * * 1'
+
+    # Multiple schedules for the same workflow
+    - cron: '0 */6 * * *'   # Every 6 hours
+```
+
+### Cron Expression Reference
+
+```
+┌────────── minute (0-59)
+│ ┌──────── hour (0-23)
+│ │ ┌────── day of month (1-31)
+│ │ │ ┌──── month (1-12 or JAN-DEC)
+│ │ │ │ ┌── day of week (0-6, 0=Sunday, or SUN-SAT)
+│ │ │ │ │
+* * * * *
+
+Examples:
+0 0 * * *      → midnight every day
+0 9 * * 1-5   → 9 AM on weekdays (Mon-Fri)
+0 */4 * * *   → every 4 hours
+30 2 1 * *    → 2:30 AM on 1st of each month
+0 0 * * 0     → midnight every Sunday
+```
+
+<Callout type="note" title="Scheduled Workflows Run on Default Branch">
+Scheduled workflows တွေဟာ repository ရဲ့ default branch ပေါ်မှာပဲ အမြဲ Runပါတယ်။ ဒါ့အပြင် repository ထဲမှာ မကြာသေးခင်က အပြောင်းအလဲ කිසිស်ို မရှိခဲ့ဘူးဆိုရင် GitHub က scheduled run ကို ကျော်သွားနိုင်ပါတယ် — အရေးကြီးတဲ့ လုပ်ဆောင်ချက်တွေအတွက် schedule ကို တခါတည်း အကြွင်းမဲ့ အားမကိုးပါနဲ့။
+</Callout>
+
+---
+
+## `workflow_dispatch` ဖြင့် Manual Trigger ပြုလုပ်ခြင်း
+
+```yaml
+on:
+  workflow_dispatch:
+    inputs:
+      # Text input
+      image-tag:
+        description: 'Docker image tag to deploy'
+        required: true
+        type: string
+        default: 'latest'
+      
+      # Dropdown / select
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options:
+          - development
+          - staging
+          - production
+        default: staging
+      
+      # Boolean toggle
+      skip-tests:
+        description: 'Skip test suite (emergency deploy only)'
+        type: boolean
+        default: false
+      
+      # Number
+      replica-count:
+        description: 'Number of replicas to deploy'
+        type: number
+        default: 3
+```
+
+```yaml
+# Access inputs in steps
+steps:
+  - name: Skip tests check
+    if: ${{ !inputs.skip-tests }}
+    run: npm test
+
+  - name: Deploy
+    run: |
+      echo "Deploying tag: ${{ inputs.image-tag }}"
+      echo "Environment: ${{ inputs.environment }}"
+      echo "Replicas: ${{ inputs.replica-count }}"
+      ./deploy.sh \
+        --tag "${{ inputs.image-tag }}" \
+        --env "${{ inputs.environment }}" \
+        --replicas ${{ inputs.replica-count }}
+```
+
+**ဘယ်အချိန်မှာ သုံးသင့်လဲ**: Manual deployments တွေ၊ emergency rollbacks တွေနဲ့ အပြည့်အဝ automate လုပ်မထားသင့်တဲ့ parameter-driven လုပ်ဆောင်ချက်တွေအတွက် သုံးပါတယ်။
+
+---
+
+## Reusable Workflows (`workflow_call`)
+
+Workflow တစ်ခုကို တစ်ကြိမ်ဖန်တီးပြီး အခြား workflow များစွာကနေ ခေါ်သုံးခြင်း:
+
+```yaml
+# .github/workflows/reusable-test.yml
+name: Reusable Test Suite
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        type: string
+        default: '20'
+      run-integration:
+        type: boolean
+        default: false
+    secrets:
+      DATABASE_URL:
+        required: true
+    outputs:
+      coverage:
+        value: ${{ jobs.test.outputs.coverage }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    outputs:
+      coverage: ${{ steps.test.outputs.coverage }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+      - run: npm ci
+      - id: test
+        run: |
+          npm test -- --coverage
+          COV=$(cat coverage/coverage-summary.json | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['total']['lines']['pct'])")
+          echo "coverage=${COV}" >> $GITHUB_OUTPUT
+      - if: ${{ inputs.run-integration }}
+        run: npm run test:integration
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+```
+
+```yaml
+# .github/workflows/ci.yml — calls the reusable workflow
+jobs:
+  test-node20:
+    uses: ./.github/workflows/reusable-test.yml
+    with:
+      node-version: '20'
+      run-integration: true
+    secrets:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+  test-node18:
+    uses: ./.github/workflows/reusable-test.yml
+    with:
+      node-version: '18'
+```
+
+---
+
+## `workflow_run` Trigger
+
+Workflow တစ်ခု ပြီးဆုံးသွားတဲ့အခါ နောက်ထပ် Workflow တစ်ခုကို ဆက် Run ပါ — CI (PR မှာ Run တာ) ကို CD (CI အောင်မြင်ပြီးမှ Run တာ) နဲ့ တွဲဖြုတ်ထားချင်တဲ့အခါ အသုံးဝင်ပါတယ်-
+
+```yaml
+# .github/workflows/deploy.yml
+on:
+  workflow_run:
+    workflows: ["CI Pipeline"]   # Must match the `name:` of the other workflow
+    branches: [main]
+    types: [completed]           # or: requested, in_progress
+
+jobs:
+  deploy:
+    # Only deploy if CI actually passed (not if it was cancelled or failed)
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get the artifact from the CI run
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ github.event.workflow_run.id }}
+          name: production-build
+
+      - name: Deploy
+        run: ./deploy.sh
+```
+
+---
+
+## `paths` Optimization: Advanced Patterns
+
+```yaml
+# Separate workflows for frontend and backend
+# Frontend CI — only runs if frontend code changed
+on:
+  push:
+    paths:
+      - 'apps/web/**'
+      - 'packages/ui/**'
+
+# Backend CI — only runs if backend code changed  
+on:
+  push:
+    paths:
+      - 'apps/api/**'
+      - 'packages/shared/**'
+      - 'Dockerfile'
+
+# Infrastructure CI — only runs if IaC changed
+on:
+  push:
+    paths:
+      - 'terraform/**'
+      - 'k8s/**'
+      - '.github/workflows/**'  # Pipeline changes always trigger
+```
+
+---
+
+## Summary: Trigger Selection Guide
+
+| Trigger | ဘယ်အချိန်မှာ သုံးသင့်လဲ |
+|---------|------------|
+| `push` to `main` | Production ကို deploy လုပ်တဲ့အခါ |
+| `push` to `develop` | Staging ကို deploy လုပ်တဲ့အခါ |
+| `pull_request` | CI checks တွေ Run ဖို့၊ fail ရင် merge တာကို ပိတ်ထားဖို့ |
+| `push` with `tags: 'v*'` | Release artifacts တွေ တည်ဆောက်ဖို့၊ registry ကို publish လုပ်ဖို့ |
+| `schedule` | ညဘက် security scans တွေ၊ အပတ်စဉ် dependency audits တွေ၊ cleanup jobs တွေအတွက် |
+| `workflow_dispatch` | Manual deployments တွေ၊ emergency rollbacks တွေနဲ့ parameterized operations တွေအတွက် |
+| `workflow_call` | Repositories အားလုံးမှာ မျှဝေသုံးတဲ့ Reusable test/build logic အတွက် |
+| `workflow_run` | CI workflow အောင်မြင်သွားပြီးမှ CD ကို trigger လုပ်ဖို့ |
+| `release: published` | GitHub Release ဖန်တီးပြီးနောက် npm/PyPI ကို publish လုပ်ဖို့ |
+
+သက်ဆိုင်ရာ code တွေ ပြောင်းလဲမှသာ ဈေးကြီးတဲ့ (အချိန်ကုန်တဲ့) jobs တွေကို Run ဖို့အတွက် `push` ကို `paths` filters တွေနဲ့ တွဲသုံးပါ — ဒီနည်းလမ်းဟာ large monorepos တွေမှာ CI minute သုံးစွဲမှုကို ၃၀% ကနေ ၆၀% အထိ လျှော့ချပေးနိုင်ပါတယ်။
+
+နောက်လာမယ့် သင်ခန်းစာမှာတော့ jobs နဲ့ steps တွေအကြောင်း — multi-job workflows, service containers, artifacts နဲ့ conditional execution patterns တွေကို ကျွမ်းကျင်အောင် လေ့လာရမှာ ဖြစ်ပါတယ်။

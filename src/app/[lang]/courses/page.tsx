@@ -5,6 +5,10 @@ import { CourseGrid } from "@/components/course/CourseGrid";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { translations } from "@/lib/i18n/translations";
 
+export function generateStaticParams() {
+  return [{ lang: "en" }, { lang: "my" }];
+}
+
 export async function generateMetadata({ params }: { params: Promise<{ lang: string }> }): Promise<Metadata> {
   const { lang } = await params;
   const t = translations[lang as keyof typeof translations]?.coursesPage || translations.en.coursesPage;

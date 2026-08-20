@@ -1,0 +1,448 @@
+---
+title: "Building a Multi-Node K3s Cluster"
+---
+
+# Why Add Worker Nodes?
+
+Single-node K3s cluster တစ်ခုက လေ့လာဖို့နဲ့ small production workloads တွေအတွက် အရမ်းကောင်းပါတယ်။ ဒါပေမဲ့ အပလီကေးရှင်းတွေ ကြီးထွားလာတာနဲ့အမျှ အောက်ပါ limit တွေနဲ့ ရင်ဆိုင်ရပါမယ် -
+
+| ပြဿနာ | Single Node | Multi-Node Cluster |
+|---------|------------|-------------------|
+| **RAM exhaustion** | မိုမိုရီပြည့်တဲ့အခါ App က OOMKilled ဖြစ်သွားမယ် | Pod တွေက node တွေအနှံ့ ဖြန့်ခွဲနေထိုင်မယ် |
+| **CPU throttling** | Workload အားလုံးက core တစ်ခုတည်းမှာ ယှဉ်ပြိုင်သုံးစွဲနေရမယ် | Workload တွေကို ဖြန့်ခွဲပေးထားမယ် |
+| **Maintenance downtime** | Update လုပ်ဖို့အတွက် cluster တစ်ခုလုံး ရပ်သွားမယ် | Node တစ်ခုကို drain လုပ်မယ်၊ update လုပ်မယ်၊ ပြီးရင် ပြန် restore လုပ်မယ် |
+| **Single point of failure** | Node ပျက်ရင် အားလုံးပျက်မယ် | Pod တွေက အခြား node တွေဆီ automatic ပြောင်းသွားမယ် |
+| **Scaling limits** | VPS တစ်ခုမှာ limit ရှိတယ် | လိုအပ်သလို node အသစ်တွေ ထပ်ထည့်လို့ရတယ် |
+
+ဒီ lesson မှာတော့ ရှိပြီးသား K3s server ထဲကို worker node တွေ ထပ်ထည့်တာ၊ workload distribution ကို configure လုပ်တာနဲ့ downtime မရှိဘဲ node maintenance လုပ်တာတွေကို လေ့လာသွားမှာ ဖြစ်ပါတယ်။
+
+---
+
+## K3s Multi-Node Architecture
+
+```mermaid
+flowchart TD
+    subgraph control["Control Plane Node (Server)"]
+        API[API Server :6443]
+        SCHED[Scheduler]
+        CM[Controller Manager]
+        ETCD[(SQLite / etcd)]
+        TRAEFIK[Traefik Ingress\nPods can also run here]
+    end
+
+    subgraph worker1["Worker Node 1"]
+        W1_KUBELET[kubelet]
+        W1_POD1[Pod: api-replica-1]
+        W1_POD2[Pod: frontend-replica-1]
+    end
+
+    subgraph worker2["Worker Node 2"]
+        W2_KUBELET[kubelet]
+        W2_POD1[Pod: api-replica-2]
+        W2_POD2[Pod: frontend-replica-2]
+    end
+
+    subgraph internet["Internet"]
+        USERS[Users]
+        LB["DNS Round-Robin\nor Load Balancer"]
+    end
+
+    USERS --> LB
+    LB -->|":80 :443"| control
+    LB -->|":80 :443"| worker1
+    LB -->|":80 :443"| worker2
+
+    worker1 -->|"Join token\n:6443"| control
+    worker2 -->|"Join token\n:6443"| control
+
+    SCHED -->|"Assigns pods to nodes"| W1_KUBELET & W2_KUBELET
+```
+
+K3s မှာ default အနေနဲ့ -
+- **Server node**: Control plane ကို Run ပေးသလို worker pod တွေကိုပါ run ပေးနိုင်ပါတယ်
+- **Agent nodes**: Worker pod တွေကိုပဲ run ပေးပါတယ် (Control plane components တွေ မပါပါဘူး)
+- **Scheduler** က Ready ဖြစ်နေတဲ့ node တွေ အားလုံးဆီကို pod တွေကို automatic ဖြန့်ခွဲပေးပါတယ်
+
+---
+
+## Step 1: Get the Join Token from the Server
+
+```bash
+# SSH into your existing K3s server node
+ssh root@SERVER_IP
+
+# Read the node token (keep this secret — it authenticates agents to join)
+sudo cat /var/lib/rancher/k3s/server/node-token
+# K10abc123def456...::server:xyz789...
+
+# Note your server's internal or public IP
+SERVER_IP="your.server.ip.here"
+NODE_TOKEN="$(sudo cat /var/lib/rancher/k3s/server/node-token)"
+```
+
+---
+
+## Step 2: Prepare the Worker Node
+
+Worker အဖြစ် သုံးမယ့် **new VPS** ပေါ်မှာ -
+
+```bash
+# Update and install required tools
+sudo apt-get update && sudo apt-get upgrade -y
+sudo apt-get install -y curl wget jq
+
+# Open required ports for worker nodes
+sudo ufw allow 22/tcp          # SSH
+sudo ufw allow 8472/udp        # Flannel VXLAN (pod networking)
+sudo ufw allow 10250/tcp       # kubelet API (kubectl exec/logs)
+sudo ufw allow 2376/tcp        # Docker TLS (if using Docker)
+sudo ufw enable
+
+# Note: Worker nodes do NOT need port 6443 open — only the server does
+```
+
+ဒါ့အပြင် **server node** ပေါ်မှာလည်း worker က ဆက်သွယ်လို့ရအောင် လုပ်ပေးရပါမယ် -
+```bash
+# On the server: verify agent can reach the API server
+# (port 6443 must be open to the worker node IP)
+sudo ufw allow from WORKER_NODE_IP to any port 6443
+sudo ufw allow from WORKER_NODE_IP to any port 8472    # Flannel
+sudo ufw allow from WORKER_NODE_IP to any port 10250   # kubelet
+```
+
+---
+
+## Step 3: Install K3s as an Agent (Worker Node)
+
+**Worker node** ပေါ်မှာ -
+
+```bash
+# Install K3s as an agent (worker only — no control plane)
+curl -sfL https://get.k3s.io | \
+  K3S_URL=https://SERVER_IP:6443 \
+  K3S_TOKEN=YOUR_NODE_TOKEN \
+  sh -
+
+# What this does:
+# 1. Downloads the k3s binary
+# 2. Creates /etc/systemd/system/k3s-agent.service
+# 3. Starts the agent (connects to the server, registers as a worker)
+```
+
+**Server** ပေါ်မှာ node အသစ် join လာတာကို စစ်ဆေးပါ -
+
+```bash
+kubectl get nodes
+# NAME         STATUS   ROLES                  AGE    VERSION
+# server       Ready    control-plane,master   5d     v1.29.4+k3s1
+# worker-1     Ready    <none>                 2m     v1.29.4+k3s1   ← New node!
+
+# Get more detail about node resources
+kubectl get nodes -o wide
+# NAME       STATUS   ROLES          AGE   VERSION    INTERNAL-IP    OS-IMAGE           KERNEL-VERSION
+# server     Ready    control-plane  5d    v1.29.4    10.0.0.1       Ubuntu 22.04 LTS   5.15.0
+# worker-1   Ready    <none>         2m    v1.29.4    10.0.0.2       Ubuntu 22.04 LTS   5.15.0
+```
+
+---
+
+## Step 4: Label and Taint Nodes
+
+Labels တွေက scheduler ကို node သတ်မှတ်ချက်တွေအတိုင်း ပို့ဆောင်ပေးနိုင်ဖို့ ကူညီပါတယ်။ Taints တွေကတော့ taint ကိုလက်မခံနိုင်တဲ့ pod တွေ node ပေါ်မှာ မ run နိုင်အောင် တားဆီးပေးပါတယ်။
+
+```bash
+# Add labels to nodes for workload targeting
+kubectl label node worker-1 role=worker environment=production
+kubectl label node worker-2 role=worker environment=production gpu=true  # If GPU node
+kubectl label node server role=control-plane
+
+# View node labels
+kubectl get nodes --show-labels
+
+# Taint the server node to prevent non-system pods from scheduling on it
+# (Keep the control plane node lean — only Traefik and system pods)
+kubectl taint node server node-role.kubernetes.io/control-plane:NoSchedule
+# This means: don't schedule new pods here unless they have the matching toleration
+```
+
+---
+
+## Step 5: Spread Workloads Across Nodes
+
+### Pod Anti-Affinity: Ensure Replicas on Different Nodes
+
+ဒါက app တစ်ခုရဲ့ replica တွေကို node တူတူပေါ်မှာ တပြိုင်နက် မကျရောက်သွားအောင် တားဆီးပေးပါတယ် (replication ရဲ့ အဓိပ္ပာယ်ကို ထိရောက်စေပါတယ်) -
+
+```yaml
+# deployment.yaml — with anti-affinity
+spec:
+  replicas: 3
+  template:
+    spec:
+      affinity:
+        podAntiAffinity:
+          # REQUIRED: Never schedule two api pods on the same node
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: api   # This pod's own label
+              topologyKey: kubernetes.io/hostname   # "Same node" = same hostname
+```
+
+ဒီ configuration နဲ့ဆိုရင် replicas 3 ခုနဲ့ nodes 3 ခု ရှိတဲ့အခါ node တစ်ခုချင်းစီမှာ pod တစ်ခုစီ ကျရောက်မှာ ဖြစ်ပါတယ်။ node တစ်ခုခု ပျက်သွားရင်တည်း အဲ့ဒီပေါ်က pod က ကျန်တဲ့ node တစ်ခုခုဆီပြောင်းပြီး reschedule ဖြစ်သွားပါမယ်။
+
+### Topology Spread Constraints: Even Distribution
+
+Anti-affinity ထက် ပိုပြီး flexible ဖြစ်တဲ့ နည်းလမ်းတစ်ခုပါ -
+
+```yaml
+spec:
+  replicas: 6
+  template:
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1                          # Max difference in pod count between nodes
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule   # Strict: reject the pod if constraint can't be met
+          labelSelector:
+            matchLabels:
+              app: api
+```
+
+Replicas 6 ခုနဲ့ nodes 3 ခု ရှိရင် node တစ်ခုချင်းစီမှာ pod 2 ခုစီ အတိအကျ ကျပါမယ်။ `maxSkew: 1` ကြောင့် ဖြန့်ခွဲမှုက အများဆုံး 1 ပဲ ကွာခြားနိုင်ပါတယ်။ (ဥပမာ - 2/2/2 ဒါမှမဟုတ် 3/2/1 ဖြစ်ပြီး 4/1/1 တော့ မဖြစ်ပါဘူး)။
+
+### Node Selector: Pin Workloads to Specific Nodes
+
+```yaml
+spec:
+  template:
+    spec:
+      # Only schedule on nodes with this label
+      nodeSelector:
+        role: worker   # The label we set in Step 4
+```
+
+### Node Affinity: More Flexible Than nodeSelector
+
+```yaml
+spec:
+  template:
+    spec:
+      affinity:
+        nodeAffinity:
+          # REQUIRED: Must run on a worker node
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: role
+                    operator: In
+                    values: ["worker"]
+          # PREFERRED: Try to run on nodes in az-west (soft preference)
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: topology.kubernetes.io/zone
+                    operator: In
+                    values: ["az-west"]
+```
+
+---
+
+## Step 6: Node Maintenance — Drain and Cordon
+
+Node တစ်ခုကို update လုပ်တဲ့အခါ သူ့ပေါ်က pod တွေကို ရုတ်တရက် အပြီးတိုင် ဖျက်ပစ်ချင်မှာ မဟုတ်ပါဘူး။ လုပ်ထုံးလုပ်နည်း မှန်ကန်တာကတော့ **cordon** လုပ်တာ (schedule လုပ်လို့မရတော့ကြောင်း အမှတ်အသားပြတာ) နဲ့ **drain** လုပ်တာ (pod တွေကို သေသေချာချာ ရွှေ့ပြောင်းပေးတာ) တို့ပဲ ဖြစ်ပါတယ် -
+
+```bash
+# === Maintenance Window: Update worker-1 ===
+
+# Step 1: Cordon the node (mark as unschedulable)
+# New pods won't be scheduled here, existing pods keep running
+kubectl cordon worker-1
+# node/worker-1 cordoned
+
+# Step 2: Drain the node (evict all pods gracefully)
+# - Pods with a PodDisruptionBudget respect the disruption budget
+# - Pods migrate to other nodes
+# - DaemonSet pods are skipped (they run on every node intentionally)
+kubectl drain worker-1 \
+  --ignore-daemonsets \        # Skip DaemonSet pods (kube-proxy, Flannel, etc.)
+  --delete-emptydir-data \     # Delete pods using emptyDir volumes (they're temporary anyway)
+  --grace-period=60 \          # Give pods 60s to gracefully terminate
+  --timeout=300s               # Fail if drain takes more than 5 minutes
+
+# Step 3: Perform maintenance (OS updates, K3s upgrade, etc.)
+ssh root@WORKER_1_IP
+sudo apt-get update && sudo apt-get upgrade -y
+# Or upgrade K3s:
+curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.30.0+k3s1 sh -
+
+# Step 4: Uncordon the node (mark as schedulable again)
+kubectl uncordon worker-1
+# node/worker-1 uncordoned
+
+# Pods will gradually reschedule back (or stay on other nodes until they're restarted)
+kubectl get pods -o wide -A | grep worker-1
+```
+
+---
+
+## PodDisruptionBudget: Protect Against Involuntary Disruptions
+
+`PodDisruptionBudget` (PDB) က deployment တစ်ခုရဲ့ pod ဘယ်နှစ်ခုက maintenance လုပ်နေစဉ်အတွင်း တစ်ပြိုင်နက် အသုံးမပြုနိုင်ဘဲ ရှိနေနိုင်လဲဆိုတာကို Kubernetes ကို ပြောပြပေးပါတယ် -
+
+```yaml
+# pdb.yaml
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: api-pdb
+  namespace: myapp
+spec:
+  # Option A: Min available (at least 2 pods must be running at all times)
+  minAvailable: 2
+
+  # Option B: Max unavailable (at most 1 pod can be down at once)
+  # maxUnavailable: 1
+
+  selector:
+    matchLabels:
+      app: api
+```
+
+```bash
+kubectl apply -f pdb.yaml
+
+# Verify the PDB
+kubectl -n myapp get pdb
+# NAME      MIN AVAILABLE   MAX UNAVAILABLE   ALLOWED DISRUPTIONS   AGE
+# api-pdb   2               N/A               1                     5s
+
+# "ALLOWED DISRUPTIONS: 1" means 1 pod can be evicted right now
+# (3 running - 2 min available = 1 allowed disruption)
+```
+
+Node တစ်ခုကို `kubectl drain` လုပ်တဲ့အခါ Kubernetes က အောက်ပါအတိုင်း လုပ်ဆောင်ပါမယ် -
+1. Node ပေါ်က pod အားလုံးကို ဖယ်ရှားဖို့ ကြိုးစားပါမယ်
+2. Pod တစ်ခုချင်းစီအတွက် PDB ရှိမရှိ စစ်ဆေးပါမယ်
+3. ဖယ်ရှားလိုက်ရင် PDB ကို ချိုးဖောက်ရာရောက်မယ်ဆိုရင် အခြား node တွေပေါ်မှာ pod အသစ်တွေ Running ဖြစ်လာ تر تر အထိ **စောင့်နေပါမယ်**
+4. ပြီးမှသာ pod ကို ဖယ်ရှားပါမယ်
+
+ဒါက တင်းကျပ်တဲ့ PDB တွေ သုံးထားရင်တောင် **node maintenance လုပ်နေစဉ် downtime လုံးဝ မရှိစေရန်** သေချာစေပါတယ်။
+
+---
+
+## Horizontal Pod Autoscaler (HPA)
+
+HPA က CPU ဒါမှမဟုတ် memory သုံးစွဲမှုကို မူတည်ပြီး replica အရေအတွက်ကို automatic ချိန်ညှိပေးပါတယ် -
+
+```yaml
+# hpa.yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api-hpa
+  namespace: myapp
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api
+
+  minReplicas: 2       # Always run at least 2 replicas
+  maxReplicas: 10      # Never exceed 10 replicas
+
+  metrics:
+    # Scale up when average CPU usage exceeds 70%
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+
+    # Scale up when average memory usage exceeds 80%
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60    # Wait 60s before scaling up again
+      policies:
+        - type: Pods
+          value: 2                      # Add at most 2 pods per scale event
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300   # Wait 5 minutes before scaling down
+      policies:
+        - type: Pods
+          value: 1                      # Remove at most 1 pod per scale event
+          periodSeconds: 60
+```
+
+```bash
+kubectl apply -f hpa.yaml
+
+# Watch the HPA in action
+kubectl -n myapp get hpa -w
+# NAME      REFERENCE          TARGETS          MINPODS   MAXPODS   REPLICAS
+# api-hpa   Deployment/api     35%/70%,40%/80%  2         10        2
+# (during high load)
+# api-hpa   Deployment/api     85%/70%,40%/80%  2         10        4   ← Scaled up!
+
+# Simulate load to see autoscaling
+kubectl -n myapp run load-test --image=busybox --restart=Never -- \
+  /bin/sh -c "while true; do wget -q -O- http://api.myapp.svc.cluster.local/api/items; done"
+```
+
+---
+
+## Adding a High-Availability Control Plane
+
+အရေးကြီးတဲ့ workload တွေအတွက် control plane HA ဖြစ်စေဖို့ embedded etcd ပါတဲ့ server node 3 ခုကို run ပေးပါ -
+
+```bash
+# Initialize the FIRST server node with embedded etcd
+curl -sfL https://get.k3s.io | sh -s - --cluster-init
+
+# Get the first server's token
+TOKEN=$(sudo cat /var/lib/rancher/k3s/server/node-token)
+
+# Join SECOND server node to the cluster
+curl -sfL https://get.k3s.io | sh -s - \
+  --server https://FIRST_SERVER_IP:6443 \
+  --token $TOKEN
+
+# Join THIRD server node (for etcd quorum — need 3 for HA)
+curl -sfL https://get.k3s.io | sh -s - \
+  --server https://FIRST_SERVER_IP:6443 \
+  --token $TOKEN
+
+# Verify all three control plane nodes
+kubectl get nodes
+# NAME       STATUS   ROLES                       AGE   VERSION
+# server-1   Ready    control-plane,etcd,master   10m   v1.29.4+k3s1
+# server-2   Ready    control-plane,etcd,master   5m    v1.29.4+k3s1
+# server-3   Ready    control-plane,etcd,master   2m    v1.29.4+k3s1
+```
+
+Server node 3 ခုနဲ့ဆိုရင် etcd cluster က node တစ်ခု ပျက်စီးတာကို ခံနိုင်ရည်ရှိပါတယ် (quorum အတွက် node 2/3 လိုအပ်ပါတယ်)။ တကယ့် HA kubectl access ရရှိဖို့ API server 3 ခုရဲ့ ရှေ့မှာ load balancer တစ်ခု (HAProxy ဒါမှမဟုတ် cloud LB) ကို ထည့်သွင်းပေးပါ။
+
+---
+
+## Summary
+
+ယခုအခါမှာ သင့်ရဲ့ K3s cluster ကို node များစွာနဲ့ scale လုပ်ပြီးဖြစ်ပါတယ် -
+- **Agent nodes** တွေဟာ `K3S_URL` နဲ့ `K3S_TOKEN` သုံးပြီး installer ကို run ခြင်းဖြင့် စက္ကန့် 60 အတွင်း server နဲ့ ချိတ်ဆက် join နိုင်ပါတယ်
+- **Labels နဲ့ taints** တွေက ဘယ် workload က ဘယ် node မှာ run ရမယ်ဆိုတာကို ထိန်းချုပ်ပေးပါတယ်
+- **Pod anti-affinity** နဲ့ **topology spread constraints** တွေက high availability အတွက် replica တွေကို node တွေအနှံ့ ဖြန့်ခွဲပေးပါတယ်
+- **Drain + cordon** က downtime လုံးဝမရှိဘဲ node maintenance လုပ်နိုင်စေပါတယ် — pod တွေက အခြား node တွေဆီ သေသေချာချာ ရွှေ့ပြောင်းသွားပါတယ်
+- **PodDisruptionBudgets** က maintenance လုပ်နေစဉ် မမျှော်လင့်ဘဲ ပြတ်တောက်မှုတွေ မဖြစ်အောင် ကာကွယ်ပေးပါတယ်
+- **HPA** က CPU/memory metrics ကိုမူတည်ပြီး replica အရေအတွက်ကို automatic ချိန်ညှိပေးပါတယ်
+- Embedded etcd ပါတဲ့ **3-server HA** က control plane ကို single point of failure ဖြစ်မသွားအောင် ဖယ်ရှားပေးပါတယ်
+
+နောက်လာမယ့် lesson မှာတော့ သင့်ရဲ့ K3s cluster data နဲ့ persistent volumes တွေအတွက် automated backup strategies တွေကို ဆက်လက်လေ့လာသွားမှာ ဖြစ်ပါတယ်။

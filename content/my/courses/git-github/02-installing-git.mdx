@@ -1,0 +1,324 @@
+---
+title: "Installing Git & First Setup"
+---
+
+# Installing နှင့် Configuring Git
+
+ကودတစ်ကြောင်းချင်းစီကို မစောင့်ကြည့်ခင် (track လုပ်ခင်) မှာ Git ကို install လုပ်ဖို့နဲ့ ကိုယ့်ရဲ့ identity နဲ့ properly configure လုပ်ဖို့ လိုအပ်ပါတယ်။ Git က ကိုယ့်နာမည်နဲ့ email ကို ကိုယ်လုပ်သမျှ commit တိုင်းထဲမှာ ထည့်သွင်းပေးပါတယ် — ဒီလို attribution က permanent ဖြစ်ပြီး repository ကို clone လုပ်သူတိုင်း မြင်ရမှာ ဖြစ်ပါတယ်။
+
+---
+
+## Installing Git
+
+### macOS
+
+```bash
+# Option 1: Homebrew (recommended — gets you the latest version)
+brew install git
+
+# Option 2: Apple Command Line Developer Tools (pre-installed or auto-prompted)
+# Just run git in Terminal — if not installed, macOS prompts you automatically
+git --version
+
+# Verify after installation
+git --version
+# git version 2.45.0
+```
+
+### Ubuntu / Debian Linux
+
+```bash
+sudo apt update && sudo apt install -y git
+
+git --version
+# git version 2.43.0
+```
+
+### RHEL / CentOS / Amazon Linux
+
+```bash
+sudo yum install -y git   # CentOS 7 / Amazon Linux 2
+# or
+sudo dnf install -y git   # CentOS 8+ / RHEL 8+
+```
+
+### Windows
+
+```powershell
+# Option 1: winget (Windows Package Manager — built into Windows 10/11)
+winget install --id Git.Git -e --source winget
+
+# Option 2: Official installer from https://git-scm.com
+# Recommended settings during install:
+# - Default editor: VS Code (not Vim)
+# - Adjust PATH: Git from command line and 3rd-party software
+# - Line endings: Checkout Windows-style, commit Unix-style
+```
+
+---
+
+## Essential First-Time Configuration
+
+Git မှာ layered configuration system ကို သုံးပါတယ်-
+
+```
+/etc/gitconfig        → System-wide (all users on this machine)
+~/.gitconfig          → Global (your user account — applies to ALL repos)
+<repo>/.git/config    → Local (only this specific repository)
+
+More specific settings override less specific ones (local > global > system)
+```
+
+### 1. Your Identity (Required)
+
+```bash
+git config --global user.name "Jane Smith"
+git config --global user.email "jane@yourcompany.com"
+```
+
+ဒီတန်ဖိုးတွေက ကိုယ်ဖန်တီးတဲ့ commit တိုင်းမှာ ပေါ်လာပါမယ်။ Commit တွေနဲ့ GitHub profile ချိတ်ဆက်နိုင်ဖို့ GitHub account မှာ သုံးတဲ့ email အတိုင်းပဲ သုံးပါ။
+
+### 2. Default Branch Name
+
+```bash
+# Modern default: main (not the legacy "master")
+git config --global init.defaultBranch main
+```
+
+### 3. Line Ending Handling
+
+ဒါကို မလုပ်ထားရင် Windows (CRLF) နဲ့ Mac/Linux (LF) မှာ edit လုပ်ထားတဲ့ file တွေက git diff မှာ false "changes" တွေ ပြနေပါလိမ့်မယ်-
+
+```bash
+# macOS / Linux
+git config --global core.autocrlf input
+# → Store files with LF, convert CRLF→LF on commit (no conversion on checkout)
+
+# Windows
+git config --global core.autocrlf true
+# → Store files with LF, convert LF→CRLF on checkout, CRLF→LF on commit
+```
+
+### 4. Default Editor
+
+Git က message ရေးဖို့ လိုအပ်တဲ့အခါ (merge commit, rebase လုပ်တဲ့အခါ) editor တစ်ခုကို ဖွင့်ပေးပါတယ်-
+
+```bash
+# VS Code (most popular choice)
+git config --global core.editor "code --wait"
+
+# Nano (simple, beginner-friendly)
+git config --global core.editor nano
+
+# Vim (if you know it)
+git config --global core.editor vim
+```
+
+### 5. Useful Aliases
+
+```bash
+# Compact, visual commit graph (type "git lg" instead of the full command)
+git config --global alias.lg "log --oneline --graph --decorate --all"
+
+# Short status
+git config --global alias.st "status -sb"
+
+# Undo last commit but keep changes staged
+git config --global alias.undo "reset HEAD~1 --mixed"
+
+# Safe force push (only pushes if remote hasn't changed)
+git config --global alias.pushf "push --force-with-lease"
+```
+
+### 6. Rebase on Pull (Recommended)
+
+```bash
+# When you pull, rebase your local commits on top of remote instead of creating merge commits
+git config --global pull.rebase true
+```
+
+ဒါက history ကို linear နဲ့ clean ဖြစ်စေပါတယ် — "Merge branch 'main' of github.com/..." ဆိုတဲ့ noise commit တွေ မရှိတော့ပါဘူး။
+
+---
+
+## Verify Your Configuration
+
+```bash
+# Show all active configuration and where each setting comes from
+git config --list --show-origin
+
+# Output:
+# file:/Users/jane/.gitconfig  user.name=Jane Smith
+# file:/Users/jane/.gitconfig  user.email=jane@yourcompany.com
+# file:/Users/jane/.gitconfig  core.autocrlf=input
+# file:/Users/jane/.gitconfig  init.defaultbranch=main
+# file:/Users/jane/.gitconfig  alias.lg=log --oneline --graph --decorate --all
+
+# Check a specific setting
+git config user.name
+# Jane Smith
+
+# View the raw global config file
+cat ~/.gitconfig
+```
+
+---
+
+## SSH Authentication: The Right Way to Use GitHub
+
+GitHub က ၂၀၂၁ ခုနှစ်မှာ password authentication ကို ဖြုတ်လိုက်ပါပြီ။ ရွေးချယ်စရာ ၂ ခု ရှိပါတယ်-
+1. **HTTPS with a Personal Access Token** (setup လုပ်ရတာ ပိုရိုးရှင်း)
+2. **SSH key pair** (recommended — ပိုလုံခြုံတယ်၊ token expire ဖြစ်မယ့်ပြဿနာ မရှိဘူး)
+
+### Generate an SSH Key
+
+```bash
+# Generate a new Ed25519 key (faster and more secure than RSA)
+ssh-keygen -t ed25519 -C "jane@yourcompany.com"
+# Press Enter to accept default path (~/.ssh/id_ed25519)
+# Optionally set a passphrase (adds an extra layer of protection)
+
+# Output creates two files:
+# ~/.ssh/id_ed25519      → your PRIVATE key (never share this)
+# ~/.ssh/id_ed25519.pub  → your PUBLIC key (safe to share)
+```
+
+### Add to SSH Agent
+
+```bash
+# Start the SSH agent
+eval "$(ssh-agent -s)"
+
+# Add your key to the agent (so you don't type passphrase every time)
+ssh-add ~/.ssh/id_ed25519
+
+# macOS: persist key across reboots
+ssh-add --apple-use-keychain ~/.ssh/id_ed25519
+
+# View added keys
+ssh-add -l
+```
+
+### Add Public Key to GitHub
+
+```bash
+# Copy the public key to clipboard
+cat ~/.ssh/id_ed25519.pub
+# ssh-ed25519 AAAAC3NzaC1lZDI1NTE5... jane@yourcompany.com
+
+# Add to GitHub:
+# GitHub → Settings → SSH and GPG keys → New SSH key
+# Paste the output above
+```
+
+### Test the Connection
+
+```bash
+ssh -T git@github.com
+# Hi jane! You've successfully authenticated, but GitHub does not provide shell access.
+# ✅ Working!
+```
+
+### Clone Repositories Using SSH
+
+```bash
+# Always use SSH URL (not HTTPS) when using SSH keys
+git clone git@github.com:yourorg/my-repo.git   # ✅ SSH
+# Not: git clone https://github.com/yourorg/my-repo.git  (would ask for PAT)
+
+# Switch an existing repo from HTTPS to SSH
+git remote set-url origin git@github.com:yourorg/my-repo.git
+git remote -v   # Verify
+```
+
+---
+
+## Signing Commits with GPG (Optional but Professional)
+
+Signed commit တွေက ဒီ commit ဟာ GitHub account ကို ဟက်ခံရသူတစ်ယောက်ဆီက လာတာမဟုတ်ဘဲ ကိုယ်တိုင် အမှန်တကယ် လုပ်ထားတာဖြစ်ကြောင်း သက်သေပြပါတယ်-
+
+```bash
+# Generate a GPG key
+gpg --full-generate-key
+# Choose: RSA and RSA, 4096 bits, 1 year expiry
+
+# List your keys
+gpg --list-secret-keys --keyid-format=long
+# /Users/jane/.gnupg/secring.gpg
+# sec   4096R/3AA5C34371567BD2 2026-01-01
+
+# Configure Git to sign all commits
+git config --global user.signingkey 3AA5C34371567BD2
+git config --global commit.gpgsign true
+git config --global tag.gpgsign true
+
+# Export and add public key to GitHub
+gpg --armor --export 3AA5C34371567BD2
+# GitHub → Settings → SSH and GPG keys → New GPG key
+# Paste the output
+```
+
+Signed commit တွေမှာ GitHub ပေါ်မှာ အစိမ်းရောင် "Verified" badge ပြသပေးမှာဖြစ်ပြီး အဖွဲ့သားတွေနဲ့ auditor တွေကို commit ရဲ့ အစစ်အမှန်ဖြစ်မှုကို ယုံကြည်မှု ပေးစွမ်းနိုင်ပါတယ်။
+
+---
+
+## The Complete `~/.gitconfig`
+
+ကောင်းမွန်စွာ configure လုပ်ထားတဲ့ global Git config တစ်ခုက ဒီလိုပုံစံ ရှိပါတယ်-
+
+```ini
+[user]
+    name = Jane Smith
+    email = jane@yourcompany.com
+    signingkey = 3AA5C34371567BD2
+
+[core]
+    editor = code --wait
+    autocrlf = input        # macOS/Linux
+    pager = less -FX        # Don't open pager for short output
+
+[init]
+    defaultBranch = main
+
+[pull]
+    rebase = true
+
+[push]
+    autoSetupRemote = true  # Automatically set tracking on first push
+
+[commit]
+    gpgsign = true
+
+[diff]
+    tool = vscode
+    colorMoved = default    # Color moved lines differently from changed lines
+
+[merge]
+    tool = vscode
+    conflictstyle = zdiff3  # Better conflict markers (shows common ancestor)
+
+[difftool "vscode"]
+    cmd = code --wait --diff $LOCAL $REMOTE
+
+[alias]
+    lg = log --oneline --graph --decorate --all
+    st = status -sb
+    undo = reset HEAD~1 --mixed
+    pushf = push --force-with-lease
+    whoami = !git config user.name && git config user.email
+    recent = for-each-ref --sort=-committerdate --format='%(refname:short)' refs/heads/ | head -10
+```
+
+---
+
+## Summary
+
+- Homebrew (macOS)၊ apt/dnf (Linux) သို့မဟုတ် winget (Windows) ကိုသုံးပြီး Git ကို install လုပ်ပါ
+- Identity ကို configure လုပ်ပါ: `git config --global user.name` နှင့် `user.email` — ဒါတွေက commit တိုင်းထဲမှာ ပါဝင်သွားမှာ ဖြစ်ပါတယ်
+- Clean ဖြစ်ပြီး linear ဖြစ်တဲ့ history အတွက် `pull.rebase = true` ကို သတ်မှတ်ပါ
+- Line ending ပြဿနာ မဖြစ်စေရန် `core.autocrlf = input` (macOS/Linux) သို့မဟုတ် `true` (Windows) ကို သတ်မှတ်ပါ
+- GitHub authentication အတွက် **SSH keys** (Ed25519) ကို သုံးပါ — ပိုလုံခြုံတယ်၊ token expire ဖြစ်မယ့်ပြဿနာ မရှိဘူး
+- **Signed commits** (GPG) က "Verified" badge နဲ့ authorship ရဲ့ cryptographic proof ကို ပေးစွမ်းနိုင်ပါတယ်
+- အသုံးဝင်သော aliases များ: visual graph အတွက် `git lg`၊ compact status အတွက် `git st`၊ safe force-push အတွက် `git pushf`
+
+နောက်သင်ခန်းစာမှာတော့ three-state Git model နဲ့ core commit workflow ကို လေ့လာရမှာ ဖြစ်ပါတယ်။

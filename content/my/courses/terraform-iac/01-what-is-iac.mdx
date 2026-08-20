@@ -1,0 +1,148 @@
+---
+title: "Why Infrastructure as Code & Terraform Architecture"
+duration: "25 min"
+order: 1
+---
+
+# Why Infrastructure as Code & Terraform Architecture
+
+Infrastructure as Code (IaC) မပေါ်ခင်တုန်းက servers တွေ၊ VPC networks တွေ၊ databases တွေနဲ့ load balancers တွေ deploy လုပ်ဖို့ဆိုရင် web consoles တွေကနေ တစ်ဆင့် manual လုပ်ခဲ့ကြရပါတယ် — ဒီလို လုပ်ဆောင်ပုံကို industry ထဲမှာ **ClickOps** လို့ ခေါ်ကြပါတယ်။
+
+ClickOps က weekend side-project လေးတွေ စမ်းလုပ်ဖို့အတွက်တော့ အဆင်ပြေပေမဲ့ production engineering မှာတော့ လုံးဝ သုံးလို့မရပါဘူး။
+
+```mermaid
+flowchart TD
+    subgraph ClickOps["❌ The ClickOps Nightmare"]
+        A1["Engineer clicks AWS Console"] --> A2["Forgets step 7 in wiki runbook"]
+        A2 --> A3["Staging != Production"]
+        A3 --> A4["Midnight Outage & Blameless Postmortem"]
+    end
+
+    subgraph IaC["✅ The Infrastructure as Code Paradigm"]
+        B1["HCL Code in Git"] --> B2["Pull Request & Automated Plan"]
+        B2 --> B3["Peer Review & Security Scan"]
+        B3 --> B4["Deterministic, 100% Reproducible Cloud"]
+    end
+```
+
+---
+
+## ClickOps ရဲ့ ဆိုးကျိုး ၄ ချက် (The 4 Disasters of ClickOps)
+
+1. **Configuration Drift**: ၆ လလောက် ကြာလာတဲ့အခါ engineers တွေက security groups တွေကို ဝင်ပြင်တာ၊ instances တွေရဲ့ size တွေကို ချိန်တာ၊ environment variables တွေကို AWS Console ကနေ manual တွေ လိုက်ပြောင်းကြပါတယ်။ ပြဿနာ တစ်ခုခု တက်လာပြီဆိုရင် စနစ်တစ်ခုလုံးကို ခြေကနေစပြီး ဘယ်လိုပြန်ဆောက်ရမှန်း ဘယ်သူမှ မသိတော့ပါဘူး။
+2. **Zero Audit Trail**: ည ၃ နာရီလောက်မှာ firewall rule တစ်ခုခုထဲမှာ `22` (SSH) port ကို `0.0.0.0/0` ဆီကို လိုက်ဖွင့်မိတယ်ဆိုပါစို့။ ဘယ်သူ့ဆီကမှ Git commit log လည်း မရှိဘူး၊ pull request approval လည်း မရှိဘူး၊ ဘာကြောင့် လုပ်တယ်ဆိုတဲ့ အကြောင်းပြချက်လည်း မှတ်တမ်းတင်ထားတာ မရှိပါဘူး။
+3. **Environment Inconsistency**: "Dev မှာတော့ အလုပ်လုပ်တယ်၊ ဒါပေမဲ့ Prod မှာ ကျတော့ error တက်နေတယ်"။ ဘာလို့လဲဆိုတော့ Dev ကို ဇန်နဝါရီလတုန်းက Alice က configure လုပ်ခဲ့တာဖြစ်ပြီး Prod ကိုတော့ သြဂုတ်လမှာ Bob က subnet masks တွေနဲ့ disk IOPS တွေ မတူတာတွေနဲ့ configure လုပ်ခဲ့လို့ပါပဲ။
+4. **Slow Disaster Recovery**: region အများကြီးပါတဲ့ cloud infrastructure ကြီး တစ်ခုလုံးကို manual ပြန်ဆောက်ဖို့ဆိုရင် ရက်ပေါင်းများစွာ ကြာတတ်ပါတယ်။ IaC ကိုသာ သုံးမယ်ဆိုရင်တော့ region တစ်ခုလုံးကို command တစ်ခုတည်းနဲ့ ပြန်ဆောက်နိုင်ပါတယ်: `terraform apply`။
+
+---
+
+## Imperative vs. Declarative: အဓိက ကွာခြားချက်
+
+Infrastructure တွေကို automate လုပ်တဲ့အခា သုံးတဲ့ tools တွေမှာ အခြေခံအားဖြင့် paradigm နှစ်ခု ရှိပါတယ်:
+
+```mermaid
+flowchart LR
+    subgraph Imperative["Imperative (Bash / Python / Ansible)"]
+        direction TB
+        I1["Step 1: Create VPC"]
+        I2["Step 2: Create Subnet inside VPC"]
+        I3["Step 3: If EC2 exists, skip; else launch EC2"]
+        I1 --> I2 --> I3
+    end
+
+    subgraph Declarative["Declarative (Terraform / CloudFormation)"]
+        direction TB
+        D1["'I want 3 EC2 instances in a private subnet with 50GB SSD disk.'"]
+        D2["Terraform computes the graph & diff automatically."]
+        D1 --> D2
+    end
+```
+
+| Feature | Imperative (ဥပမာ - Bash, AWS CLI) | Declarative (Terraform) |
+| :--- | :--- | :--- |
+| **Focus** | ဘယ်လို လုပ်ရမလဲ (step-by-step commands တွေ) | နောက်ဆုံး ထွက်လာမယ့် result က ဘယ်လိုပုံစံ ဖြစ်ရမလဲ |
+| **Idempotency** | လုပ်ရခက်တယ်၊ resource တိုင်းအတွက် check လုပ်တဲ့ code တွေ လိုက်ရေးရတယ် | ပါပြီးသားဖြစ်တယ်၊ ၁၀ ခါ run ရင်တောင် state က အတူတူပဲ ထွက်တယ် |
+| **State Awareness** | မရှိဘူး (ရှိပြီးသား resources တွေကို scripts တွေက မသိဘူး) | အပြည့်အဝ ရှိတယ် (state file ကို single source of truth အနေနဲ့ ထိန်းသိမ်းပေးတယ်) |
+| **Deletions** | delete လုပ်တဲ့ script သပ်သပ် အတိအကျ ရေးပေးရတယ် | code block ကိုပဲ ဖြုတ်လိုက်ပြီး apply run လိုက်ရုံပဲ |
+
+---
+
+## Terraform ရဲ့ အတွင်းပိုင်း Architecture
+
+Terraform ကို HashiCorp ကနေ compiled Go binary တစ်ခုအနေနဲ့ တည်ဆောက်ထားပါတယ်။ ဒါဟာ အဓိက component နှစ်ခုနဲ့ ဖွဲ့စည်းထားပါတယ်:
+
+```mermaid
+graph TD
+    UserCode["Your HCL Configuration (*.tf)"] --> Core["Terraform Core Engine"]
+    StateFile[("terraform.tfstate (Current Reality)")] <--> Core
+
+    Core --> RPC1["gRPC Plugin Interface"]
+    RPC1 --> AWS["AWS Provider Plugin"]
+    RPC1 --> K8s["Kubernetes Provider Plugin"]
+    RPC1 --> Cloudflare["Cloudflare Provider Plugin"]
+
+    AWS --> AWS_API["AWS REST APIs (EC2, S3, RDS)"]
+    K8s --> K8S_API["Kubernetes Control Plane API"]
+    Cloudflare --> CF_API["Cloudflare DNS API"]
+```
+
+### 1. Terraform Core
+Core engine ကတော့ cloud-agnostic ဖြစ်ပါတယ်။ ဒါဟာ ခင်ဗျားရဲ့ `.tf` configuration files တွေကို ဖတ်တယ်၊ resources တွေ အားလုံးရဲ့ **Directed Acyclic Graph (DAG)** တစ်ခုကို တည်ဆောက်ပေးတယ်၊ ခင်ဗျားရဲ့ code နဲ့ **State File** ကို တိုက်ဆိုင်စစ်ဆေးပြီး mathematical diff (Plan) ကို တွက်ချက်ပေးပါတယ်။
+
+### 2. Providers (Plugins)
+Providers တွေကတော့ cloud platforms တွေရဲ့ API တွေ (AWS, GCP, Azure, DigitalOcean, GitHub, Kubernetes, Docker) နဲ့ သီးသန့် ချိတ်ဆက်ပေးတဲ့ binary plugins တွေ ဖြစ်ပါတယ်။ Terraform က `terraform init` လုပ်တဲ့အခါ providers တွေကို automatic download လုပ်ပေးပါတယ်။
+
+---
+
+## Terraform Workflow အဓိက အဆင့်များ
+
+Terraform ကို အသုံးပြုတဲ့အခါတိုင်း အဆင့် ၄ ဆင့်ပါတဲ့ lifecycle အတိုင်း စနစ်တကျ လုပ်ဆောင်ရပါတယ်။
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Dev as DevOps Engineer
+    participant TF as Terraform CLI
+    participant State as State File / Cloud API
+
+    Dev->>TF: 1. terraform init
+    TF-->>Dev: Downloads provider binaries & configures backend
+    Dev->>TF: 2. terraform plan
+    TF->>State: Reads current live state
+    TF-->>Dev: Previews exact diff (+ create, ~ update, - destroy)
+    Dev->>TF: 3. terraform apply
+    TF->>State: Executes REST API calls & records new IDs in state
+    TF-->>Dev: Infrastructure successfully provisioned!
+```
+
+---
+
+## Terraform ကို သွင်းခြင်းနှင့် စစ်ဆေးခြင်း (Installing and Verifying Terraform)
+
+macOS ပေါ်မှာ (Homebrew သုံးပြီး):
+```bash
+brew tap hashicorp/tap
+brew install hashicorp/tap/terraform
+```
+
+Ubuntu / Debian Linux ပေါ်မှာ:
+```bash
+sudo apt-get update && sudo apt-get install -y gnupg software-properties-common curl
+curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+sudo apt-get update && sudo apt-get install terraform
+```
+
+installation ကို စစ်ဆေးပါ:
+```bash
+$ terraform version
+Terraform v1.8.5
+on linux_amd64
+```
+
+> [!TIP]
+> အလုပ်ပိုတွင်စေဖို့ shell autocompletion ကို ဖွင့်ထားပါ:
+> ```bash
+> terraform -install-autocomplete
+> ```
+> Terminal ကို restart ချလိုက်ပါ၊ ဒါဆိုရင် commands တွေ၊ flags တွေနဲ့ resource names တွေကို `Tab` နှိပ်ရုံနဲ့ autocomplete လုပ်နိုင်သွားပါပြီ။

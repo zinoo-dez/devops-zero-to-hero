@@ -1,0 +1,117 @@
+---
+title: "Progressive Delivery with Argo Rollouts (Canary & Blue-Green)"
+duration: "40 min"
+order: 7
+---
+
+# Progressive Delivery with Argo Rollouts
+
+Standard Kubernetes `Deployment` rolling updates မှာ အဓိക အားနည်းချက် တစ်ခု ရှိပါတယ်- သူတို့က Container တစ်ခု start ဖြစ်ပြီး readiness probes တွေ pass ဖြစ်မဖြစ်ကိုပဲ စစ်ဆေးနိုင်ပါတယ်။ Real user တွေဆီကို **new version က 500 errors တွေ ပို့နေလားဆိုတာကိုတော့ လုံးဝ မစစ်ဆေးနိုင်ပါဘူး**။
+
+တကယ်လို့ `v2.0.0` version မှာ user traffic စတင်ဝင်ရောက်ပြီး စက္ကန့် ၃၀ အကြာမှာ crash ဖြစ်စေမယ့် severe bug တစ်ခု ပါလာခဲ့မယ်ဆိုရင် Standard Kubernetes က user တွေရဲ့ 100% ဆီကို အေးအေးလူလူ roll out လုပ်သွားမှာ ဖြစ်ပါတယ်။
+
+**Argo Rollouts** ကတော့ Kubernetes ဆီကို automated metric-driven rollbacks တွေနဲ့အတူ advanced ဖြစ်တဲ့ **Canary** နဲ့ **Blue-Green** deployment strategies တွေကို ယူဆောင်လာပေးပါတယ်။
+
+```mermaid
+flowchart TD
+    subgraph CanaryStrategy["Canary Rollout Workflow"]
+        Step1["1. Deploy v2 to 20% of traffic"] --> Analysis["2. Query Prometheus: Error Rate < 1%?"]
+        Analysis -->|Metric Passed ✅| Step2["3. Increase traffic to 50%"]
+        Analysis -->|Metric Failed ❌ (500 spike)| Abort["⛔ Automatic Rollback to v1 (0s downtime)"]
+        Step2 --> Step3["4. Promote to 100%"]
+    end
+```
+
+---
+
+## 1. The `Rollout` CRD vs Standard `Deployment`
+
+Argo Rollouts ကို သုံးဖို့အတွက် `apiVersion: apps/v1` နဲ့ `kind: Deployment` ကို `argoproj.io/v1alpha1` နဲ့ `kind: Rollout` အဖြစ် ပြောင်းလဲပေးဖို့ပဲ လိုပါတယ်-
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: production-web-api
+  namespace: production
+spec:
+  replicas: 5
+  strategy:
+    canary:
+      # Step-by-step traffic shifting
+      steps:
+        # Step 1: Send 20% of traffic to the new version
+        - setWeight: 20
+        # Step 2: Pause for 10 minutes to collect real telemetry
+        - pause: { duration: 10m }
+        # Step 3: Run automated Prometheus health analysis
+        - analysis:
+            templates:
+              - templateName: success-rate-check
+        # Step 4: Increase to 50%
+        - setWeight: 50
+        - pause: { duration: 10m }
+        # Step 5: Complete rollout to 100%
+```
+
+---
+
+## 2. Automated Metric Analysis with `AnalysisTemplate`
+
+**`AnalysisTemplate`** တစ်ခုဟာ canary phase চলাတုန်းမှာ live Prometheus server ကို query လုပ်ပါတယ်။ တကယ်လို့ error rate က သတ်မှတ်ထားတဲ့ threshold ထက် ကျော်လွန်သွားခဲ့မယ်ဆိုရင် Argo Rollouts က **deployment ကို ချက်ချင်း abort လုပ်ပြီး traffic ရဲ့ 100% ကို stable version ဆီသို့ ချက်ချင်း ပြန်လည် ပို့ဆောင်ပေးပါတယ်**:
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: success-rate-check
+  namespace: production
+spec:
+  metrics:
+    - name: http-success-rate
+      interval: 1m
+      # Maximum allowed failed evaluation count before aborting
+      failureLimit: 2
+      successCondition: result[0] >= 0.99 # Requires 99% success rate!
+      provider:
+        prometheus:
+          address: http://prometheus.monitoring:9090
+          query: |
+            sum(rate(http_requests_total{status!~"5..", app="web-api"}[2m]))
+            /
+            sum(rate(http_requests_total{app="web-api"}[2m]))
+```
+
+---
+
+## 3. Managing Rollouts with the Argo Rollouts CLI
+
+`kubectl-argo-rollouts` plugin ကို install လုပ်ပါ:
+```bash
+brew install argoproj/tap/kubectl-argo-rollouts
+```
+
+Live canary rollout တစ်ခုကို real time မှာ ကြည့်ရှုပါ:
+```bash
+kubectl argo rollouts get rollout production-web-api --watch
+```
+
+```text
+NAME                                  KIND         STATUS     AGE  INFO
+⟳ production-web-api                  Rollout      ✔ Healthy  2d
+├──# revision:2
+│  ├──  production-web-api-7b8f6c498  ReplicaSet   ✔ Healthy  2m   canary (weight: 20%)
+│  │  └── 1 Pod running v2.0.0
+├──# revision:1
+│  └──  production-web-api-5c98d6f84  ReplicaSet   ✔ Healthy  2d   stable (weight: 80%)
+│     └── 4 Pods running v1.4.2
+```
+
+CLI ကနေ manual ဖြစ်ဖြစ် promote သို့မဟုတ် abort လုပ်ပါ:
+```bash
+# Force promote canary to next step
+kubectl argo rollouts promote production-web-api
+
+# Emergency manual abort & instant rollback
+kubectl argo rollouts abort production-web-api
+```

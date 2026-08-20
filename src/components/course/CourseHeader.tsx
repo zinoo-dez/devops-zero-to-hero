@@ -6,9 +6,10 @@ import { ChevronRight, Clock, BookOpen, CheckCircle2 } from "lucide-react";
 
 interface CourseHeaderProps {
   course: Course;
+  lang: string;
 }
 
-export function CourseHeader({ course }: CourseHeaderProps) {
+export function CourseHeader({ course, lang }: CourseHeaderProps) {
   return (
     <div className="relative border-b border-white/[0.08] bg-white/[0.02] py-12 lg:py-16 overflow-hidden">
       {/* Subtle Red Glow */}
@@ -17,11 +18,11 @@ export function CourseHeader({ course }: CourseHeaderProps) {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Breadcrumb */}
         <nav className="flex items-center gap-2 text-xs text-muted-foreground mb-6">
-          <Link href="/" className="hover:text-foreground transition-colors">
+          <Link href={`/${lang}`} className="hover:text-foreground transition-colors">
             Home
           </Link>
           <ChevronRight className="w-3.5 h-3.5" />
-          <Link href="/courses" className="hover:text-foreground transition-colors">
+          <Link href={`/${lang}/courses`} className="hover:text-foreground transition-colors">
             Courses
           </Link>
           <ChevronRight className="w-3.5 h-3.5" />

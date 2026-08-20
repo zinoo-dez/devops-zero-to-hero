@@ -1,0 +1,404 @@
+---
+title: "Non-Root Users, Scanning & Container Hardening"
+---
+
+# Container Security: Defense in Depth
+
+Container တစ်ခုတည်းက သူ့ဘာသာ လုံခြုံရေး အပြည့်အဝ မပေးနိုင်ပါဘူး။ သင့်ရဲ့ Application ထဲမှာ vulnerability တစ်ခုခုရှိလို့ attacker တွေက Container ထဲမှာ code execution လုပ်နိုင်သွားပြီဆိုရင်၊ attacker တွေ ဘလောက်အထိ ထိခိုက်ပျက်စီးအောင် လုပ်နိုင်မလဲဆိုတာက သင့်ရဲ့ Container configuration ဘယ်လောက်ကောင်းမွန်လဲဆိုတဲ့ အပေါ်မှာ မူတည်ပါတယ်။ ဒီ Lesson မှာတော့ production container တိုင်းမှာ လုပ်ဆောင်သင့်တဲ့ systematic hardening practices တွေကို ရှင်းပြသွားမှာ ဖြစ်ပါတယ်။
+
+```mermaid
+flowchart TD
+    subgraph LAYERS["Defense-in-Depth Layers"]
+        L1["Layer 1: Minimal base image\n(distroless / alpine — no shell, no curl)"]
+        L2["Layer 2: Non-root USER\n(attackers get limited privileges)"]
+        L3["Layer 3: Read-only root filesystem\n(can't write malware to disk)"]
+        L4["Layer 4: No privileged mode\n(can't escape to host kernel)"]
+        L5["Layer 5: Dropped capabilities\n(can't bind port 80, etc.)"]
+        L6["Layer 6: Vulnerability scanning\n(Trivy — catch CVEs before deploy)"]
+        L7["Layer 7: Secret scanning\n(no API keys in image layers)"]
+        L1 --> L2 --> L3 --> L4 --> L5 --> L6 --> L7
+    end
+```
+
+---
+
+## Hardening 1: Never Run as Root
+
+Default အားဖြင့် Docker container ထဲက process တွေဟာ `root` (UID 0) နဲ့ Run ပါတယ်။ ဒါကြောင့် attacker တွေက သင့် App ရဲ့ vulnerability ကို exploit လုပ်နိုင်ရင် Container ထဲမှာ root privilege ရသွားမှာဖြစ်ပြီး Linux kernel ကို container escape တိုက်ခိုက်မှုတွေ လုပ်ဖို့ အခွင့်အလမ်း ပိုများသွားစေပါတယ်။
+
+### Non-Root User တစ်ခု ထည့်သွင်းခြင်း
+
+```dockerfile
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Create a system group and user (before COPY or anything else)
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+# -S = system user (no login shell, no home directory)
+# appuser UID is typically 100-499
+
+COPY package*.json ./
+RUN npm ci --only=production
+
+COPY . .
+
+# Transfer ownership of the app directory to the new user
+RUN chown -R appuser:appgroup /app
+
+# Switch to non-root user for all subsequent commands and at runtime
+USER appuser
+
+EXPOSE 3000
+CMD ["node", "server.js"]
+```
+
+```bash
+# Verify the container is not running as root
+docker run --rm my-api whoami
+# appuser  ✅
+
+docker run --rm my-api id
+# uid=101(appuser) gid=101(appgroup) groups=101(appgroup)
+```
+
+### Numeric UIDs များကို အသုံးပြုခြင်း (distroless/scratch images များအတွက်)
+
+```dockerfile
+# distroless images don't have adduser — use numeric UID
+FROM gcr.io/distroless/nodejs20-debian12
+
+WORKDIR /app
+COPY --chown=65532:65532 . .
+
+USER 65532:65532    # 65532 = the 'nonroot' user in distroless
+
+EXPOSE 3000
+CMD ["server.js"]
+```
+
+---
+
+## Hardening 2: Read-Only Root Filesystem
+
+သင့် Container ရဲ့ filesystem ဟა Read-Only ဖြစ်နေမယ်ဆိုရင် Code execution ဖြစ်သွားတဲ့ Attacker ဟာ Malware တွေကို Write လုပ်ဖို့၊ Configuration file တွေ Modify လုပ်ဖို့ ဒါမှမဟုတ် Attack tool တွေ Install လုပ်ဖို့ မလုပ်နိုင်တော့ပါဘူး။
+
+```bash
+# Run container with read-only root filesystem
+docker run -d \
+  --read-only \               # Root filesystem is read-only
+  --tmpfs /tmp \              # Allow writes to /tmp (RAM-backed, not disk)
+  --tmpfs /run \              # /run dir for PID files
+  --tmpfs /var/cache/nginx \  # Nginx needs to write cache
+  my-api
+
+# Test: attacker can't write to filesystem
+docker exec my-api touch /bin/evil-tool
+# touch: /bin/evil-tool: Read-only file system  ✅ Blocked!
+```
+
+`docker-compose.yml` ထဲမှာဆိုရင်:
+```yaml
+services:
+  api:
+    read_only: true
+    tmpfs:
+      - /tmp:size=100m
+      - /run:size=10m
+```
+
+---
+
+## Hardening 3: Drop Linux Capabilities
+
+Linux capabilities က Root ရဲ့ privileges တွေ အားလုံးကို Unit လေးတွေအဖြစ် ခွဲထုတ်ပေးထားပါတယ်။ Default အားဖြင့် Docker ဟာ Container တွေကို Capabilities ၁၄ ခုခန့် ပေးထားပါတယ်။ အားလုံးကို Drop လုပ်ပြီး ကိုယ်လိုအပ်တာလေးတွေကိုပဲ ပြန်ထည့်သင့်ပါတယ်-
+
+```bash
+# Run with all capabilities dropped, then add only what's needed
+docker run -d \
+  --cap-drop ALL \              # Drop every capability
+  --cap-add NET_BIND_SERVICE \  # Allow binding to ports < 1024 (if needed)
+  my-api
+
+# For a database like Postgres:
+docker run -d \
+  --cap-drop ALL \
+  --cap-add CHOWN \          # Change file ownership during startup
+  --cap-add SETUID \         # Switch to postgres user
+  --cap-add SETGID \
+  --cap-add DAC_OVERRIDE \   # Read/write postgres data files
+  postgres:16-alpine
+```
+
+Common Capabilities တွေနဲ့ Risk တွေ:
+| Capability | Risk | Required by |
+|-----------|------|-------------|
+| `SYS_ADMIN` | Can mount filesystems, change namespaces | ❌ Avoid in production |
+| `NET_ADMIN` | Can modify network interfaces | Only network tools |
+| `SYS_PTRACE` | Can trace/debug other processes | Debuggers only |
+| `NET_BIND_SERVICE` | Bind ports < 1024 | Web servers on port 80 |
+| `CHOWN` | Change file ownership | Databases, some app init |
+
+```yaml
+# docker-compose.yml
+services:
+  api:
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE  # Only if binding port 80
+```
+
+---
+
+## Hardening 4: Vulnerability Scanning with Trivy
+
+[Trivy](https://github.com/aquasecurity/trivy) ဟа Industry-standard open-source container vulnerability scanner ဖြစ်ပါတယ်။ OS packages၊ Language packages (npm, pip, Maven) နဲ့ Misconfiguration တွေတစ်လျှောက်မှာရှိတဲ့ CVEs (Common Vulnerabilities and Exposures) တွေနဲ့ သင့် Image ကို စစ်ဆေးပေးပါတယ်။
+
+```bash
+# Install Trivy
+brew install trivy                  # macOS
+# Or via Docker (no install needed):
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+  aquasec/trivy image my-api:latest
+
+# Scan your image
+trivy image my-api:latest
+
+# Output (example):
+# my-api (alpine 3.19.1)
+# ========================
+# Total: 0 (UNKNOWN: 0, LOW: 0, MEDIUM: 0, HIGH: 0, CRITICAL: 0) ✅
+# 
+# Node.js (node-pkg)
+# ==================
+# ┌───────────┬────────────────┬──────────┬────────┬───────────┐
+# │ Library   │ Vulnerability  │ Severity │ Status │ Fixed     │
+# ├───────────┼────────────────┼──────────┼────────┼───────────┤
+# │ lodash    │ CVE-2021-23337 │ HIGH     │ fixed  │ 4.17.21   │
+# └───────────┴────────────────┴──────────┴────────┴───────────┘
+
+# Fail CI if HIGH or CRITICAL vulnerabilities found
+trivy image --exit-code 1 --severity HIGH,CRITICAL my-api:latest
+
+# Scan as part of GitHub Actions
+# (In .github/workflows/build.yml)
+# - name: Run Trivy vulnerability scanner
+#   uses: aquasecurity/trivy-action@master
+#   with:
+#     image-ref: ghcr.io/yourorg/my-api:latest
+#     format: 'sarif'
+#     output: 'trivy-results.sarif'
+#     severity: 'CRITICAL,HIGH'
+#     exit-code: '1'
+
+# Fix HIGH CVEs: usually just upgrade the base image
+# FROM node:20-alpine          ← old, has CVEs
+# FROM node:20.14.0-alpine3.20 ← pinned, often cleaner
+```
+
+### Filesystem နဲ့ IaC များကို Scanning လုပ်ခြင်း
+
+```bash
+# Scan for secrets in your source code (before building)
+trivy fs . --scanners secret
+# 2024-08-18 10:00:00 [WARN] Secret detected: AWS Secret Key in config.js
+
+# Scan Dockerfiles for misconfigurations
+trivy config .
+# Dockerfile:
+# - Running as root (DS002) HIGH
+# - No HEALTHCHECK (DS026) LOW
+# - ADD used instead of COPY (DS005) LOW
+
+# Scan Kubernetes manifests
+trivy config ./k8s/
+```
+
+---
+
+## Hardening 5: Use Minimal Base Images
+
+Container တစ်ခုရဲ့ Attack surface ဟာ သူ့ထဲမှာ ပါဝင်တဲ့ software ပမာဏနဲ့ တိုက်ရိုက်အချိုးကျပါတယ်။ ထပ်ထည့်လိုက်တဲ့ Package တိုင်းဟာ Vulnerability ဖြစ်လာနိုင်ခြေပါပဲ။ သင့်လိုအပ်ချက်နဲ့ ကိုက်ညီတဲ့ အသေးဆုံး Base image ကို ရွေးချယ်ပါ-
+
+```
+Hierarchy (smallest → largest attack surface):
+scratch             → only what you explicitly add (Go, Rust static binaries)
+distroless          → OS libraries only, no shell, no package manager (Node, Python, Java, Go)
+alpine:latest       → 5 MB, musl libc, busybox shell, apk package manager
+<lang>-alpine       → node:20-alpine, python:3.12-alpine — runtime + Alpine
+debian:slim         → small Debian variant (good for apps needing glibc)
+<lang>              → full Debian: node:20, python:3.12 — largest, most compatible
+ubuntu / centos     → ❌ Avoid for app images — not designed for single-service containers
+```
+
+```dockerfile
+# Avoid: full Ubuntu base for a Node.js app
+FROM ubuntu:22.04
+RUN apt-get update && apt-get install -y nodejs npm
+# → 500+ MB image, hundreds of unneeded packages
+
+# Better: official node image
+FROM node:20
+# → 340 MB — still has full Debian but node is pre-installed
+
+# Better: Alpine variant
+FROM node:20-alpine
+# → 120 MB — musl libc instead of glibc, much smaller
+
+# Best: distroless (no shell, no package manager)
+FROM gcr.io/distroless/nodejs20-debian12
+# → 90 MB — only Node runtime, no exploitable shell commands
+```
+
+---
+
+## Hardening 6: Don't Bake Secrets into Images
+
+Dockerfile layer ထဲမှာ ပါလာတဲ့ Secret တန်ဖိုးပါရှိတဲ့ `ENV` ဒါမှမဟုတ် `ARG` instruction တိုင်းဟာ Image ထဲကနေ **အမြဲတမ်း ဖတ်လို့ရနေမှာ** ဖြစ်ပါတယ်-
+
+```bash
+# ❌ NEVER DO THIS
+docker build --build-arg DATABASE_URL=postgres://user:pass@host/db -t my-api .
+
+# The secret is now in the image layers forever:
+docker history --no-trunc my-api | grep DATABASE_URL
+# ... --build-arg DATABASE_URL=postgres://user:pass@host/db ...
+# Anyone who can pull the image can see your production password!
+```
+
+**မှန်ကန်တဲ့ နည်းလမ်း — BuildKit secrets**:
+
+```dockerfile
+# Dockerfile — using BuildKit secret mount
+RUN --mount=type=secret,id=npmtoken \
+    NPM_TOKEN=$(cat /run/secrets/npmtoken) \
+    npm install
+# The secret is NEVER written to any layer
+```
+
+```bash
+# Pass the secret at build time
+docker build \
+  --secret id=npmtoken,env=NPM_TOKEN \
+  -t my-api .
+```
+
+---
+
+## Complete Hardened Dockerfile Checklist
+
+```dockerfile
+# ✅ Production-hardened Dockerfile
+FROM node:20-alpine AS builder        # ✅ Pinned major version, Alpine base
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+FROM node:20-alpine AS runner         # ✅ Fresh minimal stage
+
+# ✅ Labels for traceability
+LABEL org.opencontainers.image.source="https://github.com/yourorg/api"
+
+WORKDIR /app
+
+# ✅ Non-root user
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+
+ENV NODE_ENV=production
+ENV PORT=3000
+
+# ✅ Correct ownership on copy
+COPY --from=builder --chown=appuser:appgroup /app/dist ./dist
+COPY --from=builder --chown=appuser:appgroup /app/node_modules ./node_modules
+
+# ✅ Switch to non-root
+USER appuser
+
+EXPOSE 3000
+
+# ✅ Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
+  CMD wget -qO- http://localhost:3000/health || exit 1
+
+# ✅ Exec form (not shell form) for proper signal handling
+CMD ["node", "dist/server.js"]
+```
+
+```bash
+# ✅ Run with additional security flags
+docker run -d \
+  --read-only \                         # ✅ Read-only filesystem
+  --tmpfs /tmp \                        # ✅ Allow /tmp writes
+  --cap-drop ALL \                      # ✅ Drop all capabilities
+  --cap-add NET_BIND_SERVICE \          # ✅ Only add what's needed
+  --security-opt no-new-privileges:true \  # ✅ Prevent privilege escalation
+  --memory 512m \                       # ✅ Memory limit
+  --cpus 0.5 \                          # ✅ CPU limit
+  my-api:v1.0.0
+```
+
+---
+
+## Security Scanning in CI/CD Pipeline
+
+```yaml
+# .github/workflows/security.yml
+name: Security Scan
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 6 * * 1'  # Also scan every Monday morning
+
+jobs:
+  trivy-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image for scanning
+        run: docker build -t my-api:scan .
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: my-api:scan
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+          exit-code: 1      # Fail the build if CVEs found
+
+      - name: Upload Trivy results to GitHub Security
+        if: always()        # Upload even if scan fails
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+
+      - name: Scan Dockerfile for misconfigurations
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: config
+          scan-ref: .
+          exit-code: 1
+```
+
+---
+
+## Summary: Production Container Security Checklist
+
+- [ ] **Non-root user**: `adduser` in Dockerfile + `USER appuser` before `CMD`
+- [ ] **Minimal base image**: Alpine or distroless — no shell, no package manager
+- [ ] **Read-only filesystem**: `--read-only` + `--tmpfs /tmp` for necessary write paths
+- [ ] **Drop capabilities**: `--cap-drop ALL` then add only what's needed
+- [ ] **No privilege escalation**: `--security-opt no-new-privileges:true`
+- [ ] **No secrets in layers**: Use BuildKit `--mount=type=secret` or runtime env vars
+- [ ] **Resource limits**: `--memory` and `--cpus` prevent noisy-neighbor problems
+- [ ] **Vulnerability scanning**: Trivy in CI pipeline with `exit-code: 1` for HIGH/CRITICAL
+- [ ] **Pinned base image tag**: `node:20-alpine` not `node:latest`
+- [ ] **Health check**: `HEALTHCHECK` instruction in Dockerfile
+
+ဒီ Practices တွေအားလုံးကို အသုံးချခြင်းအားဖြင့် Attack surface ကို အနည်းဆုံးဖြစ်စေပြီး၊ ထိခိုက်မှုဖြစ်လာရင်တောင် Blast radius ကို ကန့်သတ်နိုင်ကာ Known vulnerabilities တွေ တွေ့ရှိလာတဲ့အခါ CI ကို အလိုအလျောက် Fail စေတဲ့ Container တစ်ခုကို ရရှိမှာ ဖြစ်ပါတယ်။

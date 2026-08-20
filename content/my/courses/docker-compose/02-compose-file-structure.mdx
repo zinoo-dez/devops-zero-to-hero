@@ -1,0 +1,497 @@
+---
+title: "Compose YAML Specification (services, networks, volumes)"
+---
+
+# Docker-compose.yml ဖိုင်တစ်ခုရဲ့ Anatomy
+
+Compose file တစ်ခုမှာ top-level sections သုံးခု ပါရှိပါတယ်: `services`, `networks`, နဲ့ `volumes` တို့ပဲ ဖြစ်ပါတယ်။ Section တစ်ခုချင်းစီမှာရှိတဲ့ option တွေကို နားလည်ထားခြင်းအားဖြင့် production-ready ဖြစ်ပြီး ခိုင်မာတဲ့ stack တွေကို တည်ဆောက်နိုင်မှာ ဖြစ်ပါတယ်။
+
+```yaml
+# docker-compose.yml — annotated skeleton
+services:       # Container တစ်ခုချင်းစီကို ဒီမှာ define လုပ်ပါ (မဖြစ်မနေ လိုအပ်ပါတယ်)
+  web: ...
+  db: ...
+
+networks:       # Custom network definitions (optional — default အနေနဲ့ auto-created ဖြစ်ပါတယ်)
+  myapp-net:
+    driver: bridge
+
+volumes:        # Named persistent volumes (optional)
+  postgres-data:
+  redis-data:
+```
+
+---
+
+## `services` Block: Key တစ်ခုချင်းစီရဲ့ ရှင်းလင်းချက်
+
+### `image` vs `build`
+
+```yaml
+services:
+  # Option A: Registry တစ်ခုခုကနေ pre-built image တစ်ခုကို Pull လုပ်ရန်
+  db:
+    image: postgres:16-alpine          # Docker Hub image
+  
+  cache:
+    image: redis:7-alpine
+  
+  private-service:
+    image: ghcr.io/yourorg/app:v1.2.0  # GitHub Container Registry
+    # Private registries တွေအတွက် ပထမဆုံး run ပါ: docker login ghcr.io
+
+  # Option B: Local Dockerfile ကနေ Build လုပ်ရန်
+  api:
+    build:
+      context: .                       # Dockerfile ပါဝင်တဲ့ Directory
+      dockerfile: Dockerfile           # Default name ဖြစ်လို့ — ချန်လှပ်ထားလို့ရပါတယ်
+      args:                            # Build-time ARG values တွေ
+        NODE_VERSION: "20"
+        BUILD_ENV: production
+      target: runner                   # Multi-stage build: ဒီ stage မှာ ရပ်ပါ
+      cache_from:                      # Layer cache သုံးပြီး CI builds တွေကို ပိုမြန်စေရန်
+        - type=gha                     # GitHub Actions cache
+      labels:
+        org.opencontainers.image.source: "https://github.com/yourorg/app"
+```
+
+### `ports` — Host-to-Container Port Mapping
+
+```yaml
+services:
+  api:
+    ports:
+      # "HOST_PORT:CONTAINER_PORT"
+      - "3000:3000"             # Host port 3000 မှာ API ကို expose လုပ်ရန်
+
+      # သီးသန့် Host IP တစ်ခုနဲ့ Bind လုပ်ရန် (Interface အားလုံးကို exposeမလုပ်ပါနဲ့)
+      - "127.0.0.1:3000:3000"  # Localhost ကနေပဲ ဝင်လို့ရမယ် — internet ကနေ မရပါ
+
+      # Docker ကို Random host port တစ်ခု ရွေးခိုင်းရန် (Conflicts တွေကို ရှောင်ရှားဖို့ CI မှာ အသုံးဝင်ပါတယ်)
+      - "3000"                  # Random host port → container port 3000
+
+      # Protocol ပါတဲ့ Named port
+      - "5353:53/udp"           # DNS services တွေအတွက် UDP port
+```
+
+<Callout type="tip" title="Production မှာ 127.0.0.1 နဲ့ Bind ပါ">
+Public server တစ်ခုပေါ်မှာ database ports တွေကို (5432, 6379, 27017) `0.0.0.0` ကို ဘယ်တော့မှ expose မလုပ်ပါနဲ့။ Local-only access အတွက် `127.0.0.1` နဲ့ bind လုပ်ပါ (သို့) `ports` ကို လုံးဝ ချန်လှပ်ထားပြီး internal Docker network ကို သုံးပါ — Compose network တစ်ခုတည်းမှာရှိတဲ့ container တွေဟာ တစ်ခုနဲ့တစ်ခု အမြဲ ချိတ်ဆက်နိုင်ပါတယ်။
+</Callout>
+
+### `environment` — Env Vars များကို သတ်မှတ်ခြင်း
+
+```yaml
+services:
+  api:
+    # Method 1: List form
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - LOG_LEVEL=info
+
+    # Method 2: Map form (ပိုသပ်ရပ်ပြီး ပိုသုံးကြပါတယ်)
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      LOG_LEVEL: info
+
+    # Method 3: Host environment ကနေ ယူသုံးရန် (Value က သင့် shell ကနေ လာပါတယ်)
+    environment:
+      - DATABASE_URL       # သင့် shell မှာ DATABASE_URL ကို set လုပ်ထားရင် ဝင်လာပါလိမ့်မယ်
+      - API_KEY            # = မပါရင်: host ရဲ့ value ကို သုံးပါတယ်
+
+    # Method 4: Variable interpolation ကိုသုံးပြီး .env file values များကို ယူသုံးရန်
+    environment:
+      DATABASE_URL: "postgres://${DB_USER}:${DB_PASS}@db:5432/${DB_NAME}"
+```
+
+### `env_file` — Files တွေကနေ Load လုပ်ရန်
+
+```yaml
+services:
+  api:
+    env_file:
+      - .env               # .env file ထဲက KEY=VALUE pairs အားလုံးကို Load လုပ်ရန်
+      - .env.local         # Local settings တွေနဲ့ Override လုပ်ရန် (gitignored လုပ်ထားတဲ့)
+```
+
+### `volumes` — Bind Mounts နဲ့ Named Volumes
+
+```yaml
+services:
+  api:
+    volumes:
+      # Bind mount: host_path:container_path
+      - ./src:/app/src                   # Development မှာ Hot reload ဖြစ်စေရန်
+      - ./config.json:/app/config.json   # Single file mount
+
+      # Named volume: volume_name:container_path
+      - node_modules:/app/node_modules   # Container ထဲမှာ node_modules ကို isolate လုပ်ရန်
+
+      # Read-only mount
+      - ./certs:/etc/ssl/certs:ro        # ro = read-only
+
+  db:
+    volumes:
+      # Persistent data — database တွေအတွက် named volumes ကို အမြဲသုံးပါ
+      - postgres-data:/var/lib/postgresql/data
+```
+
+### `depends_on` — Dependency Ordering
+
+```yaml
+services:
+  api:
+    depends_on:
+      # Simple form: container စတင်တာနဲ့ (health ဖြစ်တာကို မစောင့်ဘဲ) စောင့်ရန်
+      - db
+
+      # Extended form: သတ်မှတ်ထားတဲ့ အခြေအနေတွေကို စောင့်ရန်
+      db:
+        condition: service_healthy      # Healthcheck pass ဖြစ်တာကို စောင့်ရန်
+        restart: true                   # db restart ဖြစ်ရင် api ကိုပါ restart လုပ်ရန်
+      cache:
+        condition: service_started      # Container စတင်တာကိုပဲ စောင့်ရန်
+      migrate:
+        condition: service_completed_successfully  # Migration exit 0 ထွက်လာတာကို စောင့်ရန်
+```
+
+### `healthcheck` — Service တစ်ခု အမှန်တကယ် အသင့်ဖြစ်ပြီလားဆိုတာကို စစ်ဆေးရန်
+
+```yaml
+services:
+  db:
+    image: postgres:16-alpine
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s      # Check ကို 5 စက္ကန့်တစ်ကြိမ် လုပ်ပါ
+      timeout: 5s       # Check လုပ်တာ 5 စက္ကန့်ထਧ ကျော်လွန်ရင် Fail ပါမယ်
+      retries: 10       # ဆက်တိုက် 10 ကြိမ် fail မှ unhealthy လို့ သတ်မှတ်မယ်
+      start_period: 15s # Fail တွေမရေတွက်ခင် Grace period (ပထမအကြိမ် init က နှေးတတ်ပါတယ်)
+
+  cache:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build: .
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+```
+
+### `restart` — Recovery Policy
+
+```yaml
+services:
+  api:
+    restart: "no"              # ဘယ်တော့မှ restart မလုပ်ပါ (default) — တစ်ကြိမ်တည်းသုံး task တွေအတွက် ကောင်းပါတယ်
+    # restart: "on-failure"    # Non-zero exit code ထွက်မှသာ restart လုပ်ပါ
+    # restart: "always"        # manually stop လုပ်ထားရင်တောင် အမြဲတမ်း restart လုပ်ပါ
+    # restart: "unless-stopped" # သင်ကိုယ်တိုင် manually stop လုပ်ထားတာမှလွဲ၍ အမြဲ restart လုပ်ပါ
+```
+
+<Callout type="tip" title="Production မှာ unless-stopped ကို သုံးပါ">
+ကြာရှည် run ရမယ့် production services တွေအတွက် `unless-stopped` က အကောင်းဆုံး policy ဖြစ်ပါတယ်။ Crash ဖြစ်သွားတာနဲ့ server reboot ဖြစ်သွားတဲ့အခါတွေမှာ automatic restart ဖြစ်စေပါတယ် — ဒါပေမဲ့ သင်ကိုယ်တိုင် `docker compose stop` လုပ်တဲ့အခါမှာတော့ ဒါကို လိုက်နာပါတယ်။
+</Callout>
+
+### `command` နဲ့ `entrypoint` — Container Defaults များကို Override လုပ်ရန်
+
+```yaml
+services:
+  api:
+    image: node:20-alpine
+    working_dir: /app
+    command: ["node", "server.js"]       # Dockerfile ထဲက CMD ကို override လုပ်ပါတယ်
+
+  worker:
+    build: .
+    entrypoint: ["/bin/sh", "-c"]        # ENTRYPOINT ကို override လုပ်ပါတယ်
+    command: ["while true; do node worker.js; sleep 5; done"]
+```
+
+### `deploy` — Resource Limits (Compose v2)
+
+```yaml
+services:
+  api:
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"          # CPU core တစ်ခုရဲ့ အများဆုံး 50%
+          memory: "512M"       # အများဆုံး 512 MB RAM — ကျော်လွန်သွားရင် OOMKilled ဖြစ်ပါမယ်
+        reservations:
+          cpus: "0.1"          # အနည်းဆုံး အာမခံချက်ပေးထားတဲ့ CPU
+          memory: "128M"       # အနည်းဆုံး အာမခံချက်ပေးထားတဲ့ RAM
+
+      # Replicas အရေအတွက် (docker compose --scale က ဒါကို override လုပ်ပါတယ်)
+      replicas: 1
+
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+```
+
+### `profiles` — Optional Services
+
+```yaml
+# သတ်မှတ်ထားတဲ့ profile active ဖြစ်နေမှသာ Services တွေ စတင်ပါမယ်
+services:
+  adminer:                        # DB admin UI
+    image: adminer
+    ports: ["8080:8080"]
+    profiles: ["tools"]           # ဒီ command နဲ့မှ စတင်ပါတယ်: docker compose --profile tools up
+
+  mailhog:                        # Email testing
+    image: mailhog/mailhog
+    ports: ["1025:1025", "8025:8025"]
+    profiles: ["tools"]
+```
+
+---
+
+## `networks` Block
+
+Default အနေနဲ့ Compose ဟာ `<project>_default` လို့ခေါ်တဲ့ bridge network တစ်ခုကို ဖန်တီးပေးပြီး services တွေအားလုံးကို အဲ့ဒီထဲ ချိတ်ဆက်ပေးပါတယ်။ Services တွေဟာ တစ်ခုနဲ့တစ်ခုကို **service name** (DNS hostname အဖြစ် သုံးတာ) နဲ့ ရှာဖွေတွေ့ရှိကြပါတယ်:
+
+```bash
+# 'api' container က postgres ကို 'db' hostname နဲ့ ချိတ်ဆက်ပါတယ်
+DATABASE_URL=postgres://user:pass@db:5432/myapp
+
+# Container name (သို့) IP address ကို သုံးစရာ မလိုပါဘူး
+```
+
+### Isolation အတွက် Custom Networks
+
+```yaml
+networks:
+  frontend:
+    driver: bridge
+  backend:
+    driver: bridge
+  # External network (Compose အပြင်ဘက်မှာ ဖန်တီးထားတာ — cross-project communication အတွက် သုံးပါတယ်)
+  shared-proxy:
+    external: true
+    name: nginx-proxy-net
+
+services:
+  nginx:
+    image: nginx:alpine
+    networks:
+      - frontend   # Internet ကို ချိတ်ဆက်နိုင်ပါတယ်
+      - backend    # API ကို ချိတ်ဆက်နိုင်ပါတယ်
+
+  api:
+    build: .
+    networks:
+      - backend    # db နဲ့ cache ကို ချိတ်ဆက်နိုင်ပါတယ်
+                   # Internet ကနေ တိုက်ရိုက် ဝင်လို့ မရပါ
+
+  db:
+    image: postgres:16-alpine
+    networks:
+      - backend    # Backend network ကနေပဲ ချိတ်ဆက်လို့ရပါတယ်
+                   # Nginx (သို့) internet ကို expose မလုပ်ထားပါ
+```
+
+ဒီလို isolate လုပ်ထားခြင်းဟာ production အတွက် **security best practice** တစ်ခု ဖြစ်ပါတယ် — ဘယ်သူမဆို `nginx` container ကို penetrate လုပ်နိုင်ရင်တောင် သင့် database ကို internet ကနေ ဝင်လို့ မရနိုင်ပါဘူး။
+
+---
+
+## `volumes` Block
+
+```yaml
+volumes:
+  # Basic named volume (Docker-managed, /var/lib/docker/volumes/ ထဲမှာ သိမ်းဆည်းပါတယ်)
+  postgres-data:
+
+  # Driver options တွေနဲ့ (ဥပမာ- server တွေကြား shared storage အတွက် NFS)
+  shared-uploads:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: addr=192.168.1.100,rw
+      device: ":/exports/uploads"
+
+  # External volume (Compose ကို မ run ခင် အရင် ဖန်တီးထားရပါမယ်)
+  production-db:
+    external: true             # Docker က ဒီ volume ကို ဖန်တီးမှာ (သို့) ဖျက်မှာ မဟုတ်ပါဘူး
+```
+
+```bash
+# Docker volumes များကို ကြည့်ရန်
+docker volume ls
+
+# Volume တစ်ခုကို inspect လုပ်ရန် (Disk ပေါ်မှာ data ဘယ်နားမှာ သိမ်းထားလဲ ပြပါတယ်)
+docker volume inspect myapp_postgres-data
+# Mountpoint: /var/lib/docker/volumes/myapp_postgres-data/_data
+
+# Named volume တစ်ခုကို backup လုပ်ရန်
+docker run --rm \
+  -v myapp_postgres-data:/source:ro \
+  -v $(pwd):/backup \
+  busybox tar czf /backup/postgres-backup-$(date +%Y%m%d).tar.gz -C /source .
+```
+
+---
+
+## အဓိကကျသော `docker compose` Commands များ
+
+```bash
+# === စတင်ခြင်းနှင့် ရပ်တန့်ခြင်း ===
+docker compose up                    # Foreground မှာ စတင်ရန် (logs တွေကို stream လုပ်ပြပါမယ်)
+docker compose up -d                 # Background မှာ စတင်ရန်
+docker compose up -d --build         # မစတင်ခင် images တွေ အားလုံးကို force rebuild လုပ်ရန်
+docker compose down                  # Containers များကို ရပ်ပြီး ဖျက်ရန် (volumes တွေကို ဆက်သိမ်းထားပါတယ်)
+docker compose down -v               # Containers များနှင့် volumes များကိုပါ ရပ်ပြီး ဖျက်ရန် (Data ပျောက်သွားပါမယ်!)
+docker compose restart api           # api service တစ်ခုတည်းကိုသာ restart လုပ်ရန်
+docker compose stop db               # မဖျက်ဘဲ db ကို ရပ်ထားရန်
+docker compose start db              # ရပ်ထားတဲ့ service တစ်ခုကို ပြန်စတင်ရန်
+
+# === Scaling ===
+docker compose up -d --scale api=3  # api replicas 3 ခု runရန် (load balancer လိုအပ်ပါတယ်)
+
+# === Logs များ ကြည့်ခြင်း ===
+docker compose logs                  # Service logs အားလုံး
+docker compose logs api              # api logs သက်သက်
+docker compose logs -f               # Follow လုပ်ရန် (tail -f နဲ့ တူပါတယ်)
+docker compose logs -f api --tail=50 # နောက်ဆုံး လိုင်း 50 ကိုကြည့်ပြီး follow လုပ်ရန်
+
+# === Inspecting လုပ်ခြင်း ===
+docker compose ps                    # Containers များနှင့်  அவற்றின் status များကို ကြည့်ရန်
+docker compose ps -a                 # ရပ်ထားတဲ့ containers များကိုပါ ပြရန်
+docker compose top                   # Container တစ်ခုချင်းစီမှာ run နေတဲ့ processes များကို ပြရန်
+docker compose port api 3000         # api:3000 နဲ့ map ဖြစ်နေတဲ့ host port ကို ရှာရန်
+
+# === Exec ===
+docker compose exec api /bin/sh      # run နေတဲ့ api container ထဲသို့ shell ဖြင့် ဝင်ရန်
+docker compose exec db psql -U appuser -d myapp  # db container ထဲမှာ psql runရန်
+docker compose run --rm api env      # Fresh container အသစ်တစ်ခုထဲမှာ one-off command တစ်ခု runရန်
+
+# === Build လုပ်ခြင်း ===
+docker compose build                 # Build config ပါတဲ့ services တွေ အားလုံးကို build လုပ်ရန်
+docker compose build api --no-cache  # api ကို full rebuild လုပ်ရန် force ပေးရန်
+
+# === Config ===
+docker compose config                # ပေါင်းစပ်ထားတဲ့ compose config ကို validate လုပ်ပြီး print ထုတ်ရန်
+docker compose config --services     # Service names အားလုံးကို list လုပ်ရန်
+```
+
+---
+
+## Production-Ready ဖြစ်သော အပြည့်အစုံ ဥပမာ
+
+```yaml
+# docker-compose.yml — production-grade three-tier app
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runner              # Multi-stage: production stage သက်သက်
+    ports:
+      - "127.0.0.1:3000:3000"    # Internal only — nginx က ရှေ့ကနေ ခံပေးထားပါတယ်
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}"
+      REDIS_URL: "redis://cache:6379"
+    depends_on:
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - backend
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: "512M" }
+        reservations: { cpus: "0.1", memory: "128M" }
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql  # ပထမအကြိမ် စတင်ချိန်မှာ run ပါမယ်
+    restart: unless-stopped
+    networks:
+      - backend
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: "1G" }
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  cache:
+    image: redis:7-alpine
+    command: redis-server --save 60 1 --loglevel warning --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    networks:
+      - backend
+    deploy:
+      resources:
+        limits: { cpus: "0.25", memory: "300M" }
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+networks:
+  backend:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  redis-data:
+```
+
+---
+
+## အကျဉ်းချုပ်
+
+Compose YAML file ထဲက Key တစ်ခုချင်းစီမှာ သီးသန့် ရည်ရွယ်ချက်တွေ ရှိပါတယ်:
+- **`services`**: အဓိက core ဖြစ်ပါတယ် — container တစ်ခုချင်းစီကို image/build, ports, environment, volumes, dependencies, health checks, restart policies, နဲ့ resource limits တွေနဲ့ define လုပ်ပေးပါတယ်
+- **`image`** က registry ကနေ pull လုပ်ပါတယ်; **`build`** က local Dockerfile ကနေ compile လုပ်ပါတယ် (multi-stage `target` support နဲ့အတူ)
+- **`ports`** က host↔container ကို map လုပ်ပေးပါတယ်; public ဖြစ်စရာမလိုတဲ့ services တွေအတွက် `127.0.0.1` နဲ့ အမြဲ bind လုပ်ပါ
+- **`depends_on`** နဲ့ `condition: service_healthy` ကို သုံးခြင်းအားဖြင့် container စတင်တာကိုပဲ မစောင့်ဘဲ၊ အမှန်တကယ် အသင့်ဖြစ်တာကို စောင့်ပြီး services တွေ အစဉ်လိုက် မှန်ကန်စွာ စတင်နိုင်အောင် လုပ်ပေးပါတယ်
+- **`networks`** ကို custom segments တွေနဲ့ သုံးပြီး services တွေကို isolate လုပ်နိုင်ပါတယ် — database တွေကို backend network ကနေပဲ ချိတ်ဆက်လို့ ရသင့်ပါတယ်
+- **`volumes`** မှာ named volumes က database data တွေကို persist ဖြစ်စေပါတယ်; bind mounts (`./src:/app/src`) က development မှာ hot reload ဖြစ်စေဖို့ ကူညီပေးပါတယ်
+- **`restart: unless-stopped`** + rotation ပါတဲ့ `logging` = production-ready ဖြစ်တဲ့ container management ဖြစ်လာစေပါတယ်
+
+နောက် lesson မှာတော့ complete ဖြစ်တဲ့ three-tier full-stack application stack တစ်ခုကို အဆင့်ချင်းစီ တည်ဆောက်သွားမှာ ဖြစ်ပါတယ်။

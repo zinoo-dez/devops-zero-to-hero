@@ -1,0 +1,490 @@
+---
+title: "Installing K3s on Linux / VPS with One Command"
+---
+
+# Installing K3s: From Zero to Running Cluster
+
+K3s ဟа production software တွေထဲမှာ installation ပြုလုပ်ရတာ အစအလွယ်ဆုံး တစ်ခုပါပဲ။ `curl` command တစ်ကြောင်းတည်းနဲ့ complete ဖြစ်တဲ့ Kubernetes cluster တစ်ခုကို download လုပ်၊ install လုပ်ပြီး start နိုင်ပါတယ်။ ဒီ lesson မှာတော့ အလွယ်ဆုံး வழင်းမ်း (happy path) တင်မကဘဲ real-world deployments တွေအတွက် လိုအပ်မယ့် configuration option အားလုံးကို ဆွေးနွေးသွားမှာ ဖြစ်ပါတယ်။
+
+---
+
+## Prerequisites
+
+K3s ကို install မလုပ်ခင် သင့် server ကို အရင်ပြင်ဆင်ပါ:
+
+### Supported Operating Systems
+
+| OS | Version | Architecture | Status |
+|----|---------|-------------|--------|
+| Ubuntu | 22.04 LTS, 24.04 LTS | amd64, arm64 | ✅ Recommended |
+| Debian | 11, 12 | amd64, arm64 | ✅ Supported |
+| RHEL/Rocky | 8, 9 | amd64, arm64 | ✅ Supported |
+| Raspberry Pi OS | Bullseye, Bookworm | arm64 | ✅ Supported |
+| Alpine Linux | 3.17+ | amd64 | ⚠️ Limited support |
+| macOS | Any | — | ❌ Not supported (use k3d) |
+
+### Hardware Requirements
+
+| Scenario | RAM | CPU | Disk |
+|----------|-----|-----|------|
+| Learning / single app | 1 GB | 1 vCPU | 10 GB |
+| Small production | 2–4 GB | 2 vCPU | 40 GB |
+| Medium production | 4–8 GB | 4 vCPU | 80 GB |
+
+### Required Ports
+
+install မလုပ်ခင် **အရင်** firewall မှာ ဒီ ports တွေကို ဖွင့်ပေးပါ:
+
+```bash
+# Ubuntu မှာ UFW သုံးနေတယ်ဆိုရင်
+sudo ufw allow 22/tcp       # SSH
+sudo ufw allow 6443/tcp     # Kubernetes API server (kubectl remote access)
+sudo ufw allow 80/tcp       # HTTP (Traefik Ingress)
+sudo ufw allow 443/tcp      # HTTPS (Traefik Ingress)
+sudo ufw enable
+sudo ufw status verbose
+```
+
+multi-node setups တွေအတွက်ဆိုရင် ဒါတွေကိုပါ ထပ်ဖွင့်ပေးပါ:
+```bash
+sudo ufw allow 8472/udp     # Flannel VXLAN (pod networking between nodes)
+sudo ufw allow 10250/tcp    # kubelet API (needed for kubectl exec/logs)
+sudo ufw allow 2379-2380/tcp  # etcd (only if using embedded HA etcd)
+```
+
+---
+
+## Server Hardening Before K3s
+
+K3s မလုပ်ခင် သင့် server ကို secure ဖြစ်အောင် အရင်လုပ်ပါ:
+
+```bash
+# Package အားလုံးကို update လုပ်ရန်
+sudo apt-get update && sudo apt-get upgrade -y
+
+# နေ့စဉ်သုံးဖို့အတွက် non-root user တစ်ခု ဖန်တီးရန်
+sudo adduser k3sadmin
+sudo usermod -aG sudo k3sadmin
+
+# root SSH login ကို ပိတ်ရန်
+sudo sed -i 's/PermitRootLogin yes/PermitRootLogin no/' /etc/ssh/sshd_config
+sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
+sudo systemctl restart sshd
+
+# အလိုအလျောက် security updates လုပ်ပေးတာကို enable လုပ်ရန်
+sudo apt-get install -y unattended-upgrades
+sudo dpkg-reconfigure -plow unattended-upgrades
+
+# လိုအပ်မယ့် tools တွေကို install လုပ်ရန်
+sudo apt-get install -y curl wget git jq htop net-tools
+```
+
+---
+
+## The One-Command Installation
+
+```bash
+# နောက်ဆုံးထွက် stable K3s version ကို install လုပ်ရန်
+curl -sfL https://get.k3s.io | sh -
+```
+
+ဒီ script က တစ်ဆင့်ချင်း ဘာတွေလုပ်ပေးလဲဆိုတော့:
+1. သင့်ရဲ့ CPU architecture ကို detect လုပ်ပေးပါတယ် (amd64, arm64, armhf)
+2. `k3s` binary ကို `/usr/local/bin/k3s` ထဲကို download ချပေးပါတယ်
+3. executable ဖြစ်အောင် လုပ်ပေးပါတယ် (`chmod +x`)
+4. `/etc/systemd/system/k3s.service` မှာ systemd unit file တစ်ခု ဖန်တီးပေးပါတယ်
+5. service ကို enable လုပ်ပေးပါတယ် (`systemctl enable k3s`)
+6. service ကို start ပေးပါတယ် (`systemctl start k3s`)
+7. `/etc/rancher/k3s/k3s.yaml` (kubeconfig) ကို generate လုပ်ပေးပါတယ်
+8. `/var/lib/rancher/k3s/server/node-token` (agent nodes တွေ join ဖို့ token) ကို ဖန်တီးပေးပါတယ်
+
+---
+
+## Verify the Installation
+
+```bash
+# systemd service run နေပြီလား စစ်ဆေးရန်
+sudo systemctl status k3s
+# ● k3s.service - Lightweight Kubernetes
+#    Loaded: loaded (/etc/systemd/system/k3s.service; enabled)
+#    Active: active (running) since ...
+
+# startup logs တွေကို real time ကြည့်ရန်
+sudo journalctl -u k3s -f --no-pager
+# ("Node is ready" ဆိုတာ မြင်ရင် Ctrl+C နှိပ်ပါ)
+
+# node က Ready ဖြစ်မဖြစ် စစ်ဆေးရန် (install လုပ်ပြီး ၃၀-၆၀ စက္ကန့်ကြာတတ်ပါတယ်)
+sudo k3s kubectl get nodes
+# NAME        STATUS   ROLES                  AGE   VERSION
+# my-server   Ready    control-plane,master   90s   v1.29.4+k3s1
+
+# system pods အားလုံး run နေပြီလား စစ်ဆေးရန်
+sudo k3s kubectl get pods -A
+# NAMESPACE     NAME                                     READY   STATUS
+# kube-system   coredns-xxx                              1/1     Running
+# kube-system   local-path-provisioner-xxx               1/1     Running
+# kube-system   metrics-server-xxx                       1/1     Running
+# kube-system   svclb-traefik-xxx                        2/2     Running
+# kube-system   traefik-xxx                              1/1     Running
+```
+
+<Callout type="tip" title="K3s Has Its Own kubectl">
+K3s မှာ သူ့ဟာသူ `kubectl` ကို `k3s kubectl` ဆိုပြီး ပါလာပါတယ်။ server ပေါ်မှာ ရှိနေချိန်မှာ ဘယ်လို configuration မှ မလိုဘဲ သုံးလို့ရပါတယ်:
+```bash
+sudo k3s kubectl get nodes
+sudo k3s kubectl get pods -A
+```
+သင့်ရဲ့ laptop ကနေ remote access လုပ်ဖို့ဆိုရင်တော့ နောက် section မှာ separate ဖြစ်တဲ့ `kubectl` ကို configure လုပ်ရပါမယ်။
+</Callout>
+
+---
+
+## Configure Remote kubectl Access
+
+SSH ဝင်နေစရာမလိုဘဲ ကိုယ့် laptop ကနေ cluster ကို manage လုပ်ရတာ ပိုပြီး အဆင်ပြေပါတယ်။
+
+<Steps>
+<Step>
+**server ပေါ်က kubeconfig ကို laptop ထဲ ကူးယူပါ:**
+
+```bash
+# သင့်ရဲ့ LOCAL machine ပေါ်မှာ (YOUR_VPS_IP နေရာမှာ actual IP ကို ထည့်ပါ)
+scp root@YOUR_VPS_IP:/etc/rancher/k3s/k3s.yaml ~/.kube/k3s-config
+
+# ဖိုင်ထဲမှာ server address က 127.0.0.1 ဖြစ်နေပါတယ် — အဲ့ဒါကို ပြင်ပါ:
+sed -i '' "s/127.0.0.1/YOUR_VPS_IP/g" ~/.kube/k3s-config
+# Note: macOS က -i ပြီးရင် '' လိုအပ်ပါတယ် (Linux ပေါ်က GNU sed ကတော့ မလိုပါဘူး)
+```
+</Step>
+
+<Step>
+**file permissions တွေ သတ်မှတ်ပါ (kubectl က world-readable ဖြစ်တဲ့ kubeconfigs တွေကို လက်မခံပါဘူး):**
+
+```bash
+chmod 600 ~/.kube/k3s-config
+```
+</Step>
+
+<Step>
+**ဒီ kubeconfig ကို သုံးဖို့ kubectl ကို configure လုပ်ပါ:**
+
+```bash
+# Option A: KUBECONFIG environment variable သတ်မှတ်ရန် (temporary)
+export KUBECONFIG=~/.kube/k3s-config
+
+# Option B: default ~/.kube/config ထဲ ပေါင်းထည့်ရန် (permanent)
+KUBECONFIG=~/.kube/config:~/.kube/k3s-config \
+  kubectl config view --flatten > ~/.kube/config-merged && \
+  mv ~/.kube/config-merged ~/.kube/config
+
+# Option C: shell profile ထဲမှာ KUBECONFIG ကို permanent ထည့်ရန်
+echo 'export KUBECONFIG=~/.kube/k3s-config' >> ~/.zshrc
+source ~/.zshrc
+```
+</Step>
+
+<Step>
+**remote access အလုပ်လုပ်မလုပ် စစ်ဆေးပါ:**
+
+```bash
+kubectl get nodes
+# NAME        STATUS   ROLES                  AGE   VERSION
+# my-server   Ready    control-plane,master   5m    v1.29.4+k3s1
+
+# pods တွေအားလုံး မြင်ရမမြင် စစ်ဆေးပါ
+kubectl get pods -A
+```
+</Step>
+
+<Step>
+**shell autocomplete ကို setup လုပ်ပါ (optional ဖြစ်ပေမယ့် အရမ်း အသုံးဝင်ပါတယ်):**
+
+```bash
+# Bash
+echo 'source <(kubectl completion bash)' >> ~/.bashrc
+
+# Zsh
+echo 'source <(kubectl completion zsh)' >> ~/.zshrc
+
+# 'k' alias တစ်ခု ဖန်တီးရန်
+echo 'alias k=kubectl' >> ~/.zshrc
+echo 'complete -F __start_kubectl k' >> ~/.zshrc
+
+source ~/.zshrc
+```
+</Step>
+</Steps>
+
+---
+
+## Common Installation Variants
+
+### Install a Specific K3s Version
+
+production scripts တွေမှာ version တွေကို အမြဲ pin လုပ်ထားသင့်ပါတယ်:
+
+```bash
+# ရနိုင်တဲ့ version များကို ကြည့်ရန်: https://github.com/k3s-io/k3s/releases
+curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.29.4+k3s1 sh -
+
+# install ဖြစ်သွားတဲ့ version ကို စစ်ဆေးရန်
+k3s --version
+# k3s version v1.29.4+k3s1 (abc12345)
+# go version go1.21.8
+```
+
+### Disable Traefik (Use NGINX Instead)
+
+```bash
+curl -sfL https://get.k3s.io | sh -s - --disable traefik
+
+# ပြီးရင် NGINX Ingress Controller ကို install လုပ်ပါ
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.10.1/deploy/static/provider/cloud/deploy.yaml
+```
+
+### Use Embedded etcd (For Multi-Server HA)
+
+```bash
+# embedded etcd ပါတဲ့ ပထမဆုံး server node (SQLite အစား)
+curl -sfL https://get.k3s.io | sh -s - --cluster-init
+
+# ထပ်ဆောင်း server nodes တွေက cluster ကို join ရန်
+curl -sfL https://get.k3s.io | sh -s - \
+  --server https://FIRST_SERVER_IP:6443 \
+  --token YOUR_NODE_TOKEN \
+  --cluster-init
+```
+
+### Configure with a Config File
+
+ရှည်လျားတဲ့ command-line flags တွေအစား YAML config file ကို သုံးပါ:
+
+```yaml
+# /etc/rancher/k3s/config.yaml
+# installer မrun ခင် ဒါကို ဖန်တီးပါ၊ ဒါမှမဟုတ် k3s ကို restart လုပ်ပါ
+
+# မလိုတဲ့ components တွေကို disable လုပ်ရန်
+disable:
+  - traefik        # NGINX သုံးမယ်ဆိုရင်
+  - servicelb      # LoadBalancer IPs အတွက် MetalLB သုံးမယ်ဆိုရင်
+
+# ဖတ်လို့ရတဲ့ permissions တွေနဲ့ kubeconfig ကို ရေးရန်
+write-kubeconfig-mode: "644"
+
+# TLS SAN: API server certificate ထဲကို သင့်ရဲ့ VPS IP နဲ့ domain ကို ထည့်ရန်
+tls-san:
+  - "YOUR_VPS_IP"
+  - "k8s.yourdomain.com"
+
+# Data directory (/var သေးတယ်ဆိုရင် ပြောင်းပါ)
+data-dir: /opt/k3s-data
+
+# etcd snapshots (embedded etcd သုံးနေရင်)
+etcd-snapshot-schedule-cron: "0 */6 * * *"
+etcd-snapshot-retention: 5
+```
+
+```bash
+# K3s ကို install လုပ်ပါ (config.yaml ကို သူ့အလိုလို ဖတ်ပါလိမ့်မယ်)
+curl -sfL https://get.k3s.io | sh -
+
+# config apply ဖြစ်သွားတာကို စစ်ဆေးရန်
+sudo k3s kubectl get nodes -o wide
+```
+
+### Air-Gapped Installation (No Internet Access)
+
+အင်တာနက် အဝင်အထွက်မရှိတဲ့ server တွေအတွက်:
+
+```bash
+# အင်တာနက်ရတဲ့ machine တစ်ခုပေါ်မှာ: release ကို download ချပါ
+VERSION=v1.29.4+k3s1
+wget https://github.com/k3s-io/k3s/releases/download/${VERSION}/k3s
+wget https://github.com/k3s-io/k3s/releases/download/${VERSION}/k3s-airgap-images-amd64.tar.zst
+wget https://github.com/k3s-io/k3s/releases/download/${VERSION}/install.sh
+
+# USB/private network ကနေတစ်ဆင့် air-gapped server ဆီ ဖိုင်တွေ ကူးပါ
+scp k3s k3s-airgap-images-amd64.tar.zst install.sh root@AIR_GAPPED_SERVER:/tmp/
+
+# Air-gapped server ပေါ်မှာ:
+sudo cp /tmp/k3s /usr/local/bin/k3s
+sudo chmod +x /usr/local/bin/k3s
+sudo mkdir -p /var/lib/rancher/k3s/agent/images/
+sudo cp /tmp/k3s-airgap-images-amd64.tar.zst /var/lib/rancher/k3s/agent/images/
+INSTALL_K3S_SKIP_DOWNLOAD=true bash /tmp/install.sh
+```
+
+---
+
+## Understanding K3s File Locations
+
+installation လုပ်ပြီးရင် K3s က ခန့်မှန်းလို့ရတဲ့ နေရာတွေမှာ files တွေ ဖန်တီးပေးပါတယ်:
+
+```
+/usr/local/bin/
+├── k3s                          ← Main binary
+├── k3s-uninstall.sh             ← Complete uninstall script
+└── k3s-killall.sh               ← K3s processes အားလုံးကို ရပ်ရန် (data တွေ မဖျက်ပါ)
+
+/etc/rancher/k3s/
+├── k3s.yaml                     ← Kubeconfig (သင့် laptop ဆီ ကူးပါ)
+└── config.yaml                  ← Optional: K3s server configuration
+
+/etc/systemd/system/
+└── k3s.service                  ← Systemd unit file
+
+/var/lib/rancher/k3s/
+├── server/
+│   ├── db/
+│   │   └── state.db             ← SQLite database (cluster state)
+│   ├── node-token               ← worker nodes တွေအတွက် join token
+│   ├── tls/                     ← CA certificates နဲ့ server certs
+│   └── manifests/               ← Auto-applied manifests (Helm charts, etc.)
+└── storage/                     ← local-path-provisioner PVC data
+```
+
+<Callout type="warning" title="Back Up These Directories">
+`/var/lib/rancher/k3s/server/db/` ထဲမှာ သင့်ရဲ့ cluster state တစ်ခုလုံး ပါဝင်ပါတယ်။ `/var/lib/rancher/k3s/storage/` ထဲမှာတော့ သင့်ရဲ့ PVC data တွေ (databases, uploaded files) ပါဝင်ပါတယ်။ နှစ်ခုစလုံးကို ပုံမှန် backup လုပ်ထားပါ။ Lesson 7 မှာ automated backup strategies တွေအကြောင်း ရှင်းပြထားပါတယ်။
+</Callout>
+
+---
+
+## Managing the K3s Service
+
+```bash
+# service status စစ်ဆေးရန်
+sudo systemctl status k3s
+
+# K3s ကို ရပ်ရန် (cluster ကို ရပ်လိုက်ပါတယ် — pods တွေ run တာ ရပ်သွားပါမယ်)
+sudo systemctl stop k3s
+
+# K3s ကို စတင်ရန်
+sudo systemctl start k3s
+
+# K3s ကို restart လုပ်ရန် (config ပြောင်းလဲမှုများကို apply လုပ်ရန်)
+sudo systemctl restart k3s
+
+# boot တက်ချိန်မှာ auto-start လုပ်တာကို disable လုပ်ရန်
+sudo systemctl disable k3s
+
+# live logs များကို ကြည့်ရန်
+sudo journalctl -u k3s -f
+
+# ပြီးခဲ့တဲ့ တစ်နာရီအတွင်းက logs များကို ကြည့်ရန်
+sudo journalctl -u k3s --since "1 hour ago"
+```
+
+---
+
+## Upgrading K3s
+
+```bash
+# သတ်မှတ်ထားတဲ့ version တစ်ခုကို upgrade လုပ်ရန် (installer ကို ပြန် run ပါ)
+curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.30.0+k3s1 sh -
+
+# installer က:
+# 1. node ကို drain လုပ်ပါတယ် (unschedulable လို့ သတ်မှတ်တယ်၊ pods တွေ terminate ဖြစ်တာကို စောင့်တယ်)
+# 2. k3s binary ကို အစားထိုးပါတယ်
+# 3. k3s service ကို restart လုပ်ပါတယ်
+# 4. node ကို un-cordon လုပ်ပါတယ်
+
+# upgrade ဖြစ်တာကို စစ်ဆေးရန်
+k3s --version
+kubectl get nodes
+```
+
+automated upgrades တွေအတွက် [K3s System Upgrade Controller](https://github.com/rancher/system-upgrade-controller) ကို သုံးပါ:
+
+```yaml
+# system-upgrade-plan.yaml
+apiVersion: upgrade.cattle.io/v1
+kind: Plan
+metadata:
+  name: k3s-latest
+  namespace: system-upgrade
+spec:
+  concurrency: 1          # တစ်ခါတည်းမှာ node တစ်ခုပဲ upgrade လုပ်ရန်
+  serviceAccountName: system-upgrade
+  channel: https://update.k3s.io/v1-release/channels/stable
+  upgrade:
+    image: rancher/k3s-upgrade
+```
+
+---
+
+## Uninstalling K3s
+
+```bash
+# Complete uninstall — PVCs အပါအဝင် K3s data အားလုံးကို ဖျက်ပစ်ပါတယ်!
+/usr/local/bin/k3s-uninstall.sh
+
+# Graceful stop (data ကို လက်မထိဘဲ ထားပါတယ်၊ နောက်မှ ပြန် install လုပ်လို့ရပါတယ်)
+/usr/local/bin/k3s-killall.sh
+```
+
+<Callout type="caution" title="k3s-uninstall.sh Deletes All Data">
+uninstall script က `/var/lib/rancher/k3s/` ကို ဖျက်ပစ်ပါတယ် — သင့်ရဲ့ SQLite database နဲ့ local-path PVC data (databases, files) တွေ အားလုံး အပါအဝင်ပေါ့။ uninstall မလုပ်ခင် ဒီ directory ကို backup လုပ်ပါ ဒါမှမဟုတ် အရေးကြီးတဲ့ data တွေအားလုံး remote မှာ ရှိနေကြောင်း သေချာအောင် လုပ်ပါ။
+</Callout>
+
+---
+
+## Troubleshooting Common Installation Issues
+
+### "K3s fails to start — address already in use"
+```bash
+# တခြား process တစ်ခုက port 6443 ကို သုံးနေပါတယ်
+sudo ss -tlnp | grep 6443
+# ပြဿနာဖြစ်စေတဲ့ process ကို kill ပါ ဒါမှမဟုတ် ရပ်ပစ်ပါ:
+sudo systemctl stop whatever-service-is-on-6443
+```
+
+### "Node stays in NotReady state"
+```bash
+# root cause ကို သိဖို့ K3s logs များကို စစ်ဆေးပါ
+sudo journalctl -u k3s -n 100 --no-pager
+
+# ဖြစ်လေ့ရှိတဲ့ အကြောင်းရင်းများ:
+# 1. Flannel က VXLAN interface ကို ဖန်တီးလို့ မရခြင်း (NET_ADMIN capability လိုအပ်ပါတယ်)
+# 2. /etc/hosts မှာ hostname က IP ကို resolve မလုပ်နိုင်ခြင်း
+# 3. Container images တွေကို pull လို့ မရခြင်း (အင်တာနက်ချိတ်ဆက်မှုကို စစ်ပါ)
+echo "$(hostname -I | awk '{print $1}')  $(hostname)" | sudo tee -a /etc/hosts
+```
+
+### "kubectl connection refused from laptop"
+```bash
+# K3s API server က localhost တင်မကဘဲ interfaces အားလုံးမှာ listening လုပ်နေလား စစ်ဆေးပါ
+sudo ss -tlnp | grep 6443
+# tcp LISTEN 0 4096 0.0.0.0:6443 ← ကောင်းပါတယ် (interfaces အားလုံး)
+# tcp LISTEN 0 4096 127.0.0.1:6443 ← မကောင်းပါဘူး (localhost တစ်ခုတည်း)
+
+# localhost တစ်ခုတည်းဆိုရင် /etc/rancher/k3s/config.yaml ထဲကို ဒါ ထည့်ပါ:
+# tls-san: ["YOUR_VPS_IP"]
+# ပြီးရင် restart လုပ်ပါ: sudo systemctl restart k3s
+
+# ဒါ့အပြင် VPS firewall မှာ port 6443 ဖွင့်ထားလား စစ်ဆေးပါ
+```
+
+### "Pods stuck in Pending — no storage available"
+```bash
+# local-path-provisioner run နေလား စစ်ဆေးပါ
+kubectl get pods -n kube-system | grep local-path
+# မ run ဘူးဆိုရင် PVC provisioner ပျက်နေပါပြီ
+
+# PVC ပေါ်က events တွေကို စစ်ဆေးပါ
+kubectl describe pvc YOUR_PVC_NAME
+```
+
+---
+
+## Summary
+
+K3s က `curl` command တစ်ကြောင်းတည်းနဲ့ install လုပ်လို့ရပြီး စက္ကန့် ၆၀ အတွင်းမှာပဲ အပြည့်အဝ အလုပ်လုပ်ပါတယ်။ အဓိက အချက်တွေကတော့:
+
+- installer က binary ကို download လုပ်တယ်၊ systemd service ဖန်တီးတယ်၊ kubeconfig ကို generate လုပ်တယ်၊ ပြီးတော့ cluster ကို အလိုအလျောက် start ပေးပါတယ်
+- `/etc/rancher/k3s/k3s.yaml` ကို သင့် laptop ပေါ်က `~/.kube/k3s-config` ထဲ ကူးပြီး remote `kubectl` access အတွက် server IP ကို update လုပ်ပါ
+- firewall ထဲမှာ ports 22, 6443, 80 နဲ့ 443 တွေကို ဖွင့်ပါ
+- K3s state က `/var/lib/rancher/k3s/` ထဲမှာ ရှိပါတယ် — `server/db/` subdirectory ကို ပုံမှန် backup လုပ်ပါ
+- ရှည်လျားတဲ့ command-line flags တွေအစား persistent configuration အတွက် `/etc/rancher/k3s/config.yaml` ကို သုံးပါ
+- K3s ကို version အသစ်တစ်ခုကို upgrade လုပ်ဖို့ installer script ကို ပြန် run ပါ
+
+နောက် lesson မှာတော့ K3s ရဲ့ built-in Traefik Ingress Controller အကြောင်း လေ့လာရမှာဖြစ်ပြီး external HTTP/HTTPS traffic တွေကို သင့် applications ဆီ ဘယ်လို route ရမလဲဆိုတာ သင်ယူရမှာ ဖြစ်ပါတယ်။

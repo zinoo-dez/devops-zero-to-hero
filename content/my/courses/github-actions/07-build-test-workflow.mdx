@@ -1,0 +1,261 @@
+---
+title: "Building a Real-World Production CI Pipeline"
+---
+
+# Production Continuous Integration (CI) Architecture
+
+Production-grade CI pipeline တစ်ခုဆိုတာ `npm test` ကို ရိုးရိုး run ပေးတဲ့ script သက်သက် မဟုတ်ပါဘူး။ ဒါဟာ engineer တွေကို အမြန်ဆုံး feedback ပြန်ပေးဖို့၊ main branch ဆီကို bug တွေ ပါမသွားအောင် တားဆီးဖို့၊ live database တွေနဲ့ multi-service compatibility ကို စစ်ဆေးဖို့ နဲ့ deterministic ဖြစ်ပြီး cached လုပ်ထားတဲ့ production artifact တွေ build လုပ်ဖို့ ဒီဇိုင်းထုတ်ထားတဲ့ automated quality enforcement system တစ်ခု ဖြစ်ပါတယ်။
+
+```mermaid
+flowchart TD
+    TRIGGER["📦 Trigger: git push / pull_request"] --> CANCEL["⚡ Concurrency: Cancel stale in-progress runs"]
+    
+    subgraph STAGE1["Stage 1: Fast Quality Checks (< 1 min)"]
+        LINT["🔍 ESLint / Prettier"]
+        TYPE["📐 TypeScript Typecheck (tsc --noEmit)"]
+        SECURITY["🛡️ Dependency Audit (npm audit / Snyk)"]
+    end
+
+    subgraph STAGE2["Stage 2: Parallel Test Matrix (1-3 min)"]
+        UNIT["🧪 Unit Tests (Jest / Vitest)"]
+        INT["🔗 Integration Tests (PostgreSQL + Redis Service Containers)"]
+    end
+
+    subgraph STAGE3["Stage 3: Build & Packaging (2-4 min)"]
+        BUNDLE["🏗️ Production Bundle (Next.js / Vite / Go)"]
+        DOCKER["🐳 Docker Build with BuildKit GHA Layer Caching"]
+    end
+
+    subgraph STAGE4["Stage 4: Reporting & Artifacts"]
+        SUMMARY["📊 $GITHUB_STEP_SUMMARY Table"]
+        ARTIFACT["📦 Upload Build Artifacts (actions/upload-artifact@v4)"]
+    end
+
+    CANCEL --> STAGE1
+    STAGE1 --> STAGE2
+    STAGE2 --> STAGE3
+    STAGE3 --> STAGE4
+```
+
+---
+
+## 1. Pipeline Performance Optimization Principles
+
+Workflow code မရေးခင်မှာ enterprise pipeline တွေကို မြန်ဆန်စေပြီး cost သက်သာစေမယ့် architectural rules တွေကို အရင် သတ်မှတ်ကြရအောင် -
+
+1. **Fail-Fast Early Gates**: ကုန်ကျစရိတ် သက်သာပြီး static ဖြစ်တဲ့ စစ်ဆေးမှုတွေ (linting, typechecking) ကို အစဆုံးမှာ တင်ပါ။ semi-colon ကျန်ခဲ့တာပဲဖြစ်ဖြစ်၊ type error ပဲဖြစ်ဖြစ် ရှိနေရင် ဈေးကြီးတဲ့ database container တွေကို မစတင်ခင် ၁၅ စက္ကန့်အတွင်းမှာတင် fail ဖြစ်သွားစေပါ။
+2. **Deterministic Installs (`npm ci`)**: `npm install` ထက်စာရင် `npm ci` ကို အမြဲတမ်းသုံးပါ။ ဒါဟာ `package-lock.json` ကို တိတိကျကျ လိုက်နာပြီး dependency graph တွေကို ပြောင်းလဲပစ်တာမျိုး မလုပ်ပါဘူး။
+3. **Multi-Tier Caching**: Package manager dependencies (`~/.npm`) နဲ့ compilation artifacts (`.next/cache` သို့မဟုတ် Docker BuildKit layer caches) နှစ်ခုစလုံးကို cache လုပ်ပါ။
+4. **Automated Concurrency Cancellation**: Developer တစ်ယောက်က ၂ မိနစ်အတွင်း commit ၃ ခု ပို့လိုက်တဲ့အခါ၊ queue time နဲ့ runner cost တွေကို သက်သာစေဖို့ ပထမ run နှစ်ခုကို ချက်ချင်း cancel လုပ်လိုက်ပါ။
+
+---
+
+## 2. Complete Enterprise CI Workflow: `.github/workflows/ci.yml`
+
+အောက်မှာပြထားတာကတော့ parallel jobs တွေ၊ database service containers တွေ၊ artifact archiving တွေနဲ့ dynamic step summaries တွေပါဝင်အောင် configure လုပ်ထားတဲ့ complete ဖြစ်ပြီး battle-tested ဖြစ်တဲ့ CI workflow ပဲ ဖြစ်ပါတယ် -
+
+```yaml
+name: Production CI Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.vscode/**'
+  pull_request:
+    branches: [ main ]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+
+# 1. CONCURRENCY: Cancel stale runs on the same branch when new commits are pushed
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# 2. LEAST-PRIVILEGE PERMISSIONS
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # JOB 1: Fast Static Quality Checks (Linting, Formatting, Types)
+  # ─────────────────────────────────────────────────────────────────────────────
+  quality-checks:
+    name: 🔍 Static Analysis & Type Checking
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: 📥 Check out repository
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Setup Node.js 20 with npm caching
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: 📦 Install dependencies
+        run: npm ci
+
+      - name: 🧹 Run ESLint & Prettier
+        run: npm run lint
+
+      - name: 📐 Run TypeScript Typecheck
+        run: npx tsc --noEmit
+
+      - name: 🛡️ Audit Dependencies for Known CVEs
+        run: npm audit --audit-level=high
+        continue-on-error: false
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # JOB 2: Unit & Integration Testing (with Live Postgres & Redis)
+  # ─────────────────────────────────────────────────────────────────────────────
+  test-suite:
+    name: 🧪 Automated Test Suite
+    needs: quality-checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    # Ephemeral service containers spun up on runner network
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: test_database
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test_user -d test_database"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: 📥 Check out repository
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Setup Node.js 20 with npm caching
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: 📦 Install dependencies
+        run: npm ci
+
+      - name: 🗄️ Run Database Migrations & Seeds
+        env:
+          DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_database
+        run: npx prisma migrate deploy
+
+      - name: 🧪 Execute Unit & Integration Tests with Coverage
+        env:
+          DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_database
+          REDIS_URL: redis://localhost:6379
+          NODE_ENV: test
+        run: npm test -- --coverage --coverageReporters=text --coverageReporters=json-summary
+
+      - name: 📊 Upload Coverage Report to Step Summary
+        if: always()
+        run: |
+          echo "### 🧪 Test & Coverage Summary" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "| :--- | :--- | :--- |" >> $GITHUB_STEP_SUMMARY
+          echo "| Node.js Version | 20.x | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "| Database | PostgreSQL 16 (Healthy) | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "| In-Memory Cache | Redis 7 (Healthy) | ✅ |" >> $GITHUB_STEP_SUMMARY
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # JOB 3: Production Build & Container Layer Caching
+  # ─────────────────────────────────────────────────────────────────────────────
+  build-and-package:
+    name: 🏗️ Production Build & Container Artifact
+    needs: test-suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 📥 Check out repository
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Setup Node.js 20 with npm caching
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: 📦 Install dependencies
+        run: npm ci
+
+      - name: 🏗️ Compile Web Application Bundle
+        run: npm run build
+
+      - name: 📤 Archive Production Static Assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-app-dist-${{ github.sha }}
+          path: dist/
+          retention-days: 7
+
+      - name: 🐳 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 🐳 Test Docker Build with GHA Layer Caching
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false   # Dry-run build in CI; actual push happens in CD deploy workflow
+          tags: my-org/web-app:ci-test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+```
+
+---
+
+## 3. Deep Dive into Pipeline Steps
+
+### `concurrency` ရဲ့ အခန်းကဏ္ဍ
+```yaml
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+```
+သင် commit `A` ကို push တင်လိုက်တဲ့အခါ CI စတင် အလုပ်လုပ်ပါတယ်။ တကယ်လို့ ၃၀ စက္ကန့်အကြာမှာ commit `B` ကို ထပ် push တင်လိုက်မယ်ဆိုရင်၊ `A` နဲ့ `B` ဟာ concurrency group တူတူပဲဖြစ်တယ်ဆိုတာကို GitHub Actions က အလိုအလျောက် သိရှိသွားပါတယ် (`Production CI Pipeline-refs/heads/feature/login`)။ အဲ့ဒီနောက် run `A` ကို ချက်ချင်း cancel လုပ်ပစ်ပြီး runner resources တွေကို `B` ဆီ ပြောင်းပေးလိုက်ပါတယ်။
+
+### Service Containers vs Mocking
+Jest နဲ့ database calls တွေကို mock လုပ်မယ့်အစား တကယ့် PostgreSQL နဲ့ Redis container တွေကို ဘကြောင့် run ပေးသင့်တာလဲ။
+- **Mocks တွေက လိမ်တတ်တယ်၊ တကယ့် database တွေက မလိမ်ဘူး**: In-memory mocks တွေအနေနဲ့ SQL dialect ကွာခြားချက်တွေ၊ migration syntax bug တွေ၊ constraint violation တွေ (ဥပမာ- `NOT NULL`, foreign key collisions) ဒါမှမဟုတ် Redis connection timeout တွေကို ဖမ်းယူပေးနိုင်စွမ်း မရှိပါဘူး။
+- **Service containers တွေက zero-install ဖြစ်တယ်**: GitHub runner ရဲ့ native Docker engine က official Alpine images တွေကို healthchecks တွေနဲ့အတူ ၅ စက္ကန့်အတွင်းမှာတင် စတင်ပေးနိုင်ပါတယ်။
+
+### Docker Builds အတွက် GitHub Actions Cache (`type=gha`)
+`cache-from: type=gha` နဲ့ `cache-to: type=gha,mode=max` ကို အသုံးပြုခြင်းအားဖြင့် Docker BuildKit ကို intermediate image layers တွေ diretamente GitHub Actions cache storage ထဲမှာ သိမ်းဆည်းထားနိုင်စေပါတယ်။ နောက်ပိုင်း run တွေမှာ `package.json` ကို မပြောင်းလဲဘူးဆိုရင် dependency installation layer တစ်ခုလုံးကို ကျော်သွားမှာဖြစ်လို့ container build လုပ်တဲ့ကြာချိန်ကို ၃ မိနစ်ကနေ **၁၅ စက္ကန့်အောက်** အထိ လျှော့ချပေးနိုင်ပါတယ်။
+
+---
+
+## Summary
+
+- CI pipeline တွေကို သီးခြား stage တွေအနေနဲ့ ခွဲထုတ်ပါ: **Static Quality Checks** → **Tests (with Service Containers)** → **Build & Package**။
+- Runner queue bottlenecks တွေ မဖြစ်အောင် `cancel-in-progress: true` ကိုသုံးပြီး strict branch concurrency ကို တည်ဆောက်ပါ။
+- Local mocks နဲ့ production databases တွေကြား ကွာဟချက်မရှိစေရန် integration test တွေအတွက် တကယ့် ephemeral service containers တွေကို အသုံးပြုပါ။
+- Deployment pipelines သို့မဟုတ် diagnostic auditing တွေမှာ ဆက်လက်အသုံးပြုနိုင်ဖို့ build outputs တွေကို `actions/upload-artifact@v4` ကနေတဆင့် သိမ်းဆည်းပါ။
+- အဖွဲ့သားတွေ အလွယ်တကူ မြင်တွေ့နိုင်ဖို့ human-readable ဖြစ်တဲ့ metrics တွေကို `$GITHUB_STEP_SUMMARY` ဆီ တိုက်ရိုက် publish လုပ်ပါ။
+
+လာမယ့်သင်ခန်းစာမှာတော့ pipeline ရဲ့ နောက်ဆုံးအစိတ်အပိုင်းဖြစ်တဲ့ automated cloud hosting, static CDN targets နဲ့ live production VPS servers တွေဆီကို **Continuous Deployment (CD)** ပြုလုပ်ပုံကို ဆက်လက် လေ့လာရမှာ ဖြစ်ပါတယ်!

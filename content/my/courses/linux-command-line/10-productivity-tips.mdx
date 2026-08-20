@@ -1,0 +1,256 @@
+---
+title: "Productivity, Shell Scripting, Redirection & Tmux"
+---
+
+# Unix Streams, Production Bash & Terminal Multiplexing
+
+**Linux Command Line for DevOps** ရဲ့ capstone lesson မှ ကြိုဆိုပါတယ်! ဒီ comprehensive guide မှာ Unix streaming model (STDIN, STDOUT, STDERR) တွေ၊ input/output redirection တွေ၊ strict safety modes (`set -euo pipefail`) ပါတဲ့ production-grade Bash scripting တွေနဲ့ **`tmux`** သုံးပြီး persistent terminal sessions တွေကို ဘယ်လိုသုံးရမလဲဆိုတာကို ကျွမ်းကျင်အောင် လေ့လာရမှာ ဖြစ်ပါတယ်။
+
+```mermaid
+flowchart LR
+    INPUT["⌨️ STDIN (FD 0)\nKeyboard / Stream Input"] --> PROCESS["⚙️ Linux Process\n(Command / Script)"]
+    
+    PROCESS -->|"Success Stream"| STDOUT["📺 STDOUT (FD 1)\nNormal Terminal Output"]
+    PROCESS -->|"Error Stream"| STDERR["🚨 STDERR (FD 2)\nDiagnostic / Error Output"]
+
+    STDOUT -->|"> file.log"| DISK["📄 Standard Log File"]
+    STDERR -->|"2> error.log"| ERR_DISK["⚠️ Error Log File"]
+    STDOUT & STDERR -->|"&> all.log"| COMBINED["📑 Combined Log Stream"]
+```
+
+---
+
+## 1. Standard Streams & File Descriptors
+
+Linux kernel က စတင်လိုက်တဲ့ process တိုင်းဟာ standard file descriptors (FD) သုံးခုကို အလိုအလျောက် ဖွင့်ပေးပါတယ် -
+
+| Stream Name | File Descriptor | Default Source / Destination | Redirection Symbol |
+| :--- | :---: | :--- | :--- |
+| **Standard Input (`stdin`)** | **`0`** | Keyboard or piped input stream | `<` |
+| **Standard Output (`stdout`)** | **`1`** | Terminal screen display (Standard messages) | `>`, `>>`, `1>` |
+| **Standard Error (`stderr`)** | **`2`** | Terminal screen display (Error/diagnostic messages) | `2>`, `2>>` |
+
+---
+
+## 2. Redirection Mastery: `>`, `>>`, `2>`, `2>&1` & `/dev/null`
+
+```bash
+# 1. Overwrite STDOUT to a file (> operator) — ERASED previous content!
+echo "APP_PORT=8080" > .env
+
+# 2. Append STDOUT to a file (>> operator) — Adds to the bottom without erasing!
+echo "LOG_LEVEL=debug" >> .env
+
+# 3. Redirect STDERR (Errors only) to a separate file (2>)
+./deploy-script.sh 2> errors.log
+
+# 4. Redirect BOTH STDOUT and STDERR to the same log file (Modern syntax: &>)
+npm run build &> build.log
+
+# 5. Legacy equivalent of &> (Redirect FD 2 to wherever FD 1 is pointing)
+./migrate-database.sh > migration.log 2>&1
+
+# 6. Discard unwanted noisy output to /dev/null (The Linux Bit Bucket)
+curl -s https://api.mycompany.com/health > /dev/null 2>&1
+
+# 7. Provide file content as STDIN input (< operator)
+mysql -u root -p database_name < schema.sql
+```
+
+### The `tee` Command: Split Streams (View AND Save)
+
+Deployment လုပ်နေတဲ့အချိန်မှာ terminal ပေါ်မှာ output တွေကို live ကြည့်ချင်သလို disk ပေါ်မှာလည်းတစ်ပြိုင်နက်တည်း log သိမ်းချင်တာမျိုးတွေ ဖြစ်လေ့ရှိပါတယ်။ အဲ့ဒီအခါမှာ သုံးပါတယ် -
+
+```bash
+# Pipes STDOUT to terminal screen AND writes to deploy.log
+./deploy.sh | tee deploy.log
+
+# Append to log file instead of overwriting (-a flag)
+docker compose up -d | tee -a runtime.log
+
+# Write to a root-protected file using sudo and tee
+echo "nameserver 1.1.1.1" | sudo tee /etc/resolv.conf
+```
+
+---
+
+## 3. Command Chaining & Control Flow Operators
+
+```bash
+# 1. && (AND) — Run second command ONLY if the first succeeds (Exit code 0)
+# Standard CI/CD pipeline pattern:
+npm run lint && npm run test && npm run build
+
+# 2. || (OR) — Run second command ONLY if the first FAILS (Non-zero exit code)
+# Great for fallback notifications or emergency alerts:
+ping -c 1 10.0.1.50 || echo "🚨 Server unreachable! Sending alert to PagerDuty..."
+
+# 3. ; (Sequential) — Execute commands in order regardless of pass/fail
+echo "Starting cleanup..." ; rm -rf /tmp/cache ; echo "Done!"
+
+# 4. () (Subshell) — Execute commands inside an isolated subshell environment
+# Temporarily cd into directory without changing parent terminal path:
+(cd /opt/app && git pull && npm run build)
+pwd # Still in your original directory!
+```
+
+---
+
+## 4. Production Bash Scripting: The Unofficial Strict Mode
+
+CI/CD pipelines, Docker entrypoints, ဒါမှမဟုတ် deployment automation တွေအတွက် shell scripts တွေ ရေးတဲ့အခါမှာ script ရဲ့ အစဆုံးမှာ **strict safety flags** တွေကို အမြဲတမ်း ထည့်သွင်းပေးသင့်ပါတယ် -
+
+```bash
+#!/usr/bin/env bash
+
+# ==============================================================================
+# BASH STRICT MODE
+# -e : Exit immediately if any command exits with a non-zero status.
+# -u : Treat unset variables as an error and exit immediately.
+# -o pipefail : If any command in a pipe fails, return that failure code.
+# ==============================================================================
+set -euo pipefail
+
+# Optional debug mode (prints each command before executing it):
+# set -x
+
+# Temporary workspace directory
+TEMP_DIR="/tmp/deploy-$$"
+mkdir -p "$TEMP_DIR"
+
+# Automated Cleanup Hook using trap
+# Ensures temporary files are deleted on normal exit, error, or Ctrl+C!
+cleanup() {
+  echo "🧹 Cleaning up temporary workspace: $TEMP_DIR"
+  rm -rf "$TEMP_DIR"
+}
+trap cleanup EXIT INT TERM
+
+# Script logic starts here
+echo "🚀 Starting automated deployment..."
+ENVIRONMENT="${1:-staging}" # Default to 'staging' if argument $1 is not provided
+
+echo "Deploying to environment: $ENVIRONMENT"
+
+if [[ "$ENVIRONMENT" == "production" ]]; then
+  echo "🔒 Validating production secrets..."
+  [[ -z "${DATABASE_URL:-}" ]] && { echo "❌ ERROR: DATABASE_URL is required!"; exit 1; }
+fi
+
+echo "✅ Deployment completed successfully!"
+```
+
+---
+
+## 5. Terminal Multiplexing with `tmux`
+
+SSH မှတဆင့် အချိန်ကြာမြင့်တဲ့ database migrations, builds, ဒါမှမဟုတ် backups တွေကို run နေတုန်း WiFi  अचानक ဖြတ်တောက်သွားတာပဲဖြစ်ဖြစ်၊ laptop အဖုံးပိတ်သွားတာပဲဖြစ်ဖြစ် ဖြစ်သွားရင် သင့်ရဲ့ shell process ဟာ ချက်ချင်း သေသွားပါလိမ့်မယ်။ 
+
+**`tmux` (Terminal Multiplexer)** ကတော့ server ပေါ်မှာ persistent shell sessions တွေကို background ကနေ run ပေးထားပါတယ်။
+
+```mermaid
+flowchart TD
+    SSH["SSH Client (Laptop)"] --> TMUX["tmux Server Daemon (Running on Cloud VM)"]
+    
+    subgraph SESSION["Active tmux Session ('prod-deploy')"]
+        WINDOW1["Window 1: Web Server Logs (tail -f access.log)"]
+        WINDOW2["Window 2: Database Migration Script (Long running)"]
+        WINDOW3["Window 3: Interactive System Monitor (htop)"]
+    end
+
+    TMUX --> SESSION
+```
+
+### Essential `tmux` Commands
+
+```bash
+# 1. Start a new named session
+tmux new -s deploy-session
+
+# 2. List active running tmux sessions
+tmux ls
+# Output: deploy-session: 2 windows (created Sun Aug 18 10:00:00 2026)
+
+# 3. Reconnect (attach) to an existing session after logging back into server
+tmux attach -t deploy-session
+
+# 4. Kill an obsolete session
+tmux kill-session -t deploy-session
+```
+
+### `tmux` Keyboard Shortcuts (Default Prefix: <kbd>Ctrl + b</kbd>)
+
+<kbd>Ctrl + b</kbd> ကို နှိပ်ပြီး လွှတ်လိုက်ပါ၊ ပြီးရင် အောက်ပါတို့ကို ဆက်နှိပ်ပါ -
+- <kbd>d</kbd> — Session ထဲကနေ **ထွက်ဖို့** (background မှာ အားလုံး ဆက် run နေပါမယ်!)။
+- <kbd>%</kbd> — လက်ရှိ window ကို **ဒေါင်လိုက်** နှစ်ခုခွဲရန်။
+- <kbd>"</kbd> — လက်ရှိ window ကို **အတန်းလိုက်** အထက်အောက် နှစ်ခုခွဲရန်။
+- <kbd>Arrow Keys</kbd> — Panes တွေကြား ပြောင်းရန်။
+- <kbd>c</kbd> — **window အသစ်** (tab) တည်ဆောက်ရန်။
+- <kbd>n</kbd> / <kbd>p</kbd> — နောက် window / ရှေ့ window သို့။
+- <kbd>x</kbd> — လက်ရှိ pane ကို ပိတ်ရန်။
+- <kbd>[</kbd> — scroll/copy mode ထဲဝင်ရန် (logs တွေကို အပေါ်အောက်ကြည့်ဖို့ arrow keys သုံးပါ၊ ထွက်ရန် <kbd>q</kbd> ကို နှိပ်ပါ)။
+
+---
+
+## 6. Top 10 DevOps Emergency Troubleshooting Recipes
+
+```bash
+# 1. Find who is eating all disk space:
+du -ah /var | sort -rh | head -n 10
+
+# 2. Check live disk partition capacity:
+df -hT
+
+# 3. Live check for established external TCP connections:
+ss -t state established
+
+# 4. Kill all frozen Node.js processes immediately:
+pkill -9 -f node
+
+# 5. Extract distinct IP addresses attempting brute-force SSH logins:
+grep "Failed password" /var/log/auth.log | awk '{print $(NF-3)}' | sort | uniq -c | sort -nr
+
+# 6. Test HTTP response code and total latency:
+curl -o /dev/null -s -w "HTTP: %{http_code} | Total: %{time_total}s\n" https://api.mycompany.com/health
+
+# 7. Delete all files older than 30 days in a log directory:
+find /var/log/custom-apps -type f -name "*.log" -mtime +30 -delete
+
+# 8. Check RAM swap usage:
+free -h
+
+# 9. Test remote TCP port without telnet/nc:
+timeout 3 bash -c "</dev/tcp/10.0.1.50/5432" && echo "Port is OPEN" || echo "Port is CLOSED"
+
+# 10. Check recent system reboot and login history:
+last -n 10
+```
+
+---
+
+## Course 0 Complete! 🎉
+
+ဂုဏ်ယူပါတယ်! သင်ဟာ **Linux Command Line for DevOps** ရဲ့ အခြေခံ curriculum အားလုံးကို အောင်မြင်စွာ ပြီးမြောက်သွားပါပြီ -
+- **Lesson 1:** Linux kernel architecture, FHS, and cloud/container primitives.
+- **Lesson 2:** Terminal navigation, prompt anatomy, and Readline shortcuts.
+- **Lesson 3:** Filesystem operations, absolute vs relative paths, and live log streaming (`tail -F`).
+- **Lesson 4:** Text editing (`vim`, `nano`), pattern matching (`grep`), indexing (`find`), and stream transformation (`sed`, `awk`).
+- **Lesson 5:** Linux security model, octal permissions (`chmod 755/600`), ownership (`chown`), and `visudo`.
+- **Lesson 6:** Process lifecycles, resource auditing (`htop`), Linux signals (`SIGTERM`/`SIGKILL`), and `systemd` services.
+- **Lesson 7:** Package management across distros (`apt`, `dnf`, `apk`) and secure GPG keyrings.
+- **Lesson 8:** Network interface inspection (`ip a`), DNS querying (`dig`), sockets (`ss -tulnp`), and HTTP diagnostics (`curl`).
+- **Lesson 9:** Asymmetric SSH cryptography (Ed25519), bastion host jumping (`~/.ssh/config`), and daemon hardening.
+- **Lesson 10:** Unix I/O streams, strict Bash scripting (`set -euo pipefail`), and `tmux` session multiplexing.
+
+---
+
+## What's Next in Your Zero-to-Hero Roadmap?
+
+Linux အခြေခံတွေ ခိုင်မာသွားပြီဆိုတော့ ကျန်ရှိနေတဲ့ DevOps curriculum တွေကို ဆက်လက်လေ့လာဖို့ အဆင်သင့်ဖြစ်ပါပြီ -
+1. **Course 1: Git & GitHub Fundamentals** — Branching strategies, atomic commits, PR code reviews, and Git Flow.
+2. **Course 2: GitHub Actions Automation** — CI/CD pipelines, service containers, and automated deployments.
+3. **Course 3: CI/CD Pipeline Architecture** — Deployment strategies (Blue-Green, Canary), DORA metrics, and automated rollbacks.
+4. **Course 4: Docker Fundamentals** — Minimal multi-stage builds, layer caching, and rootless containerization.
+5. **Course 5: Docker Compose** — Multi-service microservice orchestration, volumes, and networking.
+6. **Course 6 & 7: Kubernetes & K3s** — Cluster administration, Pods, Deployments, Ingresses, and StatefulSets.
+7. **Course 8: Capstone Project** — Full-stack GitOps CI/CD to live Kubernetes!

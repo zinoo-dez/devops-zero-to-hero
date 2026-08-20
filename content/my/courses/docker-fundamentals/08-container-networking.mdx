@@ -1,0 +1,293 @@
+---
+title: "Container Networking & Port Forwarding"
+---
+
+# How Containers Communicate
+
+Default အနေ-အားဖြင့် container တစ်ခုဟာ network နဲ့ လုံးဝ isolation ဖြစ်နေပါတယ် — တခြား container တွေကိုလည်း မလှမ်းနိုင်သလို၊ ဘယ်သူကမှလည်း သူ့ဆီကို လာလို့မရပါဘူး။ Docker ရဲ့ networking subsystem က virtual networks တွေနဲ့ port publishing တွေသုံးပြီး connectivity ကို သေချာ ထိန်းချုပ်ပေးပါတယ်။
+
+```mermaid
+flowchart TD
+    subgraph HOST["Host Machine (192.168.1.10)"]
+        subgraph BRIDGE["docker0 bridge network (172.17.0.0/16)"]
+            C1["Container A\n172.17.0.2:3000\n(API)"]
+            C2["Container B\n172.17.0.3:5432\n(PostgreSQL)"]
+        end
+        
+        PORT_FWD["iptables NAT rule\nhost:8080 → 172.17.0.2:3000"]
+    end
+
+    INTERNET["🌐 Internet / Laptop browser"]
+    INTERNET -->|":8080"| PORT_FWD --> C1
+    C1 -->|"172.17.0.3:5432 (direct)"| C2
+    INTERNET -. "❌ Cannot reach\nDB directly" .-> C2
+```
+
+---
+
+## Docker Network Drivers
+
+Docker မှာ network drivers အမျိုးမျိုးကို support ပေးထားပြီး တစ်ခုချင်းစီက use case မတူကြပါဘူး-
+
+| Driver | Description | Use Case |
+|--------|------------|---------|
+| **bridge** | Host ပေါ်က Virtual switch | Single-host containers တွေအတွက် Default |
+| **host** | Host ရဲ့ network stack ကို မျှသုံးတာ (isolation မရှိပါ) | Performance ကောင်းဖို့လိုတာနဲ့ port mapping မလိုတဲ့အခါ |
+| **none** | Network connection လုံးဝမရှိတာ | လုံခြုံရေးအတွက် isolate လုပ်ထားတဲ့ containers တွေ |
+| **overlay** | Docker hosts များစွာကို ဖြန့်ကျက်ချိတ်ဆက်ပေးတာ | Docker Swarm / multi-host setups တွေအတွက် |
+| **macvlan** | Physical network ပေါ်မှာ Container ကို ကိုယ်ပိုင် MAC/IP ပေးတာ | Physical network ရှိမှ အလုပ်လုပ်တဲ့ Legacy systems တွေအတွက် |
+
+---
+
+## The Default Bridge Network (`docker0`)
+
+Docker ကို install လိုက်တာနဲ့ `docker0` လို့ခေါ်တဲ့ virtual bridge interface တစ်ခုကို အလိုအလျောက် ဖန်တီးပေးပါတယ်။ Default အနေနဲ့ container တိုင်းဟာ ဒီ bridge ကို ချိတ်ဆက်ကြပြီး `172.17.0.0/16` subnet ထဲက IP တစ်ခုစီကို ရကြပါတယ်။
+
+```bash
+# See the default network
+docker network ls
+# NETWORK ID     NAME      DRIVER    SCOPE
+# abc123         bridge    bridge    local   ← this is docker0
+# def456         host      host      local
+# ghi789         none      null      local
+
+# Inspect the default bridge
+docker network inspect bridge | python3 -m json.tool
+# Shows subnet, gateway, and all connected containers
+
+# Start a container (attaches to bridge by default)
+docker run -d --name api nginx:alpine
+
+# Check its IP
+docker inspect --format '{{.NetworkSettings.IPAddress}}' api
+# 172.17.0.2
+
+# But the default bridge has a MAJOR limitation:
+# Container names are NOT resolvable as DNS hostnames
+docker run --rm alpine ping api  # ← This FAILS on the default bridge!
+```
+
+**Default bridge ရဲ့ အဓိက အားနည်းချက်**: container တွေဟာ တစ်ခုနဲ့တစ်ခု **name** နဲ့ လှမ်းခေါ်လို့ မရပါဘူး။ Docker ရဲ့ embedded DNS က **custom user-defined networks** တွေမှာသာ အလုပ်လုပ်ပါတယ်။
+
+---
+
+## Custom Bridge Networks (The Right Way)
+
+```bash
+# Create a custom network
+docker network create myapp-network
+
+# Start services on the same network
+docker run -d \
+  --name postgres \
+  --network myapp-network \
+  -e POSTGRES_USER=appuser \
+  -e POSTGRES_PASSWORD=secret \
+  -e POSTGRES_DB=myapp \
+  postgres:16-alpine
+
+docker run -d \
+  --name api \
+  --network myapp-network \
+  -p 8080:3000 \
+  -e DATABASE_URL=postgres://appuser:secret@postgres:5432/myapp \
+  my-api:latest
+
+# The API container can reach Postgres using its container NAME as the hostname:
+# postgres://appuser:secret@postgres:5432/myapp
+#                           ^^^^^^^^
+#                           Container name = DNS hostname
+#                           Docker resolves this to 172.17.0.3 automatically!
+
+# Verify DNS resolution from inside a container
+docker exec api nslookup postgres
+# Server:    127.0.0.11   ← Docker's embedded DNS server
+# Address:   172.17.0.3   ← postgres container's IP
+```
+
+### Custom Networks တွေက Default Bridge ထက် ဘာကြောင့် ပိုကောင်းတာလဲ?
+
+| | Default Bridge | Custom Bridge |
+|--|---------------|--------------|
+| **Container name DNS** | ❌ သုံးလို့မရပါ | ✅ အလိုအလျောက်ရပါတယ် |
+| **Isolation** | Container အားလုံးက network တစ်ခုတည်းကို မျှသုံးကြတာ | ကိုယ်ချိတ်ထားတဲ့ containers တွေချင်းပဲ မြင်ရတာ |
+| **`--link` လိုပါသလား?** | လိုပါတယ် (Legacy, deprecated ဖြစ်သွားပါပြီ) | မလိုပါဘူး |
+| **လုံခြုံရေး** | နည်းပါတယ် (container အားလုံး တစ်ခုနဲ့တစ်ခု မြင်ရလို့) | ပိုကောင်းပါတယ် |
+
+---
+
+## Port Publishing: Exposing Containers to the Host
+
+Containers တွေက isolated ဖြစ်နေပါတယ်။ Host (သို့) internet ကနေ container ဆီ traffic ဝင်လာနိုင်ဖို့ဆိုရင် port ကို explicit လုပ်ပြီး publish ပေးရပါမယ်။
+
+```bash
+# Syntax: -p HOST_PORT:CONTAINER_PORT
+docker run -p 8080:3000 my-api     # Host 8080 → Container 3000
+docker run -p 80:80 nginx           # Standard HTTP
+docker run -p 443:443 nginx         # Standard HTTPS
+
+# Bind to a specific host interface (security!)
+docker run -p 127.0.0.1:5432:5432 postgres  # Only accessible from localhost
+docker run -p 0.0.0.0:8080:3000 my-api      # Accessible from any interface (default)
+
+# Random host port (Docker picks an available port)
+docker run -p 3000 my-api
+docker port my-api 3000   # Find out which host port was assigned
+# 0.0.0.0:32768
+
+# UDP port mapping
+docker run -p 53:53/udp my-dns-server
+
+# Multiple ports
+docker run \
+  -p 80:80 \
+  -p 443:443 \
+  -p 8080:8080 \
+  my-server
+```
+
+**Security rule**: Public server တစ်ခုပေါ်မှာ database ports တွေ (`5432`, `3306`, `6379`) ကို `0.0.0.0` ပေါ် ဘယ်တော့မှ publish မလုပ်ပါနဲ့။ Local ကနေပဲ သုံးမယ်ဆိုရင် `127.0.0.1` ကိုသုံးပါ (သို့) port လုံးဝ publish မလုပ်ဘဲ internal Docker network ကနေပဲ application က DB ကို ချိတ်ဆက်ခိုင်းပါ။
+
+---
+
+## Connecting Containers: Full Network Isolation Example
+
+```bash
+# === Production-like network setup with isolation ===
+
+# Create two isolated networks
+docker network create frontend-net   # Public-facing
+docker network create backend-net    # Internal only
+
+# Start PostgreSQL on backend only (no exposure to public network)
+docker run -d \
+  --name postgres \
+  --network backend-net \
+  -e POSTGRES_PASSWORD=secret \
+  -v postgres-data:/var/lib/postgresql/data \
+  postgres:16-alpine
+
+# Start Redis on backend only
+docker run -d \
+  --name redis \
+  --network backend-net \
+  redis:7-alpine
+
+# Start API on backend (can reach db and redis)
+# Also connect to frontend (will be reachable from nginx)
+docker run -d \
+  --name api \
+  --network backend-net \
+  -e DATABASE_URL=postgres://postgres:secret@postgres:5432/postgres \
+  -e REDIS_URL=redis://redis:6379 \
+  my-api:latest
+
+docker network connect frontend-net api  # Add api to frontend-net too
+
+# Start Nginx on frontend-net (reaches API, but NOT db/redis directly)
+docker run -d \
+  --name nginx \
+  --network frontend-net \
+  -p 80:80 \
+  -p 443:443 \
+  nginx:alpine
+
+# Security check:
+# ✅ nginx → api (both on frontend-net)
+# ✅ api → postgres (both on backend-net)
+# ✅ api → redis (both on backend-net)
+# ❌ nginx → postgres (different networks — nginx only on frontend-net)
+# ❌ internet → postgres (not published on any host port)
+```
+
+---
+
+## DNS and Service Discovery
+
+```bash
+# Docker's embedded DNS server (127.0.0.11)
+# resolves container names within the same custom network
+
+# Test DNS from inside a container
+docker exec api cat /etc/resolv.conf
+# nameserver 127.0.0.11   ← Docker DNS
+# options ndots:0
+
+# Resolve a service name
+docker exec api nslookup postgres
+# Server:    127.0.0.11
+# Name:      postgres
+# Address:   172.18.0.3
+
+# Docker also creates DNS aliases for network-specific names
+# Full DNS: container-name.network-name
+docker exec api nslookup postgres.backend-net
+
+# Check what aliases a container has on a network
+docker inspect postgres \
+  --format '{{json .NetworkSettings.Networks}}' | python3 -m json.tool
+```
+
+---
+
+## Network Management Commands
+
+```bash
+# Create networks
+docker network create myapp-net
+docker network create --driver bridge --subnet 10.10.0.0/24 custom-subnet-net
+
+# List networks
+docker network ls
+docker network ls --filter driver=bridge
+
+# Inspect a network (shows all connected containers + their IPs)
+docker network inspect myapp-net
+
+# Connect a running container to a network
+docker network connect myapp-net my-container
+
+# Disconnect a container from a network
+docker network disconnect myapp-net my-container
+
+# Remove a network (fails if containers are still connected)
+docker network rm myapp-net
+
+# Remove unused networks
+docker network prune
+```
+
+---
+
+## The `host` Network Driver
+
+`host` driver က network isolation ကို လုံးဝ ဖယ်ရှားပစ်ပါတယ် — container က host ရဲ့ network stack ကို တိုက်ရိုက်သုံးပါတယ်။ Port mapping လုပ်စရာမလိုတော့ပါဘူး၊ container ရဲ့ port တွေဟာ host ရဲ့ port တွေပါပဲ။
+
+```bash
+# Container binds directly to host port 8080 (no mapping needed)
+docker run -d --network host my-api
+# Equivalent to running the process natively on the host
+
+# Use cases:
+# - Maximum network performance (no NAT overhead)
+# - When container needs to enumerate host interfaces
+# - Legacy applications that discover services via broadcast
+```
+
+<Callout type="warning" title="host Network Reduces Isolation">
+`--network host` ကိုသုံးလိုက်ရင် container ရဲ့ process က host ရဲ့ network namespace ထဲမှာ Run ပါတယ်။ Host port အားလုံးကို container ထဲကနေရော၊ container ဆီကပါ မြင်ရပါမယ်။ Performance အရမ်းအရေးကြီးပြီး ယုံကြည်ရတဲ့ workload တွေအတွက်ပဲ သုံးသင့်ပါတယ်။
+</Callout>
+
+---
+
+## Summary
+
+Docker networking ကို network namespaces နဲ့ virtual bridges တွေနဲ့ တည်ဆောက်ထားပါတယ်-
+- Default အနေနဲ့ containers တွေက isolated ဖြစ်ပါတယ် — explicit လုပ်ပြီး မချိတ်ထားရင် inbound traffic လည်း မလာသလို container အချင်းချင်းလည်း ချိတ်လို့မရပါဘူး။
+- **Default bridge** (`docker0`): container တွေအားလုံး မျှသုံးကြပေမဲ့ container name နဲ့ DNS ခေါ်လို့ မရပါဘူး။
+- **Custom bridge networks**: container name နဲ့ DNS ခေါ်တာ အလိုအလျောက် အလုပ်လုပ်ပါတယ် — multi-container apps တွေအတွက် ဒါကိုပဲ အမြဲသုံးသင့်ပါတယ်။
+- `-p HOST:CONTAINER` က port ကို publish လုပ်ပေးပါတယ်။ Local ကနေပဲ သုံးဖို့ဆိုရင် `127.0.0.1` နဲ့ bind လုပ်ပါ၊ DB ports တွေကို `0.0.0.0` ပေါ် ဘယ်တော့မှ ပွင့်မထားပါနဲ့။
+- Public-facing services (nginx) နဲ့ backend services (postgres, redis) တွေကို isolate လုပ်ဖို့ **multiple custom networks** ကို သုံးပါ။
+- Docker ရဲ့ embedded DNS (`127.0.0.11`) က custom network တစ်ခုတည်းမှာရှိတဲ့ container names တွေကို ဖြေရှင်းပေးပါတယ်။
+
+နောက် သင်ခန်းစာမှာတော့ images တွေကို deployment လုပ်လို့ရအောင် Docker Hub နဲ့ GitHub Container Registry တွေဆီ ဘယ်လို push ရမလဲဆိုတာကို ဆက်လက် သင်ယူသွားမှာ ဖြစ်ပါတယ်။

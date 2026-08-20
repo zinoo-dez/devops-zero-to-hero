@@ -1,0 +1,111 @@
+---
+title: "Alertmanager: Alert Rules, Deduplication & Slack Routing"
+duration: "35 min"
+order: 7
+---
+
+# Alertmanager: Alert Rules & Notification Routing
+
+Alert တွေက **human intervention (လူကိုယ်တိုင် ဝင်ရောက်ဖြေရှင်းပေးဖို့) အမှန်တကယ် လိုအပ်မှသာ** ထွက်လာသင့်ပါတယ်။ Alert တစ်ခု တက်လာပေမဲ့ ဘာလုပ်ရမှန်းမသိဘူး ဒါမှမဟုတ် ဘာမှ ဝင်လုပ်စရာမလိုဘူးဆိုရင် အဲဒီ Alert ဟာ noise (အလကားဆူညံနေတဲ့ အချက်ပြမှု) သက်သက်သာ ဖြစ်ပါတယ်။
+
+```mermaid
+flowchart LR
+    Prom["Prometheus
+(Evaluates alert_rules.yml)"] -->|Firing Alert payload| AM["Alertmanager Engine"]
+
+    subgraph AM_Features["Alertmanager Intelligence"]
+        Dedup["1. Deduplication"]
+        Group["2. Grouping (Batch 50 alerts into 1 message)"]
+        Inhibit["3. Inhibition (Silence warning if critical is active)"]
+        Silence["4. Silences (Mute during maintenance)"]
+    end
+
+    AM --> AM_Features
+    AM_Features --> Slack["Slack #devops-alerts"]
+    AM_Features --> Pager["PagerDuty (Critical Only)"]
+```
+
+---
+
+## 1. Writing Actionable Alert Rules in Prometheus
+
+`/etc/prometheus/alert_rules.yml` ကို ဖန်တီးပါ:
+
+```yaml
+groups:
+  - name: infrastructure_alerts
+    rules:
+      # 1. Instance Down Alert
+      - alert: HostInstanceDown
+        expr: up == 0
+        for: 2m # Alert မတက်လာခင် ၂ မိနစ်ဆက်တိုက် Error ဆက်တိုက်ဖြစ်နေဖို့ လိုပါတယ်
+        labels:
+          severity: critical
+          tier: infrastructure
+        annotations:
+          summary: "Host {{ $labels.instance }} is unreachable!"
+          description: "Instance {{ $labels.instance }} of job {{ $labels.job }} has been down for more than 2 minutes."
+          runbook_url: "https://wiki.mycompany.com/runbooks/host-down"
+
+      # 2. High Memory Saturation Alert
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Host {{ $labels.instance }} memory usage > 90%"
+          description: "Memory usage is currently {{ $value | printf '%.2f' }}%."
+
+      # 3. High HTTP Error Rate Alert
+      - alert: HighHttpErrorRate
+        expr: sum(rate(http_requests_total{status=~"5.."}[5m])) / sum(rate(http_requests_total[5m])) * 100 > 5
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High 5xx error rate on {{ $labels.service }}"
+          description: "5xx error rate is currently at {{ $value | printf '%.2f' }}% for service {{ $labels.service }}."
+```
+
+---
+
+## 2. Configuring Alertmanager Routing & Slack Webhooks
+
+`alertmanager.yml` ကို ဖန်တီးပါ:
+
+```yaml
+global:
+  resolve_timeout: 5m
+  slack_api_url: "https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX"
+
+route:
+  group_by: ["alertname", "cluster", "service"]
+  group_wait: 30s       # ပထမဆုံး Notification မပို့ခင် ဝင်လာတဲ့ Alert များကို ၃၀ စက္ကန့် စောင့်ုစုစည်းပါမယ်
+  group_interval: 5m    # Alert အသစ်တွေကို ၅ မိနစ်တစ်ကြိမ် Batch လိုက် ပို့ပေးပါမယ်
+  repeat_interval: 4h   # Alert က ဆက်တိုက်တက်နေတုန်းဆိုရင် ၄ နာရီတစ်ကြိမ် ထပ်ပို့ပေးပါမယ်
+  receiver: "slack_notifications"
+
+  # Route critical alerts to on-call PagerDuty
+  routes:
+    - match:
+        severity: critical
+      receiver: "pagerduty_and_slack"
+
+receivers:
+  - name: "slack_notifications"
+    slack_configs:
+      - channel: "#devops-alerts"
+        send_resolved: true # Incident ပြီးဆုံးသွားတဲ့အခါ အစိမ်းရောင် Recovery မက်ဆေ့ချ် ပို့ပေးပါမယ်!
+        title: "[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}"
+        text: >-
+          *Summary:* {{ .CommonAnnotations.summary }}
+          *Description:* {{ .CommonAnnotations.description }}
+          *Severity:* `{{ .CommonLabels.severity }}`
+          *Runbook:* {{ .CommonAnnotations.runbook_url }}
+
+  - name: "pagerduty_and_slack"
+    slack_configs:
+      - channel: "#devops-critical-incidents"
+        send_resolved: true
+```

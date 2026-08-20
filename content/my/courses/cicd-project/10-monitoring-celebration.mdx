@@ -1,0 +1,656 @@
+---
+title: "Monitoring, Health Alerts & Project Wrap-Up"
+---
+
+# Production Observability: You Can't Fix What You Can't See
+
+Deploying က အလုပ်ရဲ့ တစ်ဝက်ပဲ ရှိပါသေးတယ်။ Production systems တွေမှာ မထင်မှတ်ထားတဲ့ ပြဿနာတွေ ဖြစ်တတ်ပါတယ် — slow database query တစ်ခု၊ memory leak တစ်ခု၊ ဒါမှမဟုတ် မနက် ၃ နာရီမှာ pod OOMKilled ဖြစ်သွားတာမျိုးပေါ့။ Observability မရှိရင်တော့ ခင်ဗျား မျက်စိစုံမှိတ် ပျံသန်းနေရသလို ဖြစ်နေပါလိမ့်မယ်။
+
+ဒီ lesson မှာတော့ industry-standard ဖြစ်တဲ့ observability stack ကို စနစ်တကျ setup လုပ်သွားပါမယ်။
+- **Prometheus** — application နဲ့ cluster ကနေ time-series metrics တွေကို collect လုပ်ပြီး store လုပ်ပါတယ်
+- **Grafana** — Prometheus metrics တွေကို interactive dashboards တွေနဲ့ visualize လုပ်ပြပေးပါတယ်
+- **Alertmanager** — metrics တွေ threshold ကျော်သွားတဲ့အခါ Slack/email ကို notifications ပို့ပေးပါတယ်
+
+ပြီးသွားတဲ့အခါမှာ ခင်ဗျားမှာ အောက်ပါတို့ ရှိလာပါမယ် -
+- Real-time CPU, memory, နဲ့ request rate dashboards တွေ
+- Health endpoint က ၂ မိနစ်ကျော် Fail ဖြစ်နေရင် auto alert ပို့ပေးမယ့်စနစ်
+- Certificate မကုန်ဆုံးခင် ၁၄ ရက်အလိုမှာ ကြိုတင်ပေးမယ့် Expiry warnings တွေ
+- Pod crash တွေကို detect လုပ်ပြီး notification ပို့ပေးမယ့်စနစ်
+
+---
+
+## The Observability Stack Architecture
+
+```mermaid
+flowchart TD
+    subgraph cluster["K3s Cluster"]
+        subgraph app["Namespace: production"]
+            APP[capstone-app pods\n/metrics endpoint]
+            HEALTH[/api/health]
+        end
+
+        subgraph monitoring["Namespace: monitoring"]
+            PROM[Prometheus\nScrapes metrics every 15s]
+            AM[Alertmanager\nRoutes alerts to Slack]
+            GRAFANA[Grafana\nDashboards & panels]
+            BM[Blackbox Exporter\nProbes /api/health HTTP endpoint]
+            CM_EX[cert-manager Exporter\nTLS cert expiry metrics]
+        end
+    end
+
+    APP -->|/metrics| PROM
+    BM -->|HTTP probe| HEALTH
+    CM_EX -->|cert expiry| PROM
+    PROM -->|scrapes| BM
+    PROM -->|scrapes| CM_EX
+    PROM -->|alert rules| AM
+    AM -->|webhook| SLACK[Slack Channel\n#alerts]
+    GRAFANA -->|PromQL queries| PROM
+
+    USER[Team Member] -->|Grafana dashboard| GRAFANA
+    USER -->|Slack| SLACK
+```
+
+---
+
+## Step 1: Install kube-prometheus-stack via Helm
+
+`kube-prometheus-stack` chart က Prometheus၊ Alertmanager၊ Grafana နဲ့ Kubernetes-specific recording rules တွေနဲ့ dashboards တွေကို တစ်ခါတည်း ပေါင်းစပ်ထည့်သွင်းပေးထားပြီး အတူတကွ အလုပ်လုပ်ဖို့ အသင့် configuration လုပ်ပြီးသား ဖြစ်ပါတယ်။
+
+```bash
+# Add the Helm repo
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+
+# Create the monitoring namespace
+kubectl create namespace monitoring
+
+# Install the stack (this takes 3-5 minutes)
+helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+  -n monitoring \
+  --set grafana.adminPassword="changeme-in-production" \
+  --set prometheus.prometheusSpec.retention="30d" \
+  --set prometheus.prometheusSpec.retentionSize="10GB" \
+  --set alertmanager.enabled=true \
+  --version 56.21.4  # Pin version for reproducibility
+
+# Watch the pods come up (Grafana, Prometheus, Alertmanager)
+kubectl -n monitoring get pods -w
+```
+
+အသင့်ဖြစ်သွားတဲ့အခါ မျှော်လင့်ထားရမယ့် pods တွေကတော့ -
+```
+NAME                                                   READY   STATUS
+alertmanager-kube-prometheus-stack-alertmanager-0      2/2     Running
+kube-prometheus-stack-grafana-xxx                      3/3     Running
+kube-prometheus-stack-kube-state-metrics-xxx           1/1     Running
+kube-prometheus-stack-operator-xxx                     1/1     Running
+kube-prometheus-stack-prometheus-node-exporter-xxx     1/1     Running
+prometheus-kube-prometheus-stack-prometheus-0          2/2     Running
+```
+
+---
+
+## Step 2: Add a `/metrics` Endpoint to Your Application
+
+Prometheus က pull model ကို သုံးပါတယ် — သူက `/metrics` HTTP endpoint ကနေ metrics တွေကို အချိန်ကိုက် တောင်းယူ (fetch) ပါတယ်။ Next.js app ထဲကို `prom-client` library ကို ထည့်ပါ:
+
+```bash
+npm install prom-client
+```
+
+```typescript
+// app/api/metrics/route.ts
+import { NextResponse } from "next/server";
+import { collectDefaultMetrics, Registry, Counter, Histogram, Gauge } from "prom-client";
+
+// Create a custom registry (separate from the global one for isolation)
+const register = new Registry();
+
+// Collect default Node.js metrics (event loop lag, GC stats, memory usage)
+collectDefaultMetrics({ register, prefix: "capstone_" });
+
+// Custom application metrics
+export const httpRequestsTotal = new Counter({
+  name: "capstone_http_requests_total",
+  help: "Total number of HTTP requests",
+  labelNames: ["method", "route", "status_code"],
+  registers: [register],
+});
+
+export const httpRequestDuration = new Histogram({
+  name: "capstone_http_request_duration_seconds",
+  help: "HTTP request duration in seconds",
+  labelNames: ["method", "route"],
+  buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5],
+  registers: [register],
+});
+
+export const dbConnectionsActive = new Gauge({
+  name: "capstone_db_connections_active",
+  help: "Number of active database connections",
+  registers: [register],
+});
+
+export const dbQueryDuration = new Histogram({
+  name: "capstone_db_query_duration_seconds",
+  help: "Database query duration in seconds",
+  labelNames: ["operation"],
+  buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.5, 1],
+  registers: [register],
+});
+
+// GET /api/metrics — Prometheus scrape endpoint
+export async function GET() {
+  try {
+    const metrics = await register.metrics();
+    return new Response(metrics, {
+      status: 200,
+      headers: {
+        "Content-Type": register.contentType,
+        // Don't cache metrics
+        "Cache-Control": "no-store",
+      },
+    });
+  } catch (error) {
+    console.error("[metrics] Failed to collect metrics:", error);
+    return NextResponse.json({ error: "metrics collection failed" }, { status: 500 });
+  }
+}
+```
+
+<Callout type="warning" title="Secure the /api/metrics Endpoint">
+`/api/metrics` endpoint က internal system information တွေကို ပုံဖော်ပြသပါတယ်။ Production မှာဆိုရင် Prometheus တစ်ခုတည်းကသာ scrape လုပ်လို့ရအောင် access ကို ကန့်သတ်ထားပါ။ NetworkPolicy ကိုသုံးပြီးဖြစ်စေ၊ ဒါမှမဟုတ် shared secret header တစ်ခုကို check လုပ်တာမျိုးနဲ့ဖြစ်စေ လုပ်ဆောင်နိုင်ပါတယ်:
+
+```typescript
+// Check for a scrape token header
+const token = req.headers.get("x-prometheus-token");
+if (token !== process.env.METRICS_TOKEN) {
+  return new Response("Unauthorized", { status: 401 });
+}
+```
+</Callout>
+
+---
+
+## Step 3: Create a ServiceMonitor
+
+`ServiceMonitor` က Prometheus ကို ဘယ် services တွေဆီကနေ ဘယ်လို scrape လုပ်ရမယ်ဆိုတာကို ညွှန်ပြပေးပါတယ်:
+
+```yaml
+# k8s/servicemonitor.yaml
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: capstone-app-monitor
+  namespace: production
+  labels:
+    # This label is required by the kube-prometheus-stack Prometheus instance
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app: capstone-app   # Match the Service with this label
+  endpoints:
+    - port: http           # The port name in the Service (must match)
+      path: /api/metrics   # The metrics endpoint path
+      interval: 15s        # Scrape every 15 seconds
+      scrapeTimeout: 10s
+      scheme: http
+```
+
+```bash
+kubectl apply -f k8s/servicemonitor.yaml
+
+# Verify Prometheus picked it up (takes 30-60 seconds)
+# Access the Prometheus UI via port-forward:
+kubectl -n monitoring port-forward svc/kube-prometheus-stack-prometheus 9090:9090
+
+# In browser: http://localhost:9090/targets
+# Look for: production/capstone-app-monitor (State: UP)
+```
+
+---
+
+## Step 4: Install and Configure Blackbox Exporter
+
+Blackbox Exporter က HTTP/HTTPS endpoints တွေကို probe လုပ်ပြီးရလာတဲ့ ရလဒ်တွေကို Prometheus metrics တွေအဖြစ် ထုတ်ပေးပါတယ်။ ဒါက internal metrics တွေတင်မကဘဲ external availability တွေကိုပါ monitor လုပ်နိုင်စေပါတယ်။
+
+```bash
+# Install Blackbox Exporter
+helm install blackbox-exporter prometheus-community/prometheus-blackbox-exporter \
+  -n monitoring \
+  --set config.modules.http_2xx.prober=http \
+  --set config.modules.http_2xx.http.valid_http_versions='["HTTP/1.1", "HTTP/2.0"]' \
+  --set config.modules.http_2xx.http.valid_status_codes='[]'
+```
+
+```yaml
+# k8s/blackbox-probe.yaml — Probe the health endpoint from outside the cluster
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: capstone-app-health-probe
+  namespace: production
+  labels:
+    release: kube-prometheus-stack
+spec:
+  jobName: "capstone-app-health"
+  prober:
+    url: blackbox-exporter-prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+  module: http_2xx
+  targets:
+    staticConfig:
+      static:
+        - https://app.yourdomain.com/api/health
+      labels:
+        app: capstone-app
+        environment: production
+```
+
+```bash
+kubectl apply -f k8s/blackbox-probe.yaml
+```
+
+---
+
+## Step 5: Create Prometheus Alert Rules
+
+```yaml
+# k8s/alertrules.yaml
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: capstone-app-alerts
+  namespace: production
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: capstone-app.rules
+      rules:
+
+        # Alert if the /api/health probe fails for more than 2 minutes
+        - alert: CapstoneAppDown
+          expr: |
+            probe_success{job="capstone-app-health"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            team: backend
+          annotations:
+            summary: "Capstone App is down"
+            description: |
+              The health check at https://app.yourdomain.com/api/health
+              has been failing for more than 2 minutes.
+              Pod status: {{ $labels.pod }}
+
+        # Alert if HTTP request error rate exceeds 5% over 5 minutes
+        - alert: HighErrorRate
+          expr: |
+            (
+              rate(capstone_http_requests_total{status_code=~"5.."}[5m])
+              /
+              rate(capstone_http_requests_total[5m])
+            ) > 0.05
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High HTTP error rate"
+            description: "More than 5% of requests are returning 5xx errors."
+
+        # Alert if p99 request latency exceeds 2 seconds
+        - alert: HighLatency
+          expr: |
+            histogram_quantile(0.99,
+              rate(capstone_http_request_duration_seconds_bucket[5m])
+            ) > 2
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High request latency"
+            description: "99th percentile latency is above 2 seconds."
+
+        # Alert if any pod is crash-looping
+        - alert: PodCrashLooping
+          expr: |
+            rate(kube_pod_container_status_restarts_total{
+              namespace="production",
+              container="app"
+            }[5m]) * 60 > 1
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Pod is crash-looping"
+            description: "Pod {{ $labels.pod }} is restarting more than 1 time per minute."
+
+        # Alert if memory usage exceeds 80% of the limit
+        - alert: HighMemoryUsage
+          expr: |
+            (
+              container_memory_working_set_bytes{
+                namespace="production",
+                container="app"
+              }
+              /
+              kube_pod_container_resource_limits{
+                namespace="production",
+                container="app",
+                resource="memory"
+              }
+            ) > 0.80
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High memory usage"
+            description: "Memory usage is above 80% of the limit. Risk of OOMKill."
+
+        # Alert if TLS certificate expires in less than 14 days
+        - alert: CertificateExpiringSoon
+          expr: |
+            certmanager_certificate_expiration_timestamp_seconds{
+              namespace="production",
+              name="capstone-app-tls"
+            } - time() < 14 * 24 * 3600
+          labels:
+            severity: warning
+          annotations:
+            summary: "TLS certificate expiring soon"
+            description: "The TLS certificate expires in less than 14 days. Check cert-manager."
+```
+
+```bash
+kubectl apply -f k8s/alertrules.yaml
+
+# Verify the rules are loaded by Prometheus
+# In the Prometheus UI (localhost:9090): Status → Rules
+# Look for the "capstone-app.rules" group with state: "active"
+```
+
+---
+
+## Step 6: Configure Alertmanager → Slack
+
+```yaml
+# alertmanager-config-secret.yaml
+# Store as a Kubernetes Secret (contains Slack webhook URL)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: alertmanager-slack-config
+  namespace: monitoring
+type: Opaque
+stringData:
+  alertmanager.yaml: |
+    global:
+      resolve_timeout: 5m
+      slack_api_url: "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"
+
+    templates:
+      - "/etc/alertmanager/config/*.tmpl"
+
+    route:
+      group_by: ["alertname", "namespace"]
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+      receiver: slack-notifications
+
+      routes:
+        # Critical alerts: notify immediately
+        - matchers:
+            - severity = critical
+          receiver: slack-critical
+          continue: false
+
+        # Warning alerts: group and notify less frequently
+        - matchers:
+            - severity = warning
+          receiver: slack-warnings
+
+    receivers:
+      - name: slack-notifications
+        slack_configs:
+          - channel: "#alerts"
+            title: "{{ .GroupLabels.alertname }}"
+            text: "{{ range .Alerts }}{{ .Annotations.description }}\n{{ end }}"
+
+      - name: slack-critical
+        slack_configs:
+          - channel: "#alerts-critical"
+            send_resolved: true
+            title: "🚨 CRITICAL: {{ .GroupLabels.alertname }}"
+            text: |
+              *Description:* {{ .CommonAnnotations.description }}
+              *Severity:* {{ .CommonLabels.severity }}
+
+      - name: slack-warnings
+        slack_configs:
+          - channel: "#alerts"
+            send_resolved: true
+            title: "⚠️ Warning: {{ .GroupLabels.alertname }}"
+            text: "{{ .CommonAnnotations.description }}"
+```
+
+```bash
+kubectl apply -f alertmanager-config-secret.yaml
+
+# Update Alertmanager to use the config secret
+helm upgrade kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+  -n monitoring \
+  --set alertmanager.alertmanagerSpec.configSecret=alertmanager-slack-config
+```
+
+---
+
+## Step 7: Access Grafana and Import Dashboards
+
+```bash
+# Port-forward Grafana (run in background)
+kubectl -n monitoring port-forward svc/kube-prometheus-stack-grafana 3001:80 &
+
+# Open http://localhost:3001
+# Username: admin
+# Password: changeme-in-production (what you set during helm install)
+```
+
+### Import Pre-Built Dashboards
+
+Grafana ထဲမှာ: **Dashboards → Import**
+
+| Dashboard ID | Name | What it shows |
+|-------------|------|--------------|
+| 15760 | Kubernetes / Views / Global | Cluster-wide overview |
+| 14584 | Kubernetes Cluster | Node CPU, memory, network |
+| 6417 | Kubernetes Pods | Per-pod CPU and memory |
+| 7587 | Blackbox Exporter (HTTP) | Endpoint uptime, response time |
+| 14430 | cert-manager | Certificate expiry tracking |
+
+### Create a Custom App Dashboard
+
+Grafana ထဲမှာ: **Dashboards → New Dashboard → Add Panel**
+
+**Panel 1: Request Rate**
+```promql
+# Requests per second (by status code)
+sum(rate(capstone_http_requests_total[5m])) by (status_code)
+```
+
+**Panel 2: Error Rate %**
+```promql
+# Percentage of 5xx responses
+(
+  sum(rate(capstone_http_requests_total{status_code=~"5.."}[5m]))
+  /
+  sum(rate(capstone_http_requests_total[5m]))
+) * 100
+```
+
+**Panel 3: P50/P95/P99 Latency**
+```promql
+# 50th percentile
+histogram_quantile(0.50, rate(capstone_http_request_duration_seconds_bucket[5m]))
+
+# 95th percentile
+histogram_quantile(0.95, rate(capstone_http_request_duration_seconds_bucket[5m]))
+
+# 99th percentile
+histogram_quantile(0.99, rate(capstone_http_request_duration_seconds_bucket[5m]))
+```
+
+**Panel 4: Pod Memory Usage**
+```promql
+# Memory working set per pod
+container_memory_working_set_bytes{
+  namespace="production",
+  container="app"
+}
+```
+
+**Panel 5: Health Check Success Rate**
+```promql
+# Blackbox Exporter probe success (1 = up, 0 = down)
+probe_success{job="capstone-app-health"}
+```
+
+---
+
+## Step 8: Test Your Alerting
+
+```bash
+# Manually trigger the CapstoneAppDown alert by temporarily breaking the app
+# (scale down all replicas)
+kubectl -n production scale deployment/capstone-app --replicas=0
+
+# Wait 2-3 minutes and check:
+# 1. Prometheus Alerts page (localhost:9090/alerts) → CapstoneAppDown firing
+# 2. Grafana alert list → CapstoneAppDown
+# 3. Slack #alerts channel → Alert notification
+
+# Restore the deployment
+kubectl -n production scale deployment/capstone-app --replicas=3
+# Wait for pods to be Ready, then check that the alert resolves
+```
+
+---
+
+## The Complete Observability Picture
+
+```mermaid
+graph LR
+    subgraph app_metrics["Application Metrics"]
+        M1[capstone_http_requests_total]
+        M2[capstone_http_request_duration_seconds]
+        M3[capstone_db_query_duration_seconds]
+    end
+
+    subgraph k8s_metrics["Kubernetes Metrics"]
+        M4[kube_pod_container_status_restarts_total]
+        M5[container_memory_working_set_bytes]
+        M6[container_cpu_usage_seconds_total]
+    end
+
+    subgraph probe_metrics["Probe Metrics"]
+        M7["probe_success (HTTP health check)"]
+        M8["probe_duration_seconds (response time)"]
+    end
+
+    subgraph cert_metrics["Certificate Metrics"]
+        M9[certmanager_certificate_expiration_timestamp_seconds]
+    end
+
+    PROM[Prometheus]
+    M1 & M2 & M3 --> PROM
+    M4 & M5 & M6 --> PROM
+    M7 & M8 --> PROM
+    M9 --> PROM
+
+    PROM -->|dashboards| GRAFANA[Grafana]
+    PROM -->|alert rules| AM[Alertmanager]
+    AM -->|Slack| SLACK[Team #alerts]
+    GRAFANA -->|view| TEAM[Team]
+```
+
+---
+
+## You've Built a Production-Grade CI/CD System 🎉
+
+ဂုဏ်ယူပါတယ်။ အစကနေ အဆုံးထိ တည်ဆောက်ခဲ့တာတွေကို ပြန်ကြည့်ကြရအောင်:
+
+### What You Deployed
+
+| Component | Technology | Purpose |
+|-----------|-----------|---------|
+| Web app | Next.js 14 + PostgreSQL | The actual product |
+| Container image | Docker (3-stage) + GHCR | Portable, secure packaging |
+| CI pipeline | GitHub Actions | Quality gate: lint, test, scan |
+| CD pipeline | GitHub Actions | Automatic zero-downtime deployment |
+| Orchestration | K3s Kubernetes | Self-healing, scalable runtime |
+| Ingress | Traefik | HTTP/HTTPS routing |
+| TLS | cert-manager + Let's Encrypt | Automatic certificate management |
+| Monitoring | Prometheus + Grafana | Metrics and dashboards |
+| Alerting | Alertmanager + Slack | Incident notification |
+
+### What Happens Automatically Now
+
+Feature branch တစ်ခုခုကို `git push` လုပ်တိုင်း အောက်ပါတို့ အလိုအလျောက် ဖြစ်သွားပါမယ်:
+1. **ESLint** က code style ကို စစ်ဆေးပေးပါတယ်
+2. **TypeScript** က type safety ကို စစ်ဆေးပေးပါတယ်
+3. **Vitest** က unit tests တွေကို run ပေးပါတယ်
+4. **Trivy** က Docker image ထဲမှာ CVEs တွေ ပါမပါ စစ်ဆေးပေးပါတယ်
+
+`main` branch ထဲကို PR merge လုပ်တိုင်း:
+1. Git SHA tag နဲ့ **Docker image** ကို build လုပ်ပါတယ်
+2. Image ကို **GHCR** ဆီ push တင်ပါတယ်
+3. GitHub Secrets ကနေ **Kubernetes Secret** ကို sync လုပ်ပါတယ်
+4. **Rolling update** နဲ့ image အသစ်ကို deploy လုပ်ပါတယ် (zero downtime)
+5. **Smoke test** နဲ့ deployment အောင်မြင်ကြောင်း စစ်ဆေးပေးပါတယ်
+6. Smoke test fail သွားရင် **Automatic rollback** လုပ်ပါတယ်
+
+၁၅ စက္ကန့်တိုင်းမှာ:
+- **Prometheus** က ခင်ဗျားရဲ့ app၊ cluster နဲ့ health probes တွေကနေ metrics တွေကို scrape လုပ်ပါတယ်
+
+တစ်ခုခု မှားယွင်းသွားတဲ့အခါ:
+- **Alertmanager** က ၂ မိနစ်အတွင်းမှာပဲ Slack notification ကို ပို့ပေးပါတယ်
+
+---
+
+## What to Do Next
+
+complete ဖြစ်တဲ့ Pipeline တစ်ခု ရှိသွားပြီဆိုတော့ ထပ်ပြီးလေ့လာစရာ Real-world improvements တွေကတော့:
+
+### Short-term (1-2 weeks)
+- **Add a staging environment** — production မရောက်ခင် PR တွေကို staging namespace မှာ အရင် deploy လုပ်ကြည့်ပါ
+- **Add integration tests** — CI ထဲမှာ real PostgreSQL နဲ့ test လုပ်ပါ
+- **Configure log aggregation** — logs တွေကို store လုပ်ပြီး query လုပ်ဖို့ Loki (Grafana stack ကပါတဲ့) ကို သုံးပါ
+- **Add database backups** — pg_dump လုပ်ပြီး S3 ထဲ upload တင်မယ့် cron job ထည့်ပါ
+
+### Medium-term (1-3 months)
+- **Horizontal Pod Autoscaler** — CPU/memory ပေါ်မူတည်ပြီး replicas တွေကို auto scale လုပ်ပါ
+- **PodDisruptionBudget** — node maintenance လုပ်နေစဉ်အတွင်း minimum availability ကို guarantee ပေးပါ
+- **Network Policies** — လိုအပ်တာထက် ပိုမသွားအောင် pod-to-pod communication ကို ကန့်သတ်ပါ
+- **External Secrets Operator** — AWS Secrets Manager / Vault ကနေ secrets တွေကို sync လုပ်ပါ
+
+### Long-term (3+ months)
+- **GitOps with ArgoCD** — `kubectl set image` အစား declarative GitOps ကို ပြောင်းသုံးပါ
+- **Multi-cluster** — dev၊ staging နဲ့ production clusters တွေကို သီးခြားစီ deploy လုပ်ပါ
+- **Service mesh (Istio/Linkerd)** — mutual TLS, traffic management, canary deployments တွေကို သုံးပါ
+- **Multi-region deployment** — သုံးစွဲသူနဲ့ အနီးဆုံး geographic region ကနေ ဝန်ဆောင်မှု ပေးပါ
+
+---
+
+## Summary
+
+ခင်ဗျား Capstone course ကို အောင်မြင်စွာ ပြီးဆုံးသွားပါပြီ။ Production-quality ရှိတဲ့ Observability system တစ်ခုကို တည်ဆောက်နိုင်ခဲ့ပါပြီ:
+- Application metrics၊ Kubernetes metrics၊ HTTP probes နဲ့ cert-manager တွေကို scrape လုပ်နေတဲ့ **Prometheus**
+- Pre-built dashboards နဲ့ custom app dashboard ပါတဲ့ **Grafana**
+- ပြဿနာစတင်တွေ့ရှိပြီး ၂ မိနစ်အတွင်း Slack ဆီ critical alerts တွေကို route လုပ်ပေးတဲ့ **Alertmanager**
+- App downtime၊ high error rates၊ high latency၊ pod crashes၊ memory pressure နဲ့ certificate expiry တွေအတွက် **Alert rules** တွေပဲ ဖြစ်ပါတယ်။
+
+အရေးကြီးဆုံးကတော့ ကုဒ်တစ်ခုကို `git push` လုပ်လိုက်တာနဲ့ production မှာ run သွားတဲ့အထိ လုံခြုံစိတ်ချရစွာ၊ အလွယ်တကူ ထပ်လုပ်လို့ရအောင်နဲ့ observability အပြည့်အစုံနဲ့ အလိုအလျောက် လုပ်ဆောင်ပေးနိုင်တဲ့ Pipeline တစ်ခုလုံးကို ပိုင်ဆိုင်သွားပါပြီ။ ဒါဟာ လက်တွေ့ကျတဲ့ DevOps ရဲ့ အဓိပ္ပာယ်ပါပဲ။
+
+**Zero ကနေ Hero အထိ ရောက်သွားပါပြီ။ Confidence အပြည့်နဲ့ Ship လိုက်ပါတော့။ 🚀**

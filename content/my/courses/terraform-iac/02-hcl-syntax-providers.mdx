@@ -1,0 +1,234 @@
+---
+title: "HCL Syntax, Providers & Core Resource Blocks"
+duration: "30 min"
+order: 2
+---
+
+# HCL Syntax, Providers & Core Resource Blocks
+
+**HashiCorp Configuration Language (HCL)** ဆိုတာကတော့ လူတွေ ဖတ်လို့ကောင်းပြီး နားလည်ရလွယ်ကူစေဖို့နဲ့ စက်တွေ (Machines) ကလည်း လွယ်လွယ်ကူကူ parse လုပ်နိုင်ဖို့ ရည်ရွယ်ပြီး ဖန်တီးထားတဲ့ declarative language တစ်ခု ဖြစ်ပါတယ်။
+
+---
+
+## Anatomy of an HCL Configuration File
+
+Standard Terraform file တစ်ခုဟာ **Blocks**၊ **Arguments** တွေနဲ့ **Expressions** တွေ ပေါင်းစပ်ပြီး ဖွဲ့စည်းထားပါတယ်-
+
+```hcl
+# <BLOCK TYPE> "<BLOCK LABEL 1>" "<BLOCK LABEL 2>" {
+#   <IDENTIFIER> = <EXPRESSION>
+# }
+
+resource "aws_s3_bucket" "app_storage" {
+  bucket        = "devops-zero-to-hero-storage-2026"
+  force_destroy = true
+
+  tags = {
+    Environment = "Production"
+    Team        = "Platform Engineering"
+  }
+}
+```
+
+- **Block Type**: `resource`, `provider`, `variable`, `output`, `data` (သို့) `terraform` တို့ ဖြစ်ပါတယ်။
+- **Block Labels**: `aws_s3_bucket` (resource type ဖြစ်ပါတယ်) နဲ့ `app_storage` (local internal name ဖြစ်ပါတယ်) တို့ ဖြစ်ကြပါတယ်။
+- **Arguments**: လိုချင်တဲ့ configuration တွေကို သတ်မှတ်ပေးတဲ့ Key-value pairs တွေ ဖြစ်ပါတယ်။
+
+---
+
+## The `terraform {}` Settings Block & Lock File
+
+Production Terraform project တိုင်းဟာ `versions.tf` (သို့) `main.tf` ထဲက `terraform {}` configuration block နဲ့ စတင်ကြရပါတယ်-
+
+```hcl
+# versions.tf
+terraform {
+  required_version = ">= 1.5.0, < 2.0.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.50.0"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6.0"
+    }
+    local = {
+      source  = "hashicorp/local"
+      version = "~> 2.5.0"
+    }
+  }
+}
+```
+
+### Version Constraints တွေကို နားလည်ခြင်း:
+- `~> 5.50.0`: Breaking changes မရှိတဲ့ patch updates တွေကို လက်ခံပါတယ် (ဥပမာ- `5.50.1`, `5.50.2`)၊ ဒါပေမဲ့ `5.51.0` နဲ့ `6.0.0` တွေကိုတော့ ပိတ်ပင်ပါတယ်။
+- `>= 1.5.0`: Terraform CLI version 1.5.0 နဲ့ အထက်ကို လိုအပ်ပါတယ်။
+
+### Dependency Lock File (`.terraform.lock.hcl`):
+`terraform init` ကို Run လိုက်တဲ့အခါ Terraform က provider binary တိုင်းရဲ့ cryptographic checksum တွေ ပါဝင်တဲ့ `.terraform.lock.hcl` file တစ်ခုကို ဖန်တီးပေးပါတယ်။
+
+> [!IMPORTANT]
+> **`.terraform.lock.hcl` ကို Git ထဲမှာ အမြဲ commit တင်ပါ!** ဒါက developer တိုင်းနဲ့ CI/CD runner တိုင်း Operating System တွေ အမျိုးမျိုးကွဲနေရင်တောင် တူညီတဲ့ provider binary checksum ကိုပဲ Download ဆွဲတာ သေချာစေပါတယ်။
+
+---
+
+## Hands-On: Building Your First Working Project
+
+Active ဖြစ်နေတဲ့ AWS billing account မလိုဘဲ resource တွေ ဖန်တီးပုံနဲ့ dependencies တွေကို လေ့လာနိုင်ဖို့အတွက် Local working project တစ်ခုကို တည်ဆောက်ကြည့်ရအောင်။
+
+Directory အသစ်တစ်ခု ဆောက်ပါ:
+```bash
+mkdir terraform-starter && cd terraform-starter
+```
+
+`main.tf` ကို ဖန်တီးပါ:
+```hcl
+terraform {
+  required_version = ">= 1.5.0"
+  required_providers {
+    local = {
+      source  = "hashicorp/local"
+      version = "~> 2.5.0"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6.0"
+    }
+  }
+}
+
+provider "local" {}
+provider "random" {}
+
+# Generate a random hex string for unique naming
+resource "random_id" "server_id" {
+  byte_length = 4
+}
+
+# Create a local configuration file referencing the random ID
+resource "local_file" "server_manifest" {
+  filename = "${path.module}/build/server-${random_id.server_id.hex}.json"
+  content = jsonencode({
+    cluster_id   = "cluster-${random_id.server_id.hex}"
+    environment  = "production"
+    node_count   = 3
+    provisioned  = timestamp()
+  })
+  file_permission = "0644"
+}
+```
+
+---
+
+## Executing the Lifecycle Commands
+
+### 1. Initialize
+```bash
+$ terraform init
+
+Initializing the backend...
+Initializing provider plugins...
+- Finding hashicorp/local versions matching "~> 2.5.0"...
+- Installing hashicorp/local v2.5.1...
+- Finding hashicorp/random versions matching "~> 3.6.0"...
+- Installing hashicorp/random v3.6.1...
+
+Terraform has been successfully initialized!
+```
+
+### 2. Format & Validate
+```bash
+# Auto-formats all .tf files to canonical indentation
+terraform fmt
+
+# Validates syntax and internal references
+terraform validate
+```
+
+### 3. Plan (The Speculative Execution Preview)
+```bash
+$ terraform plan
+
+Terraform will perform the following actions:
+
+  # local_file.server_manifest will be created
+  + resource "local_file" "server_manifest" {
+      + content         = (known after apply)
+      + file_permission = "0644"
+      + filename        = (known after apply)
+      + id              = (known after apply)
+    }
+
+  # random_id.server_id will be created
+  + resource "random_id" "server_id" {
+      + b64_std     = (known after apply)
+      + b64_url     = (known after apply)
+      + byte_length = 4
+      + hex         = (known after apply)
+      + id          = (known after apply)
+    }
+
+Plan: 2 to add, 0 to change, 0 to destroy.
+```
+
+### 4. Apply
+```bash
+$ terraform apply -auto-approve
+
+random_id.server_id: Creating...
+random_id.server_id: Creation complete after 0s [id=9a2b8c4d]
+local_file.server_manifest: Creating...
+local_file.server_manifest: Creation complete after 0s [id=14cfd298...]
+
+Apply complete! Resources: 2 added, 0 changed, 0 destroyed.
+```
+
+သင့်ရဲ့ terminal ထဲမှာ ဖန်တီးလိုက်တဲ့ file ကို စစ်ဆေးကြည့်ပါ:
+```bash
+$ cat build/server-*.json
+{"cluster_id":"cluster-9a2b8c4d","environment":"production","node_count":3,"provisioned":"2026-08-19T01:30:00Z"}
+```
+
+---
+
+## Data Sources: Querying Existing Infrastructure
+
+**Data Sources** တွေက Terraform ရဲ့ အပြင်ဘက်မှာဖြစ်စေ၊ အခြား stack တစ်ခုခုမှာဖြစ်စေ အရင်ကတည်းက ဖန်တီးထားပြီးသား Existing infrastructure တွေကနေ အချက်အလက်တွေကို Terraform က ဖတ်ရှုနိုင်ဖို့ ခွင့်ပြုပေးပါတယ်။
+
+```hcl
+# Example: Look up the latest official Ubuntu 24.04 AMI in AWS
+data "aws_ami" "ubuntu_latest" {
+  most_recent = true
+  owners      = ["099720109477"] # Canonical AWS Account ID
+
+  filter {
+    name   = "name"
+    values = ["ubuntu/images/hvm-ssd/ubuntu-noble-24.04-amd64-server-*"]
+  }
+
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
+  }
+}
+
+# Reference the AMI ID in your resource
+resource "aws_instance" "web" {
+  ami           = data.aws_ami.ubuntu_latest.id
+  instance_type = "t3.micro"
+}
+```
+
+---
+
+## Visualizing the Dependency Graph
+
+References တွေကို လေ့လာသုံးသပ်ခြင်းအားဖြင့် ဘယ် resource တွေကို အရင် ဖန်တီးရမယ်ဆိုတာကို Terraform က အလိုအလျောက် တွက်ချက်ပေးပါတယ်။ ဥပမာအနေနဲ့ ကျွန်တော်တို့ရဲ့ ဥပမာမှာဆိုရင်:
+`local_file.server_manifest` က `random_id.server_id.hex` ကို refer လုပ်ထားတဲ့အတွက်ကြောင့် `random_id` ကို file မဆောက်ခင်မှာ **မဖြစ်မနေ အရင်ဆောက်ရမယ်** ဆိုတာကို Terraform က သိရှိပြီးသား ဖြစ်ပါတယ်။
+
+```bash
+# Output ASCII dependency graph
+terraform graph
+```

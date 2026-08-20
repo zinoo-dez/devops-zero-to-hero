@@ -1,0 +1,90 @@
+---
+title: "Production GitOps Architecture & Disaster Recovery"
+duration: "35 min"
+order: 8
+---
+
+# Production GitOps Architecture & Disaster Recovery
+
+အပိုင်းအားလုံးကို ပေါင်းစပ်ကြည့်ရအောင်- ဒီနောက်ဆုံး သင်ခန်းစာမှာတော့ enterprise-grade GitOps delivery Pipeline တစ်ခုကို တည်ဆောက်ပြီး **Cluster Disaster Recovery** drill တစ်ခုကို တိုက်ရိုက်လုပ်ဆောင်သွားမှာ ဖြစ်ပါတယ်။
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Dev as Software Engineer
+    participant CodeRepo as 1. App Code Repo
+    participant CI as 2. GitHub Actions CI
+    participant Registry as 3. GHCR Container Registry
+    participant GitOpsRepo as 4. GitOps Manifests Repo
+    participant Argo as 5. ArgoCD Controller
+    participant K8s as 6. Production Kubernetes
+
+    Dev->>CodeRepo: git push (Feature commit)
+    CodeRepo->>CI: Trigger Automated CI Pipeline
+    CI->>CI: Unit Tests + Semgrep SAST + Trivy Scan
+    CI->>Registry: Build & Push Image (ghcr.io/org/api:sha-8a1b2c)
+    CI->>GitOpsRepo: Automated Bot PR: 'Update image to sha-8a1b2c'
+    Note over GitOpsRepo: Peer Review & Merge PR
+    Argo->>GitOpsRepo: Detects new commit on main branch
+    Argo->>K8s: Reconciles cluster state & executes Zero-Downtime Rollout
+    K8s-->>Argo: Cluster Healthy (All pods running new version)
+```
+
+---
+
+## The Automated GitOps CI Pipeline Step
+
+သင့်ရဲ့ Application Code Repo ထဲမှာ Docker image အသစ်တစ်ခု Build တဲ့အခါ GitOps Manifests repository ထဲက image tag ကို အလိုအလျောက် Update လုပ်ပေးတဲ့ GitHub Actions step က ဒီလိုဖြစ်ပါတယ်-
+
+```yaml
+# Inside .github/workflows/ci.yml in your Application Code Repo:
+
+- name: Update Image Tag in GitOps Repository
+  uses: peter-evans/create-pull-request@v6
+  with:
+    token: ${{ secrets.GITOPS_REPO_PAT }}
+    repository: my-org/k8s-manifests
+    branch: update-api-${{ github.sha }}
+    title: "chore(release): update web-api image to ${{ github.sha }}"
+    body: |
+      Automated GitOps release triggered by commit: ${{ github.sha }}
+      Author: @${{ github.actor }}
+    commit-message: "deploy(api): update image to ${{ github.sha }}"
+```
+
+---
+
+## Disaster Recovery Drill: Rebuilding a Dead Cluster in Under 3 Minutes
+
+သင့်ရဲ့ cloud provider မှာ ကြီးမားတဲ့ ပျက်စီးမှုတွေဖြစ်ပေါ်ပြီး မူလ Kubernetes cluster တစ်ခုလုံး လုံးဝပျက်စီးသွားတယ်လို့ တွေးကြည့်ပါ။
+
+ရိုးရာ ClickOps ပုံစံမျိုးဆိုရင် Infrastructure ကို ပြန်ဆောက်ဖို့ လက်နဲ့လိုက်ပြင်ရတာနဲ့ ရက်ပေါင်းများစွာ ကြာသွားနိုင်ပါတယ်။ **GitOps နဲ့ Infrastructure as Code ကို အသုံးပြုမယ်ဆိုရင်တော့ Recovery လုပ်ဖို့အတွက် Command ၃ ခုတည်းနဲ့ ပြီးပါတယ်**:
+
+```mermaid
+flowchart LR
+    Disaster["🔥 Disaster: Cluster Destroyed!"] --> Step1["1. terraform apply
+(Rebuilds K3s/EKS in 2 mins)"]
+    Step1 --> Step2["2. kubectl apply -f argocd-install.yaml
+(Installs ArgoCD in 30s)"]
+    Step2 --> Step3["3. kubectl apply -f root-bootstrap.yaml
+(ArgoCD recreates 100% of apps & configs)"]
+    Step3 --> Restored["✅ Complete Production Restored in 3 Minutes!"]
+```
+
+### Execution Steps:
+1. **Rebuild Infrastructure with Terraform**:
+   ```bash
+   cd terraform/environments/prod
+   terraform apply -auto-approve
+   ```
+2. **Install ArgoCD**:
+   ```bash
+   kubectl create namespace argocd
+   kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+   ```
+3. **Apply the Root Bootstrap Application**:
+   ```bash
+   kubectl apply -f root-bootstrap.yaml
+   ```
+
+ArgoCD က သင့်ရဲ့ Git repository နဲ့ ချိတ်ဆက်ပြီး Kustomize overlays အားလုံးကို render လုပ်ပေးပါမယ်၊ Sealed Secrets တွေကနေ Secrets တွေကို ပြန်ပေါ်လာစေမယ်၊ Ingress routes တွေကို mount လုပ်ပေးပြီး လူကိုယ်တိုင် စဉ်းစားခန်းဖွင့်စရာမလိုဘဲ Traffic တွေကို ပုံမှန်အတိုင်း ပြန်လည်လည်ပတ်စေမှာ ဖြစ်ပါတယ်။

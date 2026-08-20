@@ -1,0 +1,195 @@
+---
+title: "Why Docker Compose?"
+---
+
+# The Problem: Managing Containers by Hand
+
+Docker course ထဲမှာ တုန်းက `docker run` ကို သုံးပြီး individual containers တွေကို run ခဲ့ပါတယ်။ အဲ့ဒါက isolated ဖြစ်နေတဲ့ single container တစ်ခုအတွက်တော့ အလုပ်ဖြစ်ပါတယ်။ ဒါပေမဲ့ production applications တွေ အစစ်အမှန်ကတော့ container တစ်ခုတည်းနဲ့ မလုံလောက်ပါဘူး — သူတို့က cooperating services တွေပါဝင်တဲ့ **system** တစ်ခုဖြစ်ပါတယ်။
+
+Typical ဖြစ်တဲ့ three-tier web application တစ်ခုက ဒီလိုပုံစံရှိပါတယ်:
+
+```mermaid
+flowchart LR
+    USER["👤 User\nbrowser"] -->|"HTTP :3000"| API["Node.js API\ncontainer"]
+    API -->|"SQL :5432"| DB[("PostgreSQL\ncontainer")]
+    API -->|"Redis :6379"| CACHE["Redis\ncontainer"]
+    DB --> VOL_DB[("postgres-data\nnamed volume")]
+    CACHE --> VOL_CACHE[("redis-data\nnamed volume")]
+```
+
+ဒါကို bare `docker run` command တွေနဲ့ manual လိုက် run မယ်ဆိုရင်:
+
+```bash
+# Step 1: Create a shared network so containers can talk to each other
+docker network create myapp-net
+
+# Step 2: Start PostgreSQL (don't forget the volume, the network, every env var...)
+docker run -d \
+  --name myapp-db \
+  --network myapp-net \
+  -e POSTGRES_USER=appuser \
+  -e POSTGRES_PASSWORD=supersecret \
+  -e POSTGRES_DB=myapp \
+  -v postgres-data:/var/lib/postgresql/data \
+  postgres:16-alpine
+
+# Step 3: Start Redis
+docker run -d \
+  --name myapp-cache \
+  --network myapp-net \
+  redis:7-alpine
+
+# Step 4: Build your API image first
+docker build -t myapp-api .
+
+# Step 5: Start the API — and pray Postgres has finished initializing
+docker run -d \
+  --name myapp-api \
+  --network myapp-net \
+  -p 3000:3000 \
+  -e DATABASE_URL=postgres://appuser:supersecret@myapp-db:5432/myapp \
+  -e REDIS_URL=redis://myapp-cache:6379 \
+  myapp-api
+
+# Total: 5 commands, 15+ flags, exact order matters, zero error handling
+```
+
+**ဒီလို approach ရဲ့ ပြဿနာတွေကတော့:**
+- Developer အသစ်ဝင်လာတယ် → README ကိုဖတ်တယ်၊ flag တစ်ခုလွတ်သွားတယ်၊ ညဉ့်သန်းခေါင်ယံမှာ cryptic error တစ်ခုတက်လာရော
+- Container နာမည်ပြောင်းတယ် → downstream reference တိုင်းကို manual လိုက်ပြင်ရမယ်
+- API စစချင်းမှာ Postgres က initialize လုပ်လို့ မပြီးသေးဘူး → boot တက်တဲ့အချိန်မှာ `ECONNREFUSED` ဖြစ်မယ်
+- `--restart` flag တွေ မပါဘူး → reboot လုပ်လိုက်ရင် containers တွေ သေသွားပြီး ဆက်သေနေမယ်
+- Environments မျိုးစုံ (dev, staging, prod) အကြားမှာ consistently ဖြစ်အောင် manage လုပ်ဖို့ မဖြစ်နိုင်ဘူး
+
+---
+
+## Docker Compose: The Solution
+
+Docker Compose က သင့်ရဲ့ **entire application stack** ကို — services, networks, volumes, environment variables နဲ့ dependencies အားလုံးကို declarative YAML file တစ်ခုတည်းမှာ ရေးသားနိုင်အောင် လုပ်ပေးပါတယ်။ အဲ့ဒီနောက် command တစ်ခုတည်းနဲ့ အားလုံးကို manage လုပ်နိုင်ပါတယ်။
+
+```bash
+# Start everything (builds images, creates network, starts containers, streams logs)
+docker compose up
+
+# Start everything in the background (detached)
+docker compose up -d
+
+# Stop and remove containers (keeps volumes — data is safe)
+docker compose down
+
+# Stop and remove EVERYTHING including volumes (⚠️ data loss)
+docker compose down --volumes
+```
+
+အပေါ်က three-tier stack ကြီးက ဒီလိုဖြစ်သွားပါတယ်:
+
+```yaml
+# docker-compose.yml
+services:
+  api:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgres://appuser:supersecret@db:5432/myapp
+      REDIS_URL: redis://cache:6379
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: appuser
+      POSTGRES_PASSWORD: supersecret
+      POSTGRES_DB: myapp
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U appuser"]
+      interval: 5s
+      retries: 10
+
+  cache:
+    image: redis:7-alpine
+
+volumes:
+  postgres-data:
+```
+
+**သင်ရရှိမယ့် အကျိုးကျေးဇူးတွေကတော့:**
+- **File တစ်ခုတည်း**ကို version control ထဲ ထည့်ထားလို့ရတယ် — team ထဲက လူတိုင်း stack တူတူကိုပဲ run ကြမယ်
+- **Service discovery by name** — `api` က database ကို hostname `db` သုံးပြီး automatic ချိတ်ဆက်နိုင်မယ်
+- **Dependency ordering** — `db` က သူ့ရဲ့ health check အောင်မြင်မှသာ `api` က စတင် run မယ်
+- **ဘယ်နေရာမှာမဆို တူညီစွာ run နိုင်ခြင်း** — dev laptop, CI, staging server, production VPS
+
+---
+
+## How Compose Works Under the Hood
+
+```mermaid
+flowchart TD
+    subgraph HOST["Your Machine / Server"]
+        COMPOSE_CMD["docker compose up"]
+        COMPOSE_CMD --> PARSE["Parse docker-compose.yml\n+ override files"]
+        PARSE --> NETWORK["Create network:\nmyapp_default\n(if not exists)"]
+        PARSE --> VOLUMES["Create named volumes:\npostgres-data\n(if not exists)"]
+        NETWORK & VOLUMES --> PULL["Pull / build images"]
+        PULL --> ORDER["Resolve dependency order:\ndb → cache → api"]
+        ORDER --> START["Start containers\nin dependency order"]
+        START --> HEALTH["Wait for healthchecks\nbefore dependent services"]
+    end
+```
+
+Compose က သင့်ရဲ့ YAML ကို ဖတ်တယ်၊ `depends_on` ကနေ dependency graph ကို တွက်ချက်တယ်၊ network နဲ့ volumes တွေကို ဖန်တီးတယ် (idempotent ဖြစ်လို့ ပြန် run ဖို့ လုံခြုံပါတယ်)၊ ပြီးတော့ dependency အစဉ်လိုက်အတိုင်း containers တွေကို စတင် run ပါတယ်။ configuration လုပ်ထားတဲ့ health checks တွေကိုလည်း စောင့်ပေးပါတယ်။
+
+---
+
+## `docker compose` vs `docker-compose`
+
+```bash
+# Old (Compose v1 — Python binary, being deprecated)
+docker-compose up   # hyphen
+
+# New (Compose v2 — Go plugin, built into Docker CLI)
+docker compose up   # space
+```
+
+Docker Engine 20.10+ ကစပြီး Compose v2 က လက်ရှိ standard ဖြစ်ပါတယ်။ `docker compose` (space ပါတာ) ကိုပဲ အမြဲသုံးပါ။ hyphen ပါတဲ့ version (`docker-compose`) ကတော့ deprecated ဖြစ်သွားပြီဖြစ်တဲ့ legacy Python binary ဖြစ်ပြီး ဆက်လက် maintenance မလုပ်တော့ပါဘူး။
+
+```bash
+# Verify you have Compose v2
+docker compose version
+# Docker Compose version v2.27.0
+```
+
+---
+
+## What Docker Compose Is NOT
+
+Compose က development နဲ့ single-server production deployments တွေအတွက် အလွန်ကောင်းမွန်ပါတယ်။ ဒါပေမဲ့ သူ့မှာ architectural limits တွေ ရှိပါတယ်:
+
+| Capability | Docker Compose | Kubernetes |
+|-----------|---------------|------------|
+| **Multi-server** | ❌ Single host only | ✅ Cluster of servers |
+| **Auto-scaling** | ❌ Manual only | ✅ HPA by CPU/memory |
+| **Cross-node self-healing** | ❌ Single node restart only | ✅ Pods reschedule across nodes |
+| **Rolling zero-downtime updates** | ⚠️ Brief downtime | ✅ Guaranteed zero downtime |
+| **Load balancing across nodes** | ❌ | ✅ |
+| **Learning curve** | ✅ Low (< 1 day) | ❌ Steep (weeks) |
+| **Right for** | Dev + small prod | Large-scale production |
+
+Startup တစ်ခုရဲ့ backend ကို hosting လုပ်ပေးနေတဲ့ single VPS တစ်ခုအတွက်ဆိုရင် Docker Compose က အသင့်တော်ဆုံး choice ဖြစ်ပါတယ်။ ဒါပေမဲ့ servers မျိုးစုံသုံးဖို့ လိုလာတဲ့အခါ၊ auto-scaling လိုချင်တဲ့အခါ ဒါမှမဟုတ် scale ကြီးကြီးနဲ့ zero-downtime လိုချင်တဲ့အခါမျိုးကျရင်တော့ K3s ဒါမှမဟုတ် Kubernetes ဆီကို ကူးပြောင်းရပါတော့မယ်။
+
+---
+
+## Summary
+
+- Real applications တွေမှာ အချင်းချင်း ချိတ်ဆက်ဖို့၊ မှန်ကန်တဲ့ အစဉ်လိုက်အတိုင်း စတင်ဖို့နဲ့ ယုံကြည်စိတ်ချရစွာ restart ဖြစ်ဖို့ လိုအပ်တဲ့ multiple containers (API, database, cache) တွေ ပါဝင်ဖို့ လိုအပ်ပါတယ်
+- ဒါကို bare `docker run` command တွေနဲ့ manage လုပ်တာက error တက်လွယ်တယ်၊ မျှဝေရခက်တယ်၊ တူညီတဲ့ပုံစံအတိုင်း ပြန် runဖို့ မလွယ်ကူပါဘူး
+- `docker-compose.yml` က stack တစ်ခုလုံးကို — services, networks, volumes, dependencies တွေကို version control ထဲ ထည့်ထားလို့ရတဲ့ file တစ်ခုတည်းမှာ declare လုပ်ပေးပါတယ်
+- `docker compose up -d` က အားလုံးကိုစတင်ပေးပြီး၊ `docker compose down` က အားလုံးကို သပ်သပ်ရပ်ရပ် ရပ်တန့်ပေးပါတယ်
+- `docker compose` (v2၊ space ပါတာ) ကိုပဲ အမြဲသုံးပါ — ရှေးဟောင်း `docker-compose` (hyphen ပါတာ) ကတော့ deprecated ဖြစ်သွားပါပြီ
+- Compose က development နဲ့ single-server production တွေအတွက် အကောင်းဆုံးဖြစ်ပြီး၊ Kubernetes ကတော့ multi-server scale တွေကို handle လုပ်ပေးပါတယ်
+
+နောက် lesson မှာတော့ `docker-compose.yml` file ရဲ့ section တစ်ခုချင်းစီကို အသေးစိတ် ဆွေးနွေးသွားမှာ ဖြစ်ပါတယ်။

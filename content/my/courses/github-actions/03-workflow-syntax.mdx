@@ -1,0 +1,391 @@
+---
+title: "Workflow YAML Syntax: Complete Reference"
+---
+
+# Complete Workflow Anatomy (Workflow တစ်ခုရဲ့ အစိတ်အပိုင်းများ)
+
+GitHub Actions workflow file ဆိုတာ YAML format ဖြစ်ပြီး whitespace နဲ့ indentation ကို အထူးဂရုစိုက်ရပါတယ်။ (Space တွေကိုပဲ သုံးရမှာဖြစ်ပြီး Tab လုံးဝမသုံးရပါဘူး)။ Top-level structure ကနေ step-level options တွေအထိ အဓိက keyword တိုင်းကို လေ့လာကြည့်ရအောင်။
+
+---
+
+## Top-Level Structure (အပေါ်ဆုံးအဆင့် တည်ဆောက်ပုံ)
+
+```yaml
+name: CI Pipeline                     # [Required] Actions UI မှာပြမယ့် Workflow ရဲ့နာမည်
+run-name: CI for ${{ github.actor }}  # [Optional] Run တိုင်းမှာ ပြောင်းလဲမယ့် Dynamic run name
+
+on: { ... }                           # [Required] Trigger များ - ဘယ်အချိန်မှာ run မလဲ
+
+env:                                  # [Optional] Workflow တစ်ခုလုံးအတွက် သုံးမယ့် Environment variables
+  NODE_ENV: production
+
+defaults:                             # [Optional] Run steps အားလုံးအတွက် Default settings တွေ
+  run:
+    shell: bash
+    working-directory: ./src
+
+concurrency:                          # [Optional] Parallel runs များကို ကာကွယ်ရန်
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:                          # [Optional] GITHUB_TOKEN ရဲ့ scope ကို ကန့်သတ်ရန်
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:                                 # [Required] လုပ်ဆောင်ရမယ့် အလုပ်များ
+  job-name:
+    ...
+```
+
+---
+
+## `on`: Trigger အမျိုးအစား အားလုံး
+
+### Push နှင့် Pull Request
+
+```yaml
+on:
+  push:
+    branches:
+      - main
+      - 'release/**'    # Glob pattern: "release/" နဲ့စတဲ့ ဘယ် branch မဆို
+    branches-ignore:
+      - 'dependabot/**' # Dependabot branch တွေမှာ CI မလုပ်ပါနဲ့
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'  # Regex ပုံစံ: v1.2.3 format
+    paths:
+      - 'src/**'         # ဒီ path တွေ ပြောင်းလဲမှသာ Trigger လုပ်မယ်
+      - 'package.json'
+    paths-ignore:
+      - 'docs/**'        # Documentation သီးသန့်ပဲ ပြောင်းရင် ကျော်သွားမယ် (CI minutes တွေကို သက်သာစေတယ်)
+      - '**.md'
+
+  pull_request:
+    types: [opened, synchronize, reopened]  # Default: သုံးခုစလုံး
+    branches: [main]
+```
+
+### Schedule (Cron)
+
+```yaml
+on:
+  schedule:
+    # ညဘက် UTC အချိန် 2:30 မှာ Security scan လုပ်မယ်
+    - cron: '30 2 * * *'
+    # တနင်္လာနေ့မနက် UTC အချိန် 9 နာရီတိုင်း (ဥပမာ- အပတ်စဉ် dependency audit)
+    - cron: '0 9 * * 1'
+    # ၆ နာရီတစ်ကြိမ်
+    - cron: '0 */6 * * *'
+```
+
+**Cron format**: `minute hour day-of-month month day-of-week`
+
+```
+0 2 * * *      → နေ့စဉ် နံနက် ၂:၀၀ နာရီ
+30 9 * * 1     → တနင်္လာနေ့တိုင်း နံနက် ၉:၃၀ နာရီ
+0 0 1 * *      → လတိုင်းရဲ့ ၁ ရက်နေ့ ညသန်းခေါင်ယံ
+*/5 * * * *    → ၅ မိနစ်တိုင်း (သတိထားပါ - Minutes အများကြီး စားနိုင်ပါတယ်!)
+```
+
+### Inputs များပါဝင်သော Manual Trigger
+
+```yaml
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options: [development, staging, production]
+        default: staging
+      
+      image-tag:
+        description: 'Docker image tag to deploy'
+        required: true
+        type: string
+      
+      dry-run:
+        description: 'Dry run — simulate without making changes'
+        type: boolean
+        default: false
+```
+
+```yaml
+# Steps တွေထဲမှာ Inputs တွေကို သုံးရန်
+steps:
+  - name: Deploy to ${{ inputs.environment }}
+    if: ${{ !inputs.dry-run }}
+    run: ./deploy.sh ${{ inputs.image-tag }} ${{ inputs.environment }}
+```
+
+### အခြား အသုံးဝင်သော Trigger များ
+
+```yaml
+on:
+  workflow_call:            # ဒီ workflow ကို အခြား workflow တစ်ခုက ခေါ်သုံးလို့ရပါတယ်
+  release:
+    types: [published]      # GitHub Release တစ်ခု Publish လုပ်တဲ့အခါ Run မယ်
+  issues:
+    types: [opened]         # Issue အသစ်တစ်ခု ဖွင့်လိုက်တဲ့အခါ Run မယ်
+  issue_comment:
+    types: [created]        # PR တစ်ခုပေါ်မှာ /deploy လို့ Comment ရေးရင် Deployment စမယ်
+  workflow_run:
+    workflows: ["CI"]       # အခြား workflow တစ်ခု ပြီးဆုံးသွားမှ (AFTER) Run မယ်
+    types: [completed]
+```
+
+---
+
+## `jobs`: Structure နှင့် Options များ
+
+```yaml
+jobs:
+  my-job:
+    # လိုအပ်ချက်: ဘယ် runner ကို သုံးမလဲ
+    runs-on: ubuntu-latest
+
+    # Optional: UI မှာပြမယ့် Display name
+    name: "🧪 Run Unit Tests"
+
+    # Optional: Job အလွန်အကျွံ ကြာမြင့်မှုကို ကာကွယ်ရန်
+    timeout-minutes: 30
+
+    # Optional: ဒီ Condition မှန်မှသာ Run မယ်
+    if: github.ref == 'refs/heads/main'
+
+    # Optional: အခြား Job တွေပေါ် မူတည်နေစေရန် (အစဉ်လိုက် လုပ်ဆောင်မှုကို သေချာစေသည်)
+    needs: [lint, security-scan]
+
+    # Optional: Environment (Protection rules နဲ့ Secrets တွေကို ဖွင့်ပေးသည်)
+    environment:
+      name: production
+      url: https://yourapp.com
+
+    # Optional: ဒီ Job အတွက် GitHub token permissions များကို Override လုပ်ရန်
+    permissions:
+      contents: read
+      packages: write
+
+    # Optional: Matrix strategy (Variable အမျိုးမျိုးနဲ့ Job ကို N ကြိမ် Run မယ်)
+    strategy:
+      matrix:
+        node-version: [18, 20, 22]
+        os: [ubuntu-latest, windows-latest]
+      fail-fast: false    # တစ်ခုခု Error တက်ရင်တောင် အခြား Matrix jobs တွေကို မရပ်ပစ်ဘူး
+
+    # Optional: နောက်ထပ် ဆက်လုပ်မယ့် Downstream jobs တွေဆီ ပို့ပေးမယ့် Outputs
+    outputs:
+      image-digest: ${{ steps.build.outputs.digest }}
+
+    steps: [...]
+```
+
+---
+
+## `steps`: Step Options အားလုံး
+
+```yaml
+steps:
+  - name: My step name                    # လိုအပ်ချက်: လူဖတ်လို့လွယ်မယ့် Label
+
+    # Option A: Pre-built action တစ်ခုကို သုံးရန်
+    uses: actions/checkout@v4
+    with:                                  # Action သီးသန့် Inputs များ
+      fetch-depth: 0                       # Full git history
+      ref: ${{ github.head_ref }}
+
+    # Option B: Shell commands များကို Run ရန်
+    run: |
+      echo "Hello from ${{ github.actor }}"
+      npm ci
+
+    # Step တစ်ခုချင်းစီအတွက် Environment variables
+    env:
+      NODE_ENV: test
+      DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
+
+    # ဒီ Step Error တက်ရင်တောင် ဆက်လုပ်သွားမယ်
+    continue-on-error: true
+
+    # Condition ကို ကိုက်ညီမှသာ ဒီ Step ကို Run မယ်
+    if: ${{ success() && github.ref == 'refs/heads/main' }}
+
+    # Outputs တွေကို ညွှန်းဆိုနိုင်ဖို့ ဒီ Step ကို ID ပေးမယ်
+    id: build
+
+    # ဒီ Step အတွက်တင် Working directory ကို ပြောင်းမယ်
+    working-directory: ./packages/api
+
+    # Shell ကို ပြောင်းသုံးရန် (Default: Linux/macOS မှာ bash, Windows မှာ pwsh)
+    shell: python3 {0}    # Python နဲ့ Run မယ်!
+```
+
+---
+
+## Matrix Builds: Version များစွာနဲ့ Test လုပ်ခြင်း
+
+Matrix builds တွေက သင့်ရဲ့ Job ကို Variable တန်ဖိုး အမျိုးမျိုးနဲ့ အကြိမ်ကြိမ် Run ပေးပါတယ်။ Cross-compatibility ကို Test လုပ်ဖို့အတွက် အထူးသင့်လျော်ပါတယ်:
+
+```yaml
+jobs:
+  test:
+    strategy:
+      matrix:
+        # ပေါင်းစပ်မှု အားလုံးကို Test လုပ်ပါမယ်: Node version 3 ခု × OS 2 ခု = Jobs ၆ ခု
+        node-version: [18, 20, 22]
+        os: [ubuntu-latest, windows-latest]
+        
+        # ထပ်ဆောင်း ထည့်သွင်းချင်သည်များ (ပေါင်းစပ်မှု အားလုံး မဟုတ်ဘဲ)
+        include:
+          - node-version: 20
+            os: macos-latest
+            experimental: true   # Custom variable
+        
+        # တားမြစ်လိုသည့် ပေါင်းစပ်မှုများ (Exclude)
+        exclude:
+          - node-version: 18
+            os: windows-latest   # Windows ပေါ်မှာ Node 18 ကို ကျော်မယ်
+
+      fail-fast: false           # တစ်ခုခု Error တက်ရင်တောင် အားလုံး ဆက် Run မယ်
+
+    runs-on: ${{ matrix.os }}    # Matrix value ကို သုံးမယ်
+    name: Node ${{ matrix.node-version }} on ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}    # Matrix value ကို သုံးမယ်
+      - run: npm ci
+      - run: npm test
+        continue-on-error: ${{ matrix.experimental == true }}
+```
+
+---
+
+## Expressions နှင့် Context
+
+GitHub Actions မှာ အလွန် சக்திထက်တဲ့ Expression syntax ရှိပါတယ်: `${{ expression }}`
+
+### အသုံးများသော Context များ
+
+```yaml
+# github context — workflow run နဲ့ပတ်သက်တဲ့ Metadata များ
+${{ github.sha }}              # Full commit SHA
+${{ github.sha }}              # Short: github.sha | head -c 7
+${{ github.ref }}              # refs/heads/main သို့မဟုတ် refs/tags/v1.0.0
+${{ github.ref_name }}         # main သို့မဟုတ် v1.0.0 (Short name)
+${{ github.actor }}            # Run လုပ်မှုကို စတင်ခဲ့တဲ့ Username
+${{ github.repository }}       # owner/repo
+${{ github.event_name }}       # push, pull_request, schedule စသည်ဖြင့်
+${{ github.run_number }}       # အစဉ်လိုက် Run နံပါတ် (1, 2, 3...)
+${{ github.run_id }}           # ဒီ Run အတွက် Unique ID
+${{ github.workflow }}         # Workflow name
+${{ github.head_ref }}         # Source branch (pull_request လုပ်တဲ့အခါ)
+${{ github.base_ref }}         # Target branch (pull_request လုပ်တဲ့အခါ)
+${{ github.event.pull_request.number }}  # PR နံပါတ်
+
+# env context — Environment variables များ
+${{ env.MY_VAR }}
+
+# secrets context — Encrypted secrets များ
+${{ secrets.MY_SECRET }}
+${{ secrets.GITHUB_TOKEN }}    # အလိုအလျောက် ပံ့ပိုးပေးသည်
+
+# steps context — ယခင် Steps များမှ Outputs များ
+${{ steps.my-step-id.outputs.result }}
+${{ steps.my-step-id.outcome }}    # success, failure, cancelled, skipped
+
+# jobs context — Reusable workflows များအတွက်
+${{ jobs.build.outputs.image-digest }}
+```
+
+### Conditional Expressions (အခြေအနေအရ စစ်ဆေးချက်များ)
+
+```yaml
+# Functions များ
+if: ${{ success() }}            # ယခင် Steps အားလုံး အောင်မြင်ခဲ့လျှင်
+if: ${{ failure() }}            # ယခင် Step(s) Error တက်ခဲ့လျှင်
+if: ${{ cancelled() }}          # Workflow ကို ဖျက်သိမ်းခဲ့လျှင်
+if: ${{ always() }}             # အမြဲတမ်း Run မယ် (Error တက်ရင်တောင်မှ)
+
+# Conditions များ
+if: github.ref == 'refs/heads/main'           # Main branch ပေါ်မှာသာ
+if: github.event_name == 'push'               # Push events တွေမှာသာ
+if: contains(github.ref, 'refs/tags/')        # Tag pushes တွေမှာသာ
+if: startsWith(github.ref, 'refs/tags/v')     # Version tags တွေမှာသာ
+
+# Condition များကို ပေါင်းစပ်သုံးခြင်း
+if: |
+  github.ref == 'refs/heads/main' &&
+  github.event_name == 'push'
+
+# Ternary-style ပုံစံ
+run: echo "Branch is ${{ github.ref_name == 'main' && 'MAIN' || 'not main' }}"
+```
+
+---
+
+## Steps နှင့် Jobs အကြား Outputs သတ်မှတ်ခြင်း
+
+```yaml
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      # ဒီ Job က ဘာတွေ Output ထုတ်ပေးမလဲဆိုတာ ကြေညာခြင်း
+      image-tag: ${{ steps.meta.outputs.version }}
+    
+    steps:
+      - name: Generate metadata
+        id: meta         # ဒီ Step ကို ID ပေးမယ်
+        run: |
+          VERSION=$(git describe --tags --always)
+          # Environment file ကိုသုံးပြီး Output သတ်မှတ်မယ် (Modern syntax)
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "date=$(date -u +%Y%m%d)" >> $GITHUB_OUTPUT
+
+      - name: Use the output in the same job
+        run: echo "Building version ${{ steps.meta.outputs.version }}"
+
+  deploy:
+    needs: build         # Dependency ကို ကြေညာမယ်
+    runs-on: ubuntu-latest
+    steps:
+      - name: Use output from another job
+        run: |
+          echo "Deploying ${{ needs.build.outputs.image-tag }}"
+```
+
+---
+
+## `concurrency`: Parallel Runs များကို ကာကွယ်ရန်
+
+```yaml
+# Global: Branch တစ်ခုချင်းစီအတွက် တစ်ကြိမ်လျှင် Run တစ်ခုသာ
+# Push အသစ်လုပ်လိုက်ရင် အဲ့ဒီ Branch မှာ လက်ရှိ Run နေတာကို Cancel လုပ်ပစ်မယ်
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Production Deployments တွေကို Cancel မလုပ်ပါနဲ့ (Deploy လုပ်နေတုန်း အန္တရာယ်ရှိနိုင်လို့ပါ)
+concurrency:
+  group: ${{ github.workflow }}-production
+  cancel-in-progress: false   # Cancel လုပ်မယ့်အစား Queue မှာ တင်ထားမယ်
+```
+
+---
+
+## Summary (အနှစ်ချုပ်)
+
+အဓိက Workflow syntax အစိတ်အပိုင်းများ:
+- **`on`**: Push/PR (branch/path filters များပါဝင်သည်); Cron နဲ့ Schedule လုပ်ခြင်း; Inputs တွေပါတဲ့ `workflow_dispatch`
+- **`jobs`**: Default အနေနဲ့ Parallel run ခြင်း; အစဉ်လိုက်လုပ်ဖို့ `needs:` ကိုသုံးခြင်း; ပေါင်းစပ်မှုများအတွက် `strategy.matrix`
+- **`steps`**: Actions အတွက် `uses:`; Shell အတွက် `run:`; Outputs ထုတ်ဖို့ `id:`; Condition တွေအတွက် `if:`
+- **`${{ }}`**: Expression syntax — `github.sha`, `secrets.X`, `steps.id.outputs.Y` တွေကို ဝင်ရောက်သုံးစွဲရန်
+- **`concurrency`**: Parallel deploys များကို တားဆီးသည်; Feedback မြန်စေရန် `cancel-in-progress: true` ကို သုံးသည်
+- **`outputs`**: Steps အချင်းချင်း (`$GITHUB_OUTPUT` വഴി) နဲ့ Jobs အချင်းချင်း (`needs.job.outputs` വഴി) Data လွှဲပြောင်းရန်
+
+နောက်သင်ခန်းစာမှာတော့ CI minutes တွေကို သက်သာစေမယ့် Path filters တွေနဲ့ PR-specific events တွေအပါအဝင် Trigger အမျိုးအစားများနှင့် Event filters များကို အသေးစိတ် ကျွမ်းကျင်အောင် သင်ယူသွားမှာ ဖြစ်ပါတယ်။

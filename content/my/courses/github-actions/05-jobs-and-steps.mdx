@@ -1,0 +1,349 @@
+---
+title: "Jobs, Steps, Service Containers & Artifacts"
+---
+
+# Multi-Job Workflows တည်ဆောက်ခြင်း
+
+ကောင်းမွန်စွာ တည်ဆောက်ထားသော workflow တစ်ခုတွင် လုပ်ငန်းတာဝန်များကို parallel jobs များအဖြစ် ခွဲထုတ်ခြင်း၊ မှီခိုနေရသော jobs များကို အစဥ်လိုက်လုပ်ဆောင်စေခြင်း၊ integration tests များအတွက် service containers များကို အသုံးပြုခြင်းနှင့် artifacts များဖြင့် output များကို သိမ်းဆည်းခြင်းတို့ ပါဝင်ပါတယ်။
+
+---
+
+## Job Parallelism နှင့် Dependencies
+
+```mermaid
+flowchart LR
+    PUSH["git push"]
+    
+    LINT["lint\n~1 min"]
+    TYPECHECK["type-check\n~30s"]
+    UNIT["unit-tests\n~2 min"]
+    
+    SECURITY["security-scan\n~3 min"]
+    
+    BUILD["docker-build\n~5 min"]
+    
+    STAGING["deploy-staging\n~2 min"]
+    
+    PUSH --> LINT & TYPECHECK & UNIT & SECURITY
+    LINT & TYPECHECK & UNIT & SECURITY --> BUILD
+    BUILD --> STAGING
+```
+
+```yaml
+jobs:
+  # ── Parallel group 1: Fast feedback (run simultaneously) ───────────
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+      - run: npm ci && npx eslint src/ --max-warnings=0
+
+  type-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+      - run: npm ci && npx tsc --noEmit
+
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+      - run: npm ci && npm run test:unit -- --coverage
+
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci && npm audit --audit-level=high
+
+  # ── Sequential: only after ALL parallel jobs pass ─────────────────
+  docker-build:
+    needs: [lint, type-check, unit-tests, security-scan]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/build-push-action@v5
+        with: { context: ., push: false, tags: myapp:test, load: true }
+
+  deploy-staging:
+    needs: docker-build
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Deploying to staging"
+```
+
+---
+
+## Service Containers: Integration Tests များအတွက် တကယ့် Dependencies များ
+
+Service containers များသည် job တစ်ခုနှင့်အတူ တကယ့် Docker containers များကို (PostgreSQL, Redis, MongoDB ကဲ့သို့သော) run ပေးပြီး သတ်မှတ်ထားသော port များတွင် `localhost` အဖြစ် အသုံးပြုနိုင်စေပါတယ်:
+
+```yaml
+jobs:
+  integration-tests:
+    runs-on: ubuntu-latest
+    
+    services:
+      # Service name becomes a hostname accessible to steps
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: testuser
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: testdb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U testuser -d testdb"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-retries 5
+
+      # LocalStack for mocking AWS services (S3, SQS, DynamoDB)
+      localstack:
+        image: localstack/localstack:latest
+        ports:
+          - 4566:4566
+        env:
+          SERVICES: s3,sqs,dynamodb
+          DEFAULT_REGION: us-east-1
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+      - run: npm ci
+      
+      - name: Run database migrations
+        run: npx prisma migrate deploy
+        env:
+          DATABASE_URL: postgres://testuser:testpass@localhost:5432/testdb
+
+      - name: Run integration tests
+        run: npm run test:integration
+        env:
+          DATABASE_URL: postgres://testuser:testpass@localhost:5432/testdb
+          REDIS_URL: redis://localhost:6379
+          AWS_ENDPOINT: http://localhost:4566
+
+      - name: Run E2E tests against full stack
+        run: npm run test:e2e
+        env:
+          DATABASE_URL: postgres://testuser:testpass@localhost:5432/testdb
+```
+
+---
+
+## Artifacts: Jobs အားဖြင့် Data များကို ဖြတ်သန်းပေးပို့ခြင်း
+
+Artifacts များသည် jobs များနှင့် runs များကြားတွင် files များကို ဆက်လက်ထိန်းသိမ်းပေးပါတယ်။ ၎င်းတို့ကို အောက်ပါနေရာများတွင် အသုံးပြုနိုင်ပါတယ်:
+- `build` job မှ build output ကို `deploy` job သို့ ပို့ရန်
+- Test reports များကို archive လုပ်ရန် (GitHub UI တွင် run ပြီးသွားလျှင်တောင် ဝင်ရောက်ကြည့်ရှုနိုင်သည်)
+- Coverage reports တွေ၊ security scan ရလဒ်တွေနှင့် Playwright screenshots များကို သိမ်းဆည်းရန်
+
+```yaml
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci && npm run build
+
+      # Upload build output as an artifact
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-bundle           # Artifact name (reference in download)
+          path: dist/                 # Path to upload (file or directory)
+          retention-days: 7           # Auto-delete after N days (default: 90)
+          if-no-files-found: error    # Fail if dist/ doesn't exist
+          compression-level: 6        # Compression level (0-9)
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      # Download the artifact from the build job
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-bundle
+          path: dist/   # Where to place downloaded files
+
+      - name: Deploy to server
+        run: rsync -avz dist/ user@server:/var/www/html/
+
+  # Upload test results (even if tests fail — use always())
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci
+      
+      - name: Run tests
+        run: npm test -- --reporters=junit --outputFile=test-results.xml
+        continue-on-error: true   # Don't stop the upload if tests fail
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()              # Upload even if tests failed
+        with:
+          name: test-results-${{ github.run_number }}
+          path: |
+            test-results.xml
+            coverage/
+          retention-days: 30
+```
+
+---
+
+## Caching: ထပ်ခါတလဲလဲ လုပ်ဆောင်ရမှုများကို ပိုမိုမြန်ဆန်စေခြင်း
+
+Caching သည် runs များကြားတွင် download လုပ်ထားသော dependencies များကို သိမ်းဆည်းပေးထားခြင်းဖြစ်ပြီး pipelines များအတွက် အမြန်ဆန်ဆုံး တိုးတက်မှုကို ဖြစ်စေတဲ့ အဓိကအချက်ပဲ ဖြစ်ပါတယ်:
+
+```yaml
+# Built-in caching via setup-node
+- uses: actions/setup-node@v4
+  with:
+    node-version: 20
+    cache: npm          # Automatically caches ~/.npm keyed on package-lock.json
+
+# Manual caching (more control)
+- uses: actions/cache@v4
+  id: cache-node-modules
+  with:
+    path: node_modules
+    key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json') }}
+    restore-keys: |
+      ${{ runner.os }}-node-   # Fallback: restore any node cache if exact key misses
+
+# Only install if cache missed
+- name: Install dependencies
+  if: steps.cache-node-modules.outputs.cache-hit != 'true'
+  run: npm ci
+
+# Other common cache targets
+- uses: actions/cache@v4
+  with:
+    path: ~/.gradle/caches      # Java/Kotlin (Gradle)
+    key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*') }}
+
+- uses: actions/cache@v4
+  with:
+    path: ~/.cache/pip          # Python (pip)
+    key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+
+- uses: actions/cache@v4
+  with:
+    path: |
+      ~/.cargo/registry         # Rust (Cargo)
+      ~/.cargo/git
+      target/
+    key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+```
+
+---
+
+## အခြေအနေအလိုက် Step များကို Execution လုပ်ခြင်း
+
+```yaml
+steps:
+  - name: Deploy to production
+    # Only run if: event is push AND branch is main AND previous steps passed
+    if: |
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      success()
+    run: ./deploy.sh production
+
+  - name: Notify on failure
+    # Always run, but only if something above failed
+    if: failure()
+    uses: slackapi/slack-github-action@v1
+    with:
+      channel-id: "#ci-alerts"
+      slack-message: "❌ Pipeline failed on ${{ github.ref_name }}"
+    env:
+      SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+
+  - name: Always upload logs
+    if: always()   # Runs even if earlier steps failed or were cancelled
+    uses: actions/upload-artifact@v4
+    with:
+      name: pipeline-logs
+      path: /var/log/
+
+  - name: Skip on draft PRs
+    if: |
+      github.event_name != 'pull_request' ||
+      !github.event.pull_request.draft
+    run: npm run expensive-test
+
+  - name: Only on tags
+    if: startsWith(github.ref, 'refs/tags/')
+    run: npm publish
+```
+
+---
+
+## Step Outputs များကို သတ်မှတ်ခြင်း
+
+```yaml
+steps:
+  - name: Get version
+    id: version   # Must set id to reference outputs
+    run: |
+      VERSION=$(cat package.json | python3 -c "import json,sys; print(json.load(sys.stdin)['version'])")
+      SHA_SHORT=$(git rev-parse --short HEAD)
+      
+      # Modern output syntax (GitHub Actions)
+      echo "version=${VERSION}" >> $GITHUB_OUTPUT
+      echo "sha=${SHA_SHORT}" >> $GITHUB_OUTPUT
+      echo "image-tag=${VERSION}-${SHA_SHORT}" >> $GITHUB_OUTPUT
+
+  - name: Use the output
+    run: |
+      echo "Version: ${{ steps.version.outputs.version }}"
+      echo "SHA: ${{ steps.version.outputs.sha }}"
+      docker build -t myapp:${{ steps.version.outputs.image-tag }} .
+
+  - name: Set dynamic job summary
+    run: |
+      echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+      echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+      echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+      echo "| Version | ${{ steps.version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
+      echo "| Commit | ${{ steps.version.outputs.sha }} |" >> $GITHUB_STEP_SUMMARY
+      echo "| Status | ✅ Deployed |" >> $GITHUB_STEP_SUMMARY
+```
+
+---
+
+## အကျဉ်းချုပ်
+
+| သဘောတရား | အဓိကအချက်များ |
+|---------|-----------|
+| **Parallel jobs** | မူလအတိုင်း လုပ်ဆောင်ပုံ၊ `needs:` က အစဥ်လိုက် မှီခိုမှုကို ဖန်တီးပေးသည် |
+| **Service containers** | Job နှင့်အတူ တကယ့် DB/cache instances များ ပါဝင်လာခြင်း၊ `localhost:port` ဖြင့် အသုံးပြုနိုင်သည် |
+| **Artifacts** | `upload-artifact@v4` ဖြင့် upload လုပ်ခြင်း၊ နောက်လာမည့် jobs များတွင် `download-artifact@v4` ဖြင့် download လုပ်ခြင်း |
+| **Caching** | အမြန်ဆန်ဆုံး စနစ်ထည့်သွင်းရန် `setup-node cache: npm` ကို သုံးပါ၊ သီးသန့် path များအတွက် `actions/cache@v4` ကို သုံးပါ |
+| **Conditional steps** | `if: success()`, `if: failure()`, `if: always()`, `if: expression` |
+| **Step outputs** | `echo "key=value" >> $GITHUB_OUTPUT` ဖြင့် သတ်မှတ်ပြီး `${{ steps.id.outputs.key }}` ဖြင့် ဖတ်ရှုပါ |
+| **Job summary** | GitHub UI တွင် Markdown summary ကို ပြသရန် `$GITHUB_STEP_SUMMARY` သို့ ရေးသားပါ |
+
+နောက်လာမည့် သင်ခန်းစာတွင် environment variables နှင့် secrets များအကြောင်းကို လေ့လာရမှာဖြစ်ပြီး — workflows များအတွင်းသို့ credentials များနှင့် configuration များကို လုံခြုံစွာ ဘwie ထည့်သွင်းရမည်ကို ကျွမ်းကျင်လာမှာ ဖြစ်ပါတယ်။

@@ -1,0 +1,379 @@
+---
+title: "Git Best Practices & .gitignore"
+---
+
+# Professional Git Habits
+
+Junior engineer တစ်ယောက်နဲ့ Senior engineer တစ်ယောက်ရဲ့ Git history မှာ ကွာခြားချက်က code သက်သက်တင် မဟုတ်ပါဘူး — hygiene (သပ်ရပ်သန့်ရှင်းမှု) ပါ။ Clean commits တွေ၊ ပြည့်စုံတဲ့ `.gitignore`၊ အနှစ်သာရရှိတဲ့ messages တွေနဲ့ stash ကို စည်းကမ်းတကျသုံးတတ်တာတွေက collaboration နဲ့ debugging လုပ်တဲ့အခါ အများကြီး ပိုလွယ်ကူစေတဲ့ အလေ့အထကောင်းတွေ ဖြစ်ပါတယ်။
+
+---
+
+## The `.gitignore` File: ဘယ်တော့မှ Commit မလုပ်သင့်တာများ
+
+`.gitignore` file က ဘယ် files တွေနဲ့ directories တွေကို လုံးဝဥဿုံ လျစ်လျူရှုရမယ်ဆိုတာ Git ကို ညွှန်ပြပါတယ်။ ဒါကို ပထမဆုံး commit မလုပ်ခင် **အရင်ဆုံး** စီစဉ်ထားပါ — files တွေကို Git history ထဲကနေ commit ပြီးသွားမှ ဖယ်ရှားရတာ ပိုခက်ခဲပါတယ်။
+
+### Full-Stack DevOps Projects များအတွက် ပြည့်စုံသော Template
+
+```gitignore
+# ================================================================
+# Dependencies — ဘယ်တော့မှ commit မလုပ်ပါနဲ့၊ lock file ကနေပဲ دائما install လုပ်ပါ
+# ================================================================
+node_modules/
+.pnp/
+.pnp.js
+vendor/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# ================================================================
+# 🚨 CRITICAL: Secrets နှင့် credentials များ — ဘယ်တော့မှ commit မလုပ်ပါနဲ့
+# ================================================================
+.env
+.env.local
+.env.development
+.env.staging
+.env.production
+.env.test
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+*_rsa
+*_ecdsa
+*.ppk
+service-account*.json
+*-credentials.json
+google-services.json
+GoogleService-Info.plist
+kubeconfig
+.kube/
+
+# ================================================================
+# Build outputs — ပြန်လည်ထုတ်ယူနိုင်ပါသည်၊ track လုပ်ရန်မလိုပါ
+# ================================================================
+dist/
+build/
+out/
+.next/
+.nuxt/
+.svelte-kit/
+target/          # Java/Rust
+bin/             # Go
+*.class          # Java
+*.jar
+*.war
+*.o              # C/C++
+*.so
+*.exe
+
+# ================================================================
+# Test နှင့် coverage output
+# ================================================================
+coverage/
+.nyc_output/
+test-results/
+playwright-report/
+.jest-cache/
+
+# ================================================================
+# Docker — local settings ပါသော override files များကို track မလုပ်ပါနှင့်
+# ================================================================
+docker-compose.override.yml
+docker-compose.local.yml
+
+# ================================================================
+# Infrastructure — state files များတွင် secrets များ ပါဝင်တတ်သည်
+# ================================================================
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl    # ← ဒါကတော့ commit လုပ်လို့ရပါတယ် (lock file)
+*.tfvars               # Secrets ပါဝင်နိုင်သည် — သေချာစစ်ဆေးပါ
+
+# ================================================================
+# OS နှင့် IDE files များ — အခြား developer များအတွက် မလိုတော့ပါ
+# ================================================================
+.DS_Store
+.DS_Store?
+Thumbs.db
+desktop.ini
+.vscode/               # Personal editor settings (share via .vscode/*.recommended.json)
+.idea/
+*.swp
+*.swo
+*~
+
+# ================================================================
+# Logs — repo ထဲမှာ သိမ်းမထားဘဲ stream လုပ်သင့်သည်
+# ================================================================
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+```
+
+### `.gitignore` Debugging
+
+```bash
+# သီးခြား file တစ်ခုကို ignore လုပ်ထားခြင်း ရှိမရှိ (ဘာကြောင့်လဲဆိုတာပါ) စစ်ဆေးရန်
+git check-ignore -v node_modules/lodash/
+# .gitignore:1:node_modules/  node_modules/lodash/
+
+# လက်ရှိ ignore လုပ်ထားသမျှ files အားလုံးကို ကြည့်ရန်
+git ls-files --others --ignored --exclude-standard
+
+# Ignore လုပ်ထားသော file တစ်ခုကို Force-add လုပ်ရန် (ignore rule ကို ကျော်ရန်)
+git add -f some-file.log   # တကယ်သေချာမှသာ သုံးပါ
+
+# File က commit ပြီးသားဖြစ်နေပါပြီ — .gitignore က ယခုအခါ မကူညီနိုင်ပါ
+# Tracking ထဲကနေ ဖယ်ရှားရန် (disk ပေါ်မှာတော့ ဆက်ရှိနေပါမယ်)
+git rm --cached .env
+git commit -m "chore: remove accidentally committed .env"
+```
+
+---
+
+## Conventional Commits: Industry Standard
+
+[Conventional Commits](https://www.conventionalcommits.org) သတ်မှတ်ချက်က machine-readable ဖြစ်ပြီး human-friendly ဖြစ်တဲ့ commit history ကို ဖန်တီးပေးပါတယ်။ ဒါဟာ automatic changelog generation, semantic versioning နဲ့ git log ကို ပိုမိုကောင်းမွန်စွာ filter လုပ်နိုင်ခြင်းတို့ကို အထောက်အကူပြုပါတယ်။
+
+### Format
+
+```
+<type>[optional scope]: <description>
+
+[optional body]
+
+[optional footers]
+```
+
+### Complete Type Reference
+
+| Type | Purpose | SemVer ကို Trigger ဖြစ်စေသလား? |
+|------|---------|----------------|
+| `feat` | အသုံးပြုသူများအတွက် feature အသစ် | Minor version bump (`v1.2.0 → v1.3.0`) |
+| `fix` | Bug fix ပြုလုပ်ခြင်း | Patch version bump (`v1.2.0 → v1.2.1`) |
+| `feat!` / `fix!` | Breaking change (! = BREAKING) | Major version bump (`v1.2.0 → v2.0.0`) |
+| `docs` | Documentation သက်သက် | မရှိပါ |
+| `style` | Formatting (logic အပြောင်းအလဲမရှိ) | မရှိပါ |
+| `refactor` | Code ပြန်လည်ပြင်ဆင်ခြင်း (feature/fix မပါ) | မရှိပါ |
+| `perf` | Performance တိုးတက်ကောင်းမွန်စေခြင်း | Patch |
+| `test` | Tests တွေထည့်ခြင်း သို့မဟုတ် ပြင်ခြင်း | မရှိပါ |
+| `ci` | CI/CD pipeline အပြောင်းအလဲများ | မရှိပါ |
+| `chore` | Build tools, dependencies များ | မရှိပါ |
+| `revert` | ယခင် commit ကို ပြန်ဖျက်ခြင်း | မူတည်သည် |
+
+### Real Examples
+
+```bash
+# Feature
+git commit -m "feat(auth): add Google OAuth2 login"
+
+# Scope ပါသော Bug fix
+git commit -m "fix(api): handle null userId in payment endpoint"
+
+# Breaking change (သတ်မှတ်ရန် နည်းလမ်းနှစ်မျိုးရှိသည်)
+git commit -m "feat!: require email verification before login
+
+BREAKING CHANGE: Users must now verify email before they can log in.
+Existing users with unverified emails will be prompted on next login."
+
+# Docs
+git commit -m "docs(readme): add Kubernetes deployment instructions"
+
+# CI
+git commit -m "ci: add Trivy vulnerability scan to GitHub Actions pipeline"
+
+# Chore
+git commit -m "chore(deps): update express to 4.19.2 (security patch)"
+
+# Performance
+git commit -m "perf(db): add index on users.email to speed up login queries"
+
+# Revert
+git commit -m "revert: feat(auth): add Google OAuth2 login
+
+Reverts commit abc1234.
+Reason: OAuth credentials not yet approved for production."
+```
+
+### Commitlint ဖြင့် Conventions များကို တင်းကျပ်စွာ သတ်မှတ်ခြင်း
+
+```bash
+# commitlint ကို install လုပ်ရန်
+npm install --save-dev @commitlint/cli @commitlint/config-conventional
+
+# Config ဖန်တီးရန်
+echo "module.exports = {extends: ['@commitlint/config-conventional']}" > commitlint.config.js
+
+# Commit တိုင်းကို စစ်ဆေးရန် husky ကို စနစ်ထည့်သွင်းပါ
+npm install --save-dev husky
+npx husky init
+echo "npx --no -- commitlint --edit \$1" > .husky/commit-msg
+
+# ယခုအခါ ဤကဲ့သို့ commit လုပ်လျှင် ငြင်းပယ်ခံရပါမည်:
+git commit -m "updated stuff"
+# ✖ subject may not be empty [subject-empty]
+# ✖ type may not be empty [type-empty]
+```
+
+---
+
+## The Atomic Commit Principle
+
+**Atomic commit** ဆိုသည်မှာ အောက်ပါအချက်များနှင့်ကိုက်ညီသော logical change တစ်ခုတည်းကို ပြုလုပ်ခြင်းဖြစ်သည်-
+1. வாக்கிய တစ်ကြောင်းတည်းဖြင့် ရှင်းပြနိုင်သည်
+2. ကိုယ့်ဘာသာ test အားလုံး အောင်မြင်သည် (build မပျက်စေပါ)
+3. ဆက်စပ်မှုမရှိသော အလုပ်များကို ထိခိုက်မှုမရှိဘဲ revert လုပ်နိုင်သည်
+
+```bash
+# ❌ Anti-pattern: mega-commit
+git commit -m "fix bug in checkout, add new user settings page, update dependencies, change navbar color, refactor database queries"
+# ဒါမျိုးက review လုပ်လို့ လုံးဝမရသလို၊ သပ်သပ်ရပ်ရပ် revert လုပ်လို့လည်း မရပါဘူး
+
+# ✅ Atomic commits
+git commit -m "fix(checkout): prevent double-charge on page refresh"
+git commit -m "feat(settings): add user notification preferences page"
+git commit -m "chore(deps): update to express 4.19.2"
+git commit -m "style(navbar): change background to indigo-900 per design system"
+git commit -m "perf(db): optimize user lookup query with composite index"
+```
+
+---
+
+## `git stash`: ပြီးဆုံးသေးാത്ത အလုပ်များကို ခဏသိမ်းဆည်းခြင်း
+
+Stash ကို အသုံးအများဆုံး နေရာကတော့ — feature တစ်ခုကို လုပ်လက်စနဲ့ အရေးကြီးတဲ့ bug report တစ်ခု ဝင်လာတဲ့အခါမျိုး ဖြစ်ပါတယ်။
+
+```bash
+# === The Scenario ===
+# သင်သည် feature/redesign ကို လုပ်လက်စရှိသည် — commit မလုပ်ရသေးသော ပြောင်းလဲမှုများစွာရှိသည်
+# main ပေါ်တွင် P1 bug တစ်ခု ဝင်လာသည် — ၎င်းကို ချက်ချင်း ဖြေရှင်းရန် လိုအပ်သည်
+
+# Step 1: လက်ရှိအလုပ်များကို stash လုပ်ပါ
+git stash push -m "redesign work — WIP, 60% complete"
+# ပြုပြင်ထားပြီးသော tracked files အားလုံးကို သိမ်းဆည်းသည် (ဆန္ဒရှိပါက untracked files များကိုပါ သိမ်းနိုင်သည်)
+
+# Step 2: main သို့ ပြောင်းပြီး bug ကို ဖြေရှင်းပါ
+git switch main
+git switch -c fix/p1-payment-null-check
+# ... bug ကို ဖြေရှင်းပါ ...
+git add .
+git commit -m "fix(payments): handle null response from Stripe API"
+git push -u origin fix/p1-payment-null-check
+# PR တစ်ခုဖွင့်ပြီး merge လုပ်ပါ
+
+# Step 3: Feature အလုပ်သို့ ပြန်သွားပါ
+git switch feature/redesign
+git stash pop
+# သင့်ရဲ့ commit မလုပ်ရသေးသော ပြောင်းလဲမှုများ မူလအတိုင်း ပြန်ရောက်လာပါပြီ
+
+# === Full stash command reference ===
+git stash                    # Track လုပ်ထားပြီးသား၊ ပြောင်းလဲထားတဲ့ files များကို stash လုပ်ရန်
+git stash -u                 # Untracked files များကိုပါ stash လုပ်ရန်
+git stash -a                 # Ignore လုပ်ထားသော files များကိုပါ stash လုပ်ရန်
+git stash push -m "name"     # ဖော်ပြချက်ဖြင့် stash လုပ်ရန်
+git stash list               # Stash အားလုံးကို ကြည့်ရန်
+git stash show stash@{0}     # Stash ထဲမှာ ဘာတွေရှိလဲ ကြည့်ရန်
+git stash show -p stash@{0}  # Stash ရဲ့ full diff ကို ကြည့်ရန်
+git stash pop                # နောက်ဆုံး stash ကို apply လုပ်ပြီး list ထဲကနေ ဖယ်ရှားရန်
+git stash apply stash@{1}    # သီးသန့် stash ကို apply လုပ်ရန် (list ထဲမှာ ဆက်ထားမည်)
+git stash branch new-branch stash@{0}  # Stash ကနေ branch အသစ် ဖန်တီးရန်
+git stash drop stash@{0}     # သီးသန့် stash ကို ဖျက်ရန်
+git stash clear              # Stash အားလုံးကို ဖျက်ရန်
+```
+
+---
+
+## Git Hooks: Commit ပြုလုပ်သည့်အချိန်တွင် Quality ကို အလိုအလျောက်စစ်ဆေးခြင်း
+
+Git hooks ဆိုသည်မှာ Git lifecycle ထဲက သတ်မှတ်ထားသော အဖြစ်အပျက်များ (commit မလုပ်ခင်၊ push မလုပ်ခင် စသည်ဖြင့်) တွင် အလိုအလျောက် run သော scripts များ ဖြစ်ပါသည်:
+
+```bash
+# Hooks များကို .git/hooks/ ထဲတွင် ထားရှိသည် (repo ထဲသို့ commit မလုပ်ပါ)
+# Hooks များကို မျှဝေသုံးစွဲနိုင်ရန် Husky ကို အသုံးပြုပါ (repo ထဲသို့ commit လုပ်သည်)
+
+npm install --save-dev husky
+npx husky init
+
+# === Pre-commit hook: commit တိုင်းမလုပ်ခင် linter ကို run ပါ ===
+cat > .husky/pre-commit << 'EOF'
+#!/bin/sh
+echo "🔍 Running pre-commit checks..."
+
+# Staged files များကိုသာ lint လုပ်ပါ (full lint ထက် ပိုမြန်သည်)
+npx lint-staged
+
+# Type check
+npx tsc --noEmit || { echo "❌ TypeScript errors found"; exit 1; }
+
+echo "✅ Pre-commit checks passed"
+EOF
+
+# lint-staged ကို configure လုပ်ရန် (package.json ထဲတွင်)
+# "lint-staged": {
+#   "*.{ts,tsx}": ["eslint --fix", "prettier --write"],
+#   "*.{json,md,yml}": ["prettier --write"]
+# }
+
+# === Commit-msg hook: conventional commits များကို တင်းကျပ်စွာ စစ်ဆေးရန် ===
+cat > .husky/commit-msg << 'EOF'
+#!/bin/sh
+npx --no -- commitlint --edit "$1"
+EOF
+
+# === Pre-push hook: push မလုပ်ခင် test suite အပြည့်အစုံကို run ပါ ===
+cat > .husky/pre-push << 'EOF'
+#!/bin/sh
+echo "🧪 Running tests before push..."
+npm run test:unit -- --passWithNoTests || { echo "❌ Tests failed"; exit 1; }
+echo "✅ Tests passed — pushing"
+EOF
+```
+
+---
+
+## နေ့စဉ်အလုပ်များအတွက် အသုံးဝင်သော Git Commands များ
+
+```bash
+# === History ကို ရှာဖွေစစ်ဆေးရန် ===
+git log --oneline --graph --all                    # Visual branch graph ကို ကြည့်ရန်
+git log --author="Jane" --since="1 week ago"      # Author သို့မဟုတ် အချိန်အလိုက် filter လုပ်ရန်
+git log --oneline -- src/payments/                 # directory တစ်ခုချင်းစီ၏ history
+git log --oneline -S "calculateTotal"              # function နာမည်ပါသော commits များကို ရှာရန်
+git bisect start HEAD v1.0.0                       # Bug စတင်ပါဝင်လာသည့် commit ကို binary search ဖြင့် ရှာရန်
+
+# === သွားလာလှုပ်ရှားရန် ===
+git switch -                   # ယခင် branch သို့ ပြန်သွားရန် (cd - ကဲ့သို့)
+git checkout HEAD~3 -- file.ts # လွန်ခဲ့သော commits ၃ ခုက file ကို ပြန်ယူရန်
+
+# === သပ်ရပ်အောင် ရှင်းလင်းရန် ===
+git clean -fd                  # Untracked files နှင့် directories များကို ဖယ်ရှားရန်
+git clean -n                   # Dry-run (ဘာတွေဖယ်ရှားခံရမလဲ ကြည့်ရန်)
+git reflog                     # လတ်တလော HEAD အနေအထားများကို ကြည့်ရန် (ပျောက်သွားသော commits များကို ပြန်ရှာရန်)
+
+# === Debug လုပ်ရန် ===
+git blame src/auth/login.ts    # ဘယ်သူက ဘယ်အချိန်မှာ ဘယ်လိုင်းကို ရေးခဲ့လဲ
+git blame -L 20,30 src/auth/login.ts   # သီးသန့် line range တစ်ခု
+git log -p src/auth/login.ts   # file တစ်ခုတည်း၏ full diff history
+```
+
+---
+
+## အနှစ်ချုပ်
+
+| Practice (အလေ့အထ) | ဘကြောင့် အရေးကြီးသလဲ |
+|---------|---------------|
+| **ပထမဆုံး commit မလုပ်ခင် `.gitignore` ထည့်ပါ** | Secrets တွေ၊ node_modules တွေနဲ့ build artifacts တွေ history ထဲ မရောက်အောင် တားဆီးရန် |
+| **Conventional Commits** | Machine-readable ဖြစ်စေပြီး auto-changelog နဲ့ semantic versioning ကို အထောက်အကူပြုရန် |
+| **Atomic commits** | Commit တစ်ခုလျှင် logical change တစ်ခု — review လုပ်ရလွယ်ကူပြီး သီးခြားစီ revert လုပ်နိုင်ရန် |
+| **`git stash`** | Dirty commits မရှိဘဲ context-switch ကို သပ်သပ်ရပ်ရပ် လုပ်နိုင်ရန် |
+| **Git hooks (Husky)** | Commit လုပ်ချိန်တွင် quality ကို တင်းကျပ်စွာ စစ်ဆေးရန် — lint, typecheck, conventional messages |
+
+နောက်သင်ခန်းစာတွင်, ခေတ်မီ CI/CD teams များအတွက် Trunk-Based Development နှင့် release အခြေခံသော software များအတွက် Git Flow ကဲ့သို့သော လက်တွေ့ကမ္ဘာသုံး Git workflows များကို သင်ယူရပါမည်။

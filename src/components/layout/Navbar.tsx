@@ -41,9 +41,9 @@ export function Navbar() {
   }, []);
 
   const navLinks = [
-    { href: "/", label: "Home" },
-    { href: "/courses", label: "Courses", icon: BookOpen },
-    { href: "/roadmap", label: "Interactive Roadmap", icon: Map },
+    { href: `/${language}`, label: "Home" },
+    { href: `/${language}/courses`, label: "Courses", icon: BookOpen },
+    { href: `/${language}/roadmap`, label: "Interactive Roadmap", icon: Map },
   ];
 
   return (
@@ -104,7 +104,7 @@ export function Navbar() {
           </button>
 
           <Link
-            href="/courses/linux-command-line/01-why-linux-matters"
+            href={`/${language}/courses/linux-command-line/01-why-linux-matters`}
             className="hidden sm:inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 hover:scale-[1.02] active:scale-[0.98] transition-all"
           >
             <Sparkles className="w-3.5 h-3.5" />
@@ -205,7 +205,7 @@ export function Navbar() {
 
             <div className="pt-3">
               <Link
-                href="/courses/linux-command-line/01-why-linux-matters"
+                href={`/${language}/courses/linux-command-line/01-why-linux-matters`}
                 onClick={() => setMobileMenuOpen(false)}
                 className="w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl text-sm font-bold uppercase tracking-wider bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-lg shadow-blue-500/25 active:scale-[0.98] transition-all"
               >

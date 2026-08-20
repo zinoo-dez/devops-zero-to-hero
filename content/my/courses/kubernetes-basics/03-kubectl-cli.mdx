@@ -1,0 +1,488 @@
+---
+title: "The kubectl CLI: Commands, Contexts & Namespaces"
+---
+
+# `kubectl` — Kubernetes အတွက် သင့်ရဲ့ Command Center
+
+`kubectl` ဆိုတာကတော့ Kubernetes cluster တွေနဲ့ ချိတ်ဆက် interação လုပ်ဖို့ အသုံးချတဲ့ command-line tool တစ်ခု ဖြစ်ပါတယ်။ အက်ပ်တွေ deploy လုပ်တာ၊ pod တွေကို စစ်ဆေးတာ၊ log တွေဖတ်တာ၊ error တွေ ဖြေရှင်းတာ (debugging) အစရှိတဲ့ လုပ်ဆောင်ချက် မှန်သမျှဟာ `kubectl` ကို ဖြတ်ပြီး လုပ်ဆောင်ရပါတယ်။ ဒါကြောင့် `kubectl` ကို ကျွမ်းကျင်ပိုင်နိုင်ဖို့ဆိုတာ Kubernetes Practitioner တစ်ယောက်အတွက် အတန်ဖိုးရှိဆုံး ကျွမ်းကျင်မှုတစ်ခု ဖြစ်ပါတယ်။
+
+---
+
+## Installation
+
+```bash
+# macOS (Homebrew)
+brew install kubectl
+
+# macOS (manual — matches a specific K8s version)
+curl -LO "https://dl.k8s.io/release/v1.29.4/bin/darwin/amd64/kubectl"
+chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+
+# Linux (Ubuntu/Debian)
+curl -LO "https://dl.k8s.io/release/$(curl -sL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+chmod +x kubectl && sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+
+# Linux (snap)
+sudo snap install kubectl --classic
+
+# Windows (Chocolatey)
+choco install kubernetes-cli
+
+# Verify installation
+kubectl version --client
+# Client Version: v1.29.4
+# Kustomize Version: v5.0.4
+```
+
+---
+
+## Shell Autocompletion (အထူးအရေးကြီးသည်)
+
+ဒီဟာကို အခုချက်ချင်း စနစ်ထည့်သွင်းထားပါ — စာရိုက်ရတာ အချိန်အများကြီး သက်သာစေပါလိမ့်မယ်:
+
+```bash
+# Bash (~/.bashrc)
+echo 'source <(kubectl completion bash)' >> ~/.bashrc
+source ~/.bashrc
+
+# Zsh (~/.zshrc)
+echo 'source <(kubectl completion zsh)' >> ~/.zshrc
+source ~/.zshrc
+
+# Create a 'k' alias with full autocompletion
+echo 'alias k=kubectl' >> ~/.zshrc
+echo 'complete -o default -F __start_kubectl k' >> ~/.zshrc
+source ~/.zshrc
+
+# Now you can type:
+k get po<TAB>             # → k get pods
+k describe dep<TAB>       # → k describe deployment
+k get pods -n kube-<TAB>  # → -n kube-system
+```
+
+---
+
+## အရေးအပါဆုံး Command Groups (၄) ခု
+
+### 1. `get` — Resource များကို စာရင်းထုတ်ရန်
+
+```bash
+# === PODS ===
+kubectl get pods                         # လက်ရှိ namespace ထဲက Pods များ
+kubectl get pods -o wide                 # +Node, +IP columns
+kubectl get pods -A                      # Namespace အားလုံး
+kubectl get pods -w                      # Watch (အပြောင်းအလဲရှိရင် အလိုအလျောက် refresh ဖြစ်မည်)
+kubectl get pods -l app=api              # Label အလိုက် filter လုပ်ရန်
+kubectl get pods --field-selector=status.phase=Running  # Field အလိုက် filter လုပ်ရန်
+kubectl get pod my-pod -o yaml           # သတ်မှတ်ထားသော pod ရဲ့ YAML အပြည့်အစုံ
+kubectl get pod my-pod -o json           # JSON output
+kubectl get pod my-pod -o jsonpath='{.status.podIP}'  # သတ်မှတ်ထားသော field ကို သီးသန့်ထုတ်ရန်
+
+# === NODES ===
+kubectl get nodes
+kubectl get nodes -o wide                # +OS, +container runtime, +external IP
+kubectl describe node worker-1           # Node အသေးစိတ်အချက်အလက်များ (resources, conditions, pods)
+
+# === ALL RESOURCES IN A NAMESPACE ===
+kubectl get all -n production            # Pods, deployments, services, replicasets
+kubectl get all -A                       # Cluster တစ်ခုလုံးထဲက အားလုံး
+
+# === EVENTS (Debug လုပ်ရန် အလွန်အရေးကြီးသည်) ===
+kubectl get events -n production --sort-by='.lastTimestamp'
+kubectl get events -n production --field-selector type=Warning  # Warnings များကိုသာ
+
+# === OUTPUT FORMATS ===
+kubectl get deployment my-api -o yaml    # YAML spec အပြည့်အစုံ
+kubectl get deployment my-api -o json    # JSON
+kubectl get deployment my-api -o jsonpath='{.spec.replicas}'  # တန်ဖိုးတစ်ခုတည်း
+kubectl get pods -o custom-columns='NAME:.metadata.name,NODE:.spec.nodeName,IP:.status.podIP'
+```
+
+### 2. `describe` — အသေးစိတ် စစ်ဆေးခြင်း
+
+`describe` ဆိုတာ သင့်ရဲ့ နံပါတ် (၁) Debugging tool ဖြစ်ပါတယ်။ ဒါက resource spec၊ လက်ရှိ status နဲ့ အရေးအကြီးဆုံး အောက်ဆုံးမှာရှိတဲ့ **Events** တွေကို ပြသပေးပါတယ်:
+
+```bash
+# Pod တစ်ခုကို describe လုပ်ခြင်း (container status, resource usage, events, probe results များကို ပြသည်)
+kubectl describe pod my-api-xxx-yyy
+
+# အရေးကြီးဆုံး: အောက်ဆုံးနားမှာရှိတဲ့ Events section ကို သေချာဖတ်ပါ
+# Events က Pod တစ်ခု ဘာကြောင့် Error တက်နေလဲဆိုတာကို ပြောပြပေးပါတယ်:
+# Events:
+#   Warning  Failed     pod/api-xxx  Back-off pulling image "ghcr.io/user/api:bad-tag"
+#   Warning  Failed     pod/api-xxx  Error: ErrImagePull
+#   Warning  BackOff    pod/api-xxx  Back-off restarting failed container
+
+# Deployment တစ်ခုကို describe လုပ်ခြင်း (conditions, replica counts များကို ပြသည်)
+kubectl describe deployment my-api
+
+# Service တစ်ခုကို describe လုပ်ခြင်း (endpoints များကိုပြသည် — ချိတ်ဆက်မှုပြဿနာ ဖြေရှင်းရာတွင် အလွန်အရေးကြီးသည်)
+kubectl describe service my-api
+# Endpoints:  10.42.0.5:3000,10.42.0.6:3000  ← Service ချိတ်ဆက်ပေးထားသည့် Pods များ
+# အကယ်၍ Endpoints က "<none>" ဖြစ်နေလျှင်: label selector သည် မည်သည့် pod နှင့်မှ မကိုက်ညီပါ
+
+# Node တစ်ခုကို describe လုပ်ခြင်း (allocatable resources, running pods, conditions များကို ပြသည်)
+kubectl describe node worker-1
+```
+
+### 3. `logs` — Container Output များကို ကြည့်ရှုခြင်း
+
+```bash
+# Basic logs (container မှ stdout + stderr)
+kubectl logs my-api-xxx-yyy
+
+# Real-time ဖြင့် log များကို တိုက်ရိုက်ကြည့်ရှုရန် (-f = follow)
+kubectl logs my-api-xxx-yyy -f
+
+# နောက်ဆုံး N လိုင်းများကိုသာ ကြည့်ရန်
+kubectl logs my-api-xxx-yyy --tail=100
+
+# လွန်ခဲ့သော ၁ နာရီအတွင်းက logs များ
+kubectl logs my-api-xxx-yyy --since=1h
+
+# ယခင် container instance မှ logs များ (Pod က crash ဖြစ်ပြီး restart ဖြစ်သွားတဲ့အခါ အလွန်အရေးကြီးပါတယ်)
+kubectl logs my-api-xxx-yyy --previous
+
+# Multi-container pod: container ကို သီးသန့်သတ်မှတ်ပေးရန်
+kubectl logs my-api-xxx-yyy -c sidecar-container
+
+# Label တစ်ခုနှင့် ကိုက်ညီသော pods အားလုံး (replica အားလုံးမှ log များကို တစ်ပြိုင်နက် ထုတ်ပေးသည်)
+kubectl logs -l app=api --prefix --max-log-requests=10
+
+# ခွဲခြမ်းစိတ်ဖြာရန်အတွက် ဖိုင်ထဲသို့ ထုတ်ယူရန်
+kubectl logs my-api-xxx-yyy > /tmp/api-logs.txt
+```
+
+### 4. `exec` — Pods များအတွင်း Command များ လုပ်ဆောင်ရန်
+
+```bash
+# Interactive shell တစ်ခု ဖွင့်ရန် (/bin/bash မရှိလျှင် /bin/sh ကိုသုံးပါ)
+kubectl exec -it my-api-xxx-yyy -- /bin/sh
+
+# တစ်ခါသုံး Command တစ်ခုကို Run ရန်
+kubectl exec my-api-xxx-yyy -- env | grep DATABASE
+kubectl exec my-api-xxx-yyy -- cat /app/config.json
+kubectl exec my-api-xxx-yyy -- wget -qO- http://localhost:3000/health
+
+# Multi-container pod: container ကို သီးသန့်သတ်မှတ်ပေးရန်
+kubectl exec -it my-api-xxx-yyy -c nginx-sidecar -- /bin/sh
+
+# Pod အတွင်းပိုင်းမှနေ၍ Network ချိတ်ဆက်မှုကို Debug လုပ်ရန်
+kubectl exec my-api-xxx-yyy -- nslookup postgres.production.svc.cluster.local
+kubectl exec my-api-xxx-yyy -- wget -qO- http://postgres:5432
+
+# ယာယီ Debug pod တစ်ခုကို Run ရန် (သင့် app ကို မထိခိုက်စေပါ)
+kubectl run debug-pod --image=busybox:latest --restart=Never --rm -it -- /bin/sh
+kubectl run curl-test --image=curlimages/curl --restart=Never --rm -it -- \
+  curl http://my-api.production.svc.cluster.local/health
+```
+
+---
+
+## Apply, Delete, နှင့် Edit ပြုလုပ်ခြင်း
+
+```bash
+# Manifest တစ်ခုကို Apply လုပ်ရန် (မရှိသေးရင် ဖန်တီးမယ်၊ ရှိပြီးသားဆိုရင် update လုပ်မယ် — idempotent ဖြစ်သည်)
+kubectl apply -f deployment.yaml
+
+# Folder တစ်ခုလုံးကို apply လုပ်ရန် (.yaml နှင့် .yml ဖိုင်အားလုံးကို လုပ်ဆောင်ပေးသည်)
+kubectl apply -f ./k8s/
+
+# Sub-folder များပါမကျန် အားလုံးကို apply လုပ်ရန်
+kubectl apply -f ./k8s/ --recursive
+
+# Resource များကို ဖျက်ဆီးရန် (Delete)
+kubectl delete -f deployment.yaml        # ဖိုင်ထဲမှာပါတာတွေကို ဖျက်မည်
+kubectl delete pod my-pod                # သတ်မှတ်ထားသော pod ကို ဖျက်မည်
+kubectl delete pods -l app=api           # Label တူသော pod အားလုံးကို ဖျက်မည်
+kubectl delete namespace staging         # Namespace နဲ့တကွ အထဲက Resource အားလုံးကို ဖျက်မည်
+
+# Editor ထဲမှာ Resource တစ်ခုကို တိုက်ရိုက် Edit လုပ်ရန်
+kubectl edit deployment my-api
+# $EDITOR (ပုံမှန်အားဖြင့် vim) ပွင့်လာပါမယ်။ ပြောင်းလဲမှုများကို သိမ်းဆိုက်လိုက်တာနဲ့ ချက်ချင်းသက်ရောက်သွားပါမယ်။
+
+# Resource တစ်ခုကို Patch လုပ်ရန် (scripts နှင့် CI/CD များအတွက် အသုံးဝင်သည်)
+kubectl patch deployment my-api -p '{"spec":{"replicas":5}}'
+kubectl patch deployment my-api --type='json' \
+  -p='[{"op":"replace","path":"/spec/replicas","value":5}]'
+
+# Scale အမြန်လုပ်ရန်
+kubectl scale deployment my-api --replicas=5
+```
+
+---
+
+## Namespaces — Virtual Clusters များ
+
+Namespaces က Cluster တစ်ခုကို သီးခြားခွဲထုတ်ထားတဲ့ virtual environments တွေအဖြစ် ပိုင်းခြားပေးပါတယ်။ Resource အားလုံး (Pods၊ Services၊ Deployments၊ Secrets) ဟာ namespace တစ်ခုချင်းစီအလိုက် သီးသန့်စီ သတ်မှတ်ထားကြပါတယ်။
+
+```bash
+# Namespace များကို စာရင်းထုတ်ရန်
+kubectl get namespaces
+# NAME              STATUS   AGE
+# default           Active   30d    ← -n flag မပါဘဲ သုံးတဲ့ သင့်ရဲ့ workloads များ
+# kube-system       Active   30d    ← K8s ရဲ့ အဓိက အစိတ်အပိုင်းများ (လက်ဖြင့် လုံးဝ မတို့ရပါ)
+# kube-public       Active   30d    ← လူတိုင်းဖတ်လို့ရတဲ့ အချက်အလက်များ
+# kube-node-lease   Active   30d    ← Node heartbeat leases
+# production        Active   5d     ← သင့်ရဲ့ prod namespace
+# staging           Active   5d     ← သင့်ရဲ့ staging namespace
+
+# Namespace များ ဖန်တီးရန်
+kubectl create namespace production
+kubectl create namespace staging
+
+# သို့မဟုတ် Declarative ပုံစံဖြင့် (ပို၍နှစ်သက်ကြသည်)
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: production
+  labels:
+    environment: production
+    team: backend
+EOF
+
+# -n ကိုသုံးပြီး namespace အလိုက် Command အားလုံးကို သတ်မှတ် run ရန်
+kubectl get pods -n production
+kubectl logs my-pod -n production
+kubectl apply -f ./k8s/ -n production
+
+# လက်ရှိ Context အတွက် Default namespace တစ်ခု သတ်မှတ်ရန် (-n ကို အမြဲတမ်း ဆက်တိုက် မရိုက်ရတော့ပါ)
+kubectl config set-context --current --namespace=production
+# ယခုအခါ Command အားလုံးသည် production namespace ကို ပုံမှန်အဖြစ် သုံးပါလိမ့်မည်
+kubectl get pods  # kubectl get pods -n production နှင့် အတူတူပင်ဖြစ်သည်
+
+# Namespace အချင်းချင်း Resource များကို လှမ်းခေါ်သုံးခြင်း (YAML ထဲတွင်)
+# Services များကို Namespace ကျော်ပြီး အောက်ပါအတိုင်း လှမ်းခေါ်နိုင်သည်:
+# http://SERVICE_NAME.NAMESPACE.svc.cluster.local
+# ဥပမာ: http://postgres.production.svc.cluster.local:5432
+```
+
+---
+
+## Contexts — Cluster တစ်ခုမှ တစ်ခုသို့ ပြောင်းလဲအသုံးပြုခြင်း
+
+Kubeconfig ဖိုင် (`~/.kube/config`) တစ်ခုတွင် Cluster များစွာအတွက် Credentials များနှင့် Server endpoints များကို သိမ်းဆည်းပေးထားပါတယ်။ **Contexts** က သင့်ကို ၎င်းတို့ကြားတွင် ချက်ချင်းပြောင်းလဲအသုံးပြုနိုင်ရန် ခွင့်ပြုပေးပါတယ်။
+
+```yaml
+# ~/.kube/config structure
+apiVersion: v1
+clusters:
+  - cluster:
+      server: https://prod-cluster.example.com:6443
+      certificate-authority-data: BASE64_CA_CERT
+    name: production-cluster
+  - cluster:
+      server: https://stage-cluster.example.com:6443
+      certificate-authority-data: BASE64_CA_CERT
+    name: staging-cluster
+
+contexts:
+  - context:
+      cluster: production-cluster
+      user: prod-admin
+      namespace: myapp          # ဒီ context အတွက် Default namespace
+    name: prod
+  - context:
+      cluster: staging-cluster
+      user: stage-dev
+      namespace: myapp
+    name: stage
+
+current-context: prod           # လက်ရှိ အသုံးပြုနေသော context
+
+users:
+  - name: prod-admin
+    user:
+      client-certificate-data: BASE64_CLIENT_CERT
+      client-key-data: BASE64_CLIENT_KEY
+```
+
+```bash
+# Context အားလုံးကို စာရင်းထုတ်ရန်
+kubectl config get-contexts
+# CURRENT   NAME    CLUSTER              AUTHINFO     NAMESPACE
+# *         prod    production-cluster   prod-admin   myapp
+#           stage   staging-cluster      stage-dev    myapp
+#           local   kind-local           kind-admin
+
+# Context ပြောင်းရန်
+kubectl config use-context stage
+
+# Context တစ်ခုတည်းအတွင်း Command တစ်ခုတည်းကို Run ရန် (Context မပြောင်းဘဲနဲ့)
+kubectl get pods --context=stage -n myapp
+
+# Context အမည်ပြောင်းရန်
+kubectl config rename-context old-name new-name
+
+# Context တစ်ခုကို ဖျက်ရန်
+kubectl config delete-context old-context
+
+# Kubeconfig ဖိုင်များစွာကို ပေါင်းစည်းရန်
+KUBECONFIG=~/.kube/config:~/.kube/k3s-config kubectl config view --flatten > ~/.kube/merged-config
+```
+
+### kubectx + kubens: ပိုမိုမြန်ဆန်သော Context ပြောင်းလဲခြင်း
+
+```bash
+# kubectx နှင့် kubens ကို Install လုပ်ရန် (အထူးအကြံပြုသည်)
+brew install kubectx    # macOS
+# သို့မဟုတ်
+sudo apt-get install kubectx  # Debian/Ubuntu
+
+# Context ပြောင်းရန် (kubectx သည် kubectl config use-context ထက် ပိုမြန်သည်)
+kubectx prod
+kubectx stage
+kubectx -    # ယခင် Context ဆီသို့ ပြန်သွားရန် (Toggle)
+
+# Namespace ပြောင်းရန်
+kubens production
+kubens staging
+kubens -    # ယခင် Namespace ဆီသို့ ပြန်သွားရန်
+```
+
+---
+
+## Resource Shortnames (အတိုကောက်အမည်များ)
+
+အမြဲသုံးနေကျ Command တိုင်းကို အတိုကောက်များဖြင့် ပို၍တိုတိုရိုက်နိုင်သည်:
+
+| Full Name | Short | Example |
+|-----------|-------|---------|
+| `pods` | `po` | `k get po` |
+| `services` | `svc` | `k get svc` |
+| `deployments` | `deploy` | `k get deploy` |
+| `replicasets` | `rs` | `k get rs` |
+| `statefulsets` | `sts` | `k get sts` |
+| `configmaps` | `cm` | `k get cm` |
+| `persistentvolumeclaims` | `pvc` | `k get pvc` |
+| `persistentvolumes` | `pv` | `k get pv` |
+| `namespaces` | `ns` | `k get ns` |
+| `nodes` | `no` | `k get no` |
+| `ingresses` | `ing` | `k get ing` |
+| `horizontalpodautoscalers` | `hpa` | `k get hpa` |
+| `cronjobs` | `cj` | `k get cj` |
+
+---
+
+## Port Forwarding — Services များကို Local တွင် ချိတ်ဆက်သုံးစွဲခြင်း
+
+```bash
+# Service တစ်ခုကို သင့်လက်ပ်တော့ဆီသို့ Port Forward လုပ်ရန် (Ingress သို့မဟုတ် DNS မလိုပါ)
+kubectl port-forward svc/my-api 8080:80
+# ယခုအခါ: curl http://localhost:8080/health ဖြင့် my-api service ဆီသို့ ရောက်ရှိသွားပါမည်
+
+# Pod တစ်ခုကို သီးသန့် Port Forward လုပ်ရန်
+kubectl port-forward pod/my-api-xxx-yyy 8080:3000
+
+# Deployment တစ်ခုကို Port Forward လုပ်ရန် (Pod တစ်ခုခုကို ကျပန်းရွေးချယ်ပေးသည်)
+kubectl port-forward deployment/my-api 8080:3000
+
+# Background တွင် Run ရန်
+kubectl port-forward svc/grafana 3000:80 -n monitoring &
+
+# K3s Traefik dashboard ကို ဝင်ရောက်ကြည့်ရှုရန်
+kubectl port-forward svc/traefik 9000:9000 -n kube-system
+```
+
+---
+
+## အသုံးဝင်သော Debugging Patterns များ
+
+### Pattern 1: ဒီ Pod မှာ ဘာပြဿနာရှိနေတာလဲ?
+
+```bash
+# အဆင့် ၁: Pod အမည်နှင့် Status ကို ရယူရန်
+kubectl get pods -n myapp
+
+# အဆင့် ၂: Events များကို စစ်ဆေးရန် (အသုံးအဝင်ဆုံး အချက်အလက်များ)
+kubectl describe pod POD_NAME -n myapp | tail -30
+
+# အဆင့် ၃: Container logs များကို ဖတ်ရန်
+kubectl logs POD_NAME -n myapp --previous  # Pod က crash ဖြစ်သွားခဲ့လျှင်
+
+# အဆင့် ၄: Pod က အလုပ်လုပ်နေဆဲဆိုရင် exec ဝင်ပြီး စစ်ဆေးရန်
+kubectl exec -it POD_NAME -n myapp -- /bin/sh
+```
+
+### Pattern 2: ဘာကြောင့် ကျွန်တော့် Service က အလုပ်မလုပ်တာလဲ?
+
+```bash
+# Service ရှိမရှိနှင့် Port မှန်မမှန် စစ်ဆေးရန်
+kubectl get svc my-api -n myapp
+
+# Service မှာ Endpoints တွေ ရှိမရှိ စစ်ဆေးရန် (Label selector နှင့် ကိုက်ညီသော Pods များ)
+kubectl describe svc my-api -n myapp | grep Endpoints
+# Endpoints: 10.42.0.5:3000  ← ကောင်းသည် (Pods များရှိသည်)
+# Endpoints: <none>           ← မကောင်းပါ (Selector နှင့် ကိုက်ညီသော Pods မရှိပါ)
+
+# Endpoints မရှိလျှင် Selector နှင့် Pod labels များကို နှိုင်းယှဉ်စစ်ဆေးပါ
+kubectl get svc my-api -o jsonpath='{.spec.selector}'
+kubectl get pods -n myapp --show-labels
+
+# Cluster အတွင်းပိုင်းမှနေ၍ ချိတ်ဆက်မှုကို စမ်းသပ်ပါ
+kubectl run test --image=curlimages/curl --restart=Never --rm -it -- \
+  curl http://my-api.myapp.svc.cluster.local/health
+```
+
+### Pattern 3: Pod တစ်ခုက ဘာကြောင့် Pending အနေအထားနဲ့ တန့်နေတာလဲ?
+
+```bash
+kubectl describe pod PENDING_POD | grep -A10 "Events:"
+# အဖြစ်များဆုံး အကြောင်းရင်းများ:
+# - "Insufficient memory" → requests များကို လျှော့ချပါ သို့မဟုတ် nodes အသစ်ထည့်ပါ
+# - "Insufficient cpu" → အထက်ပါအတိုင်း
+# - "PVC not found" → PVC မရှိသေးပါ သို့မဟုတ် အမည်မှားနေပါသည်
+# - "Image pull failed" → image tag မှားနေပါသည် သို့မဟုတ် private registry credentials လိုအပ်နေပါသည်
+```
+
+---
+
+## kubectl Cheat Sheet
+
+```bash
+# === INSPECT ===
+k get pods -A -o wide                    # Pods အားလုံး၊ Namespaces အားလုံး
+k get events --sort-by='.lastTimestamp'  # မကြာသေးမီက ဖြစ်ပျက်ခဲ့သော Events များ
+k top pods / k top nodes                 # Resource အသုံးပြုမှု (metrics-server လိုအပ်သည်)
+k api-resources                          # Resource အမျိုးအစား အားလုံး
+
+# === DEBUG ===
+k describe pod NAME           # အသေးစိတ်အချက်အလက်များ + Events များ
+k logs NAME -f --previous     # Logs များကို တိုက်ရိုက်ကြည့်ရှုခြင်း၊ ယခင် container ပါ ထည့်သွင်းရန်
+k exec -it NAME -- /bin/sh    # Pod အတွင်းသို့ Shell ဖြင့် ဝင်ရောက်ခြင်း
+
+# === MANAGE ===
+k apply -f FILE/DIR           # ဖန်တီးရန် သို့မဟုတ် Update လုပ်ရန်
+k delete -f FILE              # Manifest မှတဆင့် ဖျက်ဆီးရန်
+k scale deploy NAME --replicas=5
+k set image deploy/NAME container=IMAGE:TAG
+k rollout status deploy/NAME
+k rollout undo deploy/NAME
+k rollout history deploy/NAME
+
+# === CONTEXT / NAMESPACE ===
+kubectx                       # Contexts များကို စာရင်းထုတ်ရန်
+kubectx CONTEXT               # Context ပြောင်းရန်
+kubens NAMESPACE              # Namespace ပြောင်းရန်
+
+# === QUICK TESTING ===
+k run test --image=curlimages/curl --restart=Never --rm -it -- curl URL
+k port-forward svc/NAME LOCAL_PORT:REMOTE_PORT
+```
+
+---
+
+## အနှစ်ချုပ်
+
+`kubectl` ဆိုတာ Kubernetes နဲ့ ချိတ်ဆက်ပေးတဲ့ အဓိက Interface တစ်ခုဖြစ်ပါတယ်။ နေ့စဉ်သင် အသုံးချရမယ့် Command တွေကတော့:
+- **`get`** (နှင့်အတူ `-o wide`, `-w`, `-l label`, `-o yaml` များ) — Resource များကို ပုံစံအမျိုးမျိုးဖြင့် စစ်ဆေးရန်
+- **`describe`** — Events များနှင့်အတူ အသေးစိတ်စစ်ဆေးခြင်း — သင်၏ ပင်မ Debugging tool
+- **`logs`** (နှင့်အတူ `--previous`, `-f`, `--since`, `-l`) — Container output များကို ဖတ်ရှုရန်
+- **`exec -it`** — အလုပ်လုပ်နေသော မည်သည့် Pod အတွင်းကိုမဆို Shell ဖြင့် ဝင်ရောက်ရန်
+- **`apply -f`** — Resource များကို Declarative ပုံစံဖြင့် ဖန်တီးရန် သို့မဟုတ် Update လုပ်ရန်
+- **Namespaces** (`-n`) — Command အားလုံးကို သတ်မှတ်ထားသော Environment တစ်ခုတည်းအတွင်း သီးသန့်ဖြစ်စေရန်
+- **Contexts** (`kubectx`) — Cluster များကြားတွင် ချက်ချင်းပြောင်းလဲအသုံးပြုရန်
+- **Port-forward** — Cluster Service မည်သည့်ဟာကိုမဆို DNS မလိုဘဲ သင့်လက်ပ်တော့ပေါ်တွင် ထုတ်ပြရန်
+
+နောက်သင်ခန်းစာတွင်၊ သင်သည် ပထမဆုံး Kubernetes Resource — Pod ကို ဖန်တီးသွားမည် ဖြစ်ပါသည်။

@@ -215,7 +215,7 @@ export function RoadmapCanvas() {
       data: {
         label: (
           <Link
-            href={`/courses/${config.id}`}
+            href={`/${language}/courses/${config.id}`}
             className="block p-4 text-left group hover:scale-[1.02] transition-transform select-none"
           >
             <div className="flex items-center justify-between mb-2">
@@ -431,7 +431,7 @@ export function RoadmapCanvas() {
                           </span>
 
                           <Link
-                            href={`/courses/${course.slug}`}
+                            href={`/${language}/courses/${course.slug}`}
                             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-blue-600/10 hover:bg-blue-600 text-blue-600 dark:text-blue-400 hover:text-white transition-all group-hover:bg-blue-600 group-hover:text-white"
                           >
                             {t.roadmapCanvas.explore}
