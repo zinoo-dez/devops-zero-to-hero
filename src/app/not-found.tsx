@@ -38,7 +38,7 @@ export default function NotFound() {
               </Link>
 
               <Link
-                href="/"
+                href="/courses"
                 className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-xs font-bold uppercase tracking-wider bg-white/5 hover:bg-white/10 text-foreground border border-white/10 transition-all"
               >
                 <Compass className="w-3.5 h-3.5 text-indigo-400" />

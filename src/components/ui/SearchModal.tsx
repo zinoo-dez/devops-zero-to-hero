@@ -4,7 +4,8 @@ import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Search, X, ArrowRight, BookOpen, Layers, Sparkles, Clock, Hash } from "lucide-react";
-import { COURSES } from "@/lib/courses";
+import { COURSES, getAllCourses } from "@/lib/courses";
+import { useLanguage } from "@/lib/i18n/LanguageContext";
 import { useTheme } from "next-themes";
 import { cn } from "@/lib/utils";
 
@@ -24,11 +25,12 @@ interface SearchResult {
   score?: number;
 }
 
-// ─── Build Search Index across all courses and lessons ──────────────────────
-function buildIndex(): SearchResult[] {
+// ─── Build Search Index across all courses and lessons for the current language ───
+function buildIndex(language: string = "en"): SearchResult[] {
   const index: SearchResult[] = [];
+  const courses = getAllCourses(language);
 
-  for (const course of COURSES) {
+  for (const course of courses) {
     if (!course.hasFullContent) continue;
 
     // 1. Course-level entry
@@ -40,7 +42,7 @@ function buildIndex(): SearchResult[] {
       courseBadge: course.level,
       description: `${course.description} ${course.tags.join(" ")}`,
       duration: course.duration,
-      href: `/courses/${course.slug}`,
+      href: `/${language}/courses/${course.slug}`,
     });
 
     // 2. Lesson-level entries
@@ -56,15 +58,13 @@ function buildIndex(): SearchResult[] {
         lessonNumber: lIdx + 1,
         duration: lesson.duration,
         description: lesson.description || `${course.title} - Lesson ${lIdx + 1}`,
-        href: `/courses/${course.slug}/${lesson.slug}`,
+        href: `/${language}/courses/${course.slug}/${lesson.slug}`,
       });
     });
   }
 
   return index;
 }
-
-const SEARCH_INDEX = buildIndex();
 
 const POPULAR_SEARCHES = [
   "Docker Compose",
@@ -78,7 +78,7 @@ const POPULAR_SEARCHES = [
 ];
 
 // ─── High-Accuracy Weighted Search Function ─────────────────────────────────
-function searchItems(query: string): SearchResult[] {
+function searchItems(query: string, searchIndex: SearchResult[]): SearchResult[] {
   const rawQ = query.trim().toLowerCase();
   if (!rawQ) return [];
 
@@ -86,7 +86,7 @@ function searchItems(query: string): SearchResult[] {
 
   const scoredResults: SearchResult[] = [];
 
-  for (const item of SEARCH_INDEX) {
+  for (const item of searchIndex) {
     const lTitle = item.lessonTitle ? item.lessonTitle.toLowerCase() : "";
     const cTitle = item.courseTitle.toLowerCase();
     const desc = item.description.toLowerCase();
@@ -139,6 +139,7 @@ export function SearchModal({ open, onClose }: SearchModalProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
+  const { language } = useLanguage();
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
 
@@ -146,7 +147,9 @@ export function SearchModal({ open, onClose }: SearchModalProps) {
     setMounted(true);
   }, []);
 
-  const results = useMemo(() => searchItems(query), [query]);
+  const searchIndex = useMemo(() => buildIndex(language), [language]);
+  const results = useMemo(() => searchItems(query, searchIndex), [query, searchIndex]);
+  const quickCourses = useMemo(() => getAllCourses(language).slice(0, 4), [language]);
 
   // Reset when opening
   useEffect(() => {
@@ -174,10 +177,15 @@ export function SearchModal({ open, onClose }: SearchModalProps) {
 
   const navigate = useCallback(
     (href: string) => {
-      router.push(href);
+      const targetHref = href.startsWith(`/${language}`)
+        ? href
+        : href.startsWith("/")
+        ? `/${language}${href}`
+        : `/${language}/${href}`;
+      router.push(targetHref);
       onClose();
     },
-    [router, onClose]
+    [router, onClose, language]
   );
 
   // Keyboard navigation inside list
@@ -214,7 +222,7 @@ export function SearchModal({ open, onClose }: SearchModalProps) {
 
   const modalContent = (
     <div
-      className="fixed inset-0 z-[99999] flex items-start justify-center pt-[8vh] sm:pt-[10vh] px-4 sm:px-6 animate-in fade-in duration-150"
+      className="fixed inset-0 z-99999 flex items-start justify-center pt-[8vh] sm:pt-[10vh] px-4 sm:px-6 animate-in fade-in duration-150"
       onPointerDown={(e) => {
         if (e.target === e.currentTarget) {
           onClose();
@@ -245,7 +253,7 @@ export function SearchModal({ open, onClose }: SearchModalProps) {
           className={cn(
             "flex items-center gap-4 px-6 sm:px-8 py-5 border-b transition-colors",
             isDark
-              ? "border-white/10 bg-white/[0.02]"
+              ? "border-white/10 bg-white/2"
               : "border-slate-200/80 bg-slate-50/40"
           )}
         >
@@ -315,14 +323,14 @@ export function SearchModal({ open, onClose }: SearchModalProps) {
                   Explore Core Tracks
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {COURSES.slice(0, 4).map((c) => (
+                  {quickCourses.map((c) => (
                     <button
                       key={c.slug}
-                      onClick={() => navigate(`/courses/${c.slug}`)}
+                      onClick={() => navigate(`/${language}/courses/${c.slug}`)}
                       className={cn(
                         "flex items-center justify-between p-4 rounded-2xl border text-left transition-all group cursor-pointer",
                         isDark
-                          ? "bg-white/[0.03] border-white/5 hover:border-indigo-500/40 hover:bg-indigo-950/20"
+                          ? "bg-white/3 border-white/5 hover:border-indigo-500/40 hover:bg-indigo-950/20"
                           : "bg-slate-50/80 border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/40"
                       )}
                     >
